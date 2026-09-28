@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DB2Sheet.Tests\DB2Sheet.Tests.csproj" />
+  <Project Path="DB2Sheet.csproj" />
+</Solution>

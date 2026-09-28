@@ -1,0 +1,121 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.Serialization;
+
+namespace DB2Sheet.Models
+{
+    /// <summary>描述查询执行的业务目的，以便提供程序应用不同限制。</summary>
+    public enum ExecutionPurpose
+    {
+        Preview,
+        Export,
+        ConnectionTest
+    }
+
+    /// <summary>封装一次数据源查询所需的连接、SQL 和执行限制。</summary>
+    public sealed class DataSourceRequest
+    {
+        /// <summary>创建数据源请求。</summary>
+        /// <param name="connection">不可变连接快照。</param>
+        /// <param name="queryText">只读 SQL 文本。</param>
+        /// <param name="purpose">执行目的。</param>
+        /// <param name="rowLimit">允许返回的最大行数。</param>
+        /// <param name="blockSize">每次读取的行数。</param>
+        /// <param name="timeoutSeconds">数据库命令超时秒数。</param>
+        public DataSourceRequest(
+            ConnectionProfileSnapshot connection,
+            string queryText,
+            ExecutionPurpose purpose,
+            int rowLimit,
+            int blockSize,
+            int timeoutSeconds = 300)
+        {
+            Connection = connection ?? throw new ArgumentNullException(nameof(connection));
+            QueryText = queryText ?? string.Empty;
+            Purpose = purpose;
+            RowLimit = rowLimit;
+            BlockSize = blockSize;
+            TimeoutSeconds = timeoutSeconds;
+        }
+
+        /// <summary>获取连接快照。</summary>
+        public ConnectionProfileSnapshot Connection { get; }
+        /// <summary>获取 SQL 文本。</summary>
+        public string QueryText { get; }
+        /// <summary>获取执行目的。</summary>
+        public ExecutionPurpose Purpose { get; }
+        /// <summary>获取最大结果行数。</summary>
+        public int RowLimit { get; }
+        /// <summary>获取结果读取块大小。</summary>
+        public int BlockSize { get; }
+        /// <summary>获取数据库命令超时秒数。</summary>
+        public int TimeoutSeconds { get; }
+    }
+
+    /// <summary>表示用户保存并可重复执行的 SQL 查询方案。</summary>
+    [DataContract]
+    public sealed class QueryProfile
+    {
+        /// <summary>创建具有新标识、空内容和当前 UTC 时间的查询方案。</summary>
+        public QueryProfile()
+        {
+            Id = Guid.NewGuid().ToString("N");
+            Name = string.Empty;
+            ProviderId = string.Empty;
+            ConnectionProfileId = string.Empty;
+            QueryText = string.Empty;
+            TargetSheetName = string.Empty;
+            Description = string.Empty;
+            CreatedUtc = DateTime.UtcNow;
+            UpdatedUtc = DateTime.UtcNow;
+            ProviderOptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>获取或设置方案唯一标识。</summary>
+        [DataMember(Order = 1)] public string Id { get; set; }
+        /// <summary>获取或设置用户可见名称。</summary>
+        [DataMember(Order = 2)] public string Name { get; set; }
+        /// <summary>获取或设置数据源提供程序标识。</summary>
+        [DataMember(Order = 3)] public string ProviderId { get; set; }
+        /// <summary>获取或设置关联连接方案标识。</summary>
+        [DataMember(Order = 4)] public string ConnectionProfileId { get; set; }
+        /// <summary>获取或设置 SQL 文本。</summary>
+        [DataMember(Order = 5)] public string QueryText { get; set; }
+        /// <summary>获取或设置默认目标工作表名称。</summary>
+        [DataMember(Order = 6)] public string TargetSheetName { get; set; }
+        /// <summary>获取或设置方案说明。</summary>
+        [DataMember(Order = 7)] public string Description { get; set; }
+        /// <summary>获取或设置创建时间（UTC）。</summary>
+        [DataMember(Order = 8)] public DateTime CreatedUtc { get; set; }
+        /// <summary>获取或设置最后更新时间（UTC）。</summary>
+        [DataMember(Order = 9)] public DateTime UpdatedUtc { get; set; }
+        /// <summary>获取或设置提供程序专用选项。</summary>
+        [DataMember(Order = 10)] public Dictionary<string, string> ProviderOptions { get; set; }
+    }
+
+    /// <summary>表示从 SQL Sheet 单元格解析出的一个批量刷新任务。</summary>
+    public sealed class RefreshTaskDefinition
+    {
+        /// <summary>创建刷新任务定义。</summary>
+        /// <param name="id">任务标识；为空时自动生成。</param>
+        /// <param name="targetSheetName">目标工作表名称。</param>
+        /// <param name="queryText">要执行的 SQL。</param>
+        /// <param name="sourceColumn">任务在 SQL Sheet 中的源列号。</param>
+        public RefreshTaskDefinition(string id, string targetSheetName, string queryText, int sourceColumn)
+        {
+            Id = id ?? Guid.NewGuid().ToString("N");
+            TargetSheetName = targetSheetName ?? string.Empty;
+            QueryText = queryText ?? string.Empty;
+            SourceColumn = sourceColumn;
+        }
+
+        /// <summary>获取任务标识。</summary>
+        public string Id { get; }
+        /// <summary>获取目标工作表名称。</summary>
+        public string TargetSheetName { get; }
+        /// <summary>获取 SQL 文本。</summary>
+        public string QueryText { get; }
+        /// <summary>获取任务所在的源列号。</summary>
+        public int SourceColumn { get; }
+    }
+}
