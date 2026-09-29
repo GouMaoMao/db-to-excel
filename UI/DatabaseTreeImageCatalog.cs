@@ -53,9 +53,13 @@ namespace DB2Sheet.UI
             }
         }
 
-        /// <summary>获取数据库类型连接节点的图像键。</summary>
-        public static string Provider(string providerId, bool active) =>
-            Key("provider-" + (providerId ?? string.Empty).ToLowerInvariant(), active);
+        /// <summary>获取数据库类型连接节点的图像键。没有专用图标的类型使用数据库图标。</summary>
+        public static string Provider(string providerId, bool active)
+        {
+            string id = (providerId ?? string.Empty).ToLowerInvariant();
+            if (!ProviderResources.ContainsKey(id)) return Database(active);
+            return Key("provider-" + id, active);
+        }
 
         /// <summary>获取数据库节点的图像键。</summary>
         public static string Database(bool active) => Key(DatabaseKey, active);

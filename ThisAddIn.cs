@@ -14,7 +14,8 @@ namespace DB2Sheet
 {
     /// <summary>Excel VSTO 加载项入口，负责生命周期、依赖组装、Ribbon 创建和顶层窗体管理。</summary>
     /// <remarks>
-    /// 服务在首次启动或 Ribbon 操作前延迟初始化。SQL 查询和批量刷新窗体保持单实例；连接管理和设置使用模态临时窗体。
+    /// 服务在首次启动或 Ribbon 操作前延迟初始化。SQL 查询和批量刷新窗体保持单实例；连接管理、JDBC 环境和设置使用模态临时窗体。
+    /// 卸载时关闭仍打开的窗体，并结束 JDBC 转接进程。
     /// </remarks>
     public partial class ThisAddIn
     {
@@ -31,6 +32,8 @@ namespace DB2Sheet
         private IExcelResultWriter _resultWriter;
         private ISqlSheetTaskReader _taskReader;
         private IBatchRefreshService _batchRefresh;
+        private JdbcBridgeHost _jdbcBridge;
+        private IJdbcEnvironmentStore _jdbcEnvironment;
         private QueryEditorForm _queryEditorForm;
         private SheetRefreshForm _sheetRefreshForm;
 
@@ -47,13 +50,15 @@ namespace DB2Sheet
             CloseForm(_sheetRefreshForm);
             _queryEditorForm = null;
             _sheetRefreshForm = null;
+            _jdbcBridge?.Dispose();
+            _jdbcBridge = null;
         }
 
         /// <summary>创建 Office 请求的自定义 Ribbon 扩展对象。</summary>
         /// <returns>绑定到本加载项 UI 入口的 Ribbon 实例。</returns>
         protected override OfficeCore.IRibbonExtensibility CreateRibbonExtensibilityObject()
         {
-            return new DB2SheetRibbon(OpenQueryEditor, OpenSheetRefresh, OpenConnections, OpenSettings);
+            return new DB2SheetRibbon(OpenQueryEditor, OpenSheetRefresh, OpenConnections, OpenSettings, OpenJdbcEnvironment);
         }
 
         /// <summary>按依赖顺序创建路径、日志、提供程序、仓储和业务服务。</summary>
@@ -69,6 +74,9 @@ namespace DB2Sheet
             providers.Register(new MySqlProvider());
             providers.Register(new PostgreSqlProvider());
             providers.Register(new SqliteProvider());
+            _jdbcEnvironment = new JdbcEnvironmentStore(_paths);
+            _jdbcBridge = new JdbcBridgeHost(_logger, _paths.RootDirectory);
+            providers.Register(new JdbcProvider(_jdbcBridge, _jdbcEnvironment));
             _providers = providers;
 
             _settingsRegistry = SettingsRegistry.CreateDefault();
@@ -93,7 +101,7 @@ namespace DB2Sheet
                 {
                     _queryEditorForm = new QueryEditorForm(
                         _queries, _connections, _providers, _executionService, _queryBuffer,
-                        _resultWriter, _operationRunner, _settings, workbook);
+                        _resultWriter, _operationRunner, _settings, workbook, OpenJdbcEnvironment);
                     _queryEditorForm.FormClosed += (sender, args) => _queryEditorForm = null;
                     _queryEditorForm.Show();
                 }
@@ -131,7 +139,19 @@ namespace DB2Sheet
             ExecuteUiAction(() =>
             {
                 using (ConnectionProfilesForm form = new ConnectionProfilesForm(
-                    _connections, _providers, _executionService, _operationRunner, _settings))
+                    _connections, _providers, _executionService, _operationRunner, _settings, null, OpenJdbcEnvironment))
+                {
+                    form.ShowDialog();
+                }
+            });
+        }
+
+        /// <summary>以模态方式打开 JDBC 环境窗体。</summary>
+        private void OpenJdbcEnvironment()
+        {
+            ExecuteUiAction(() =>
+            {
+                using (JdbcEnvironmentForm form = new JdbcEnvironmentForm(_jdbcEnvironment, _settings))
                 {
                     form.ShowDialog();
                 }
@@ -162,7 +182,7 @@ namespace DB2Sheet
             catch (Exception exception)
             {
                 _logger?.Write(LogSeverity.Error, "Ribbon 命令执行失败。", exception: exception);
-                MessageBox.Show(exception.Message, AppPresentation.DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ExceptionDetailForm.Show(null, exception);
             }
         }
 

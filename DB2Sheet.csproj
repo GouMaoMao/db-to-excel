@@ -106,6 +106,8 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Web.Extensions" />
@@ -263,6 +265,12 @@
     <Compile Include="UI\SettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UI\JdbcEnvironmentForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\ExceptionDetailForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="UI\SheetRefreshForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -283,6 +291,9 @@
     <Content Include="docs\DEPLOYMENT.md" />
     <Content Include="docs\PROJECT_STATUS.md" />
     <Content Include="docs\TESTING.md" />
+    <EmbeddedResource Include="Java\db2sheet-jdbc-bridge.jar">
+      <LogicalName>DB2Sheet.db2sheet-jdbc-bridge.jar</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>

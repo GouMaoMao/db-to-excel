@@ -44,18 +44,22 @@ namespace DB2Sheet.Services
             }
 
             string trimmed = cleaned.Trim();
-            int semicolon = trimmed.IndexOf(';');
-            if (semicolon >= 0 && semicolon != trimmed.Length - 1)
+            if (string.Equals(providerId, "jdbc", StringComparison.OrdinalIgnoreCase))
             {
-                errors.Add("仅允许执行单条查询语句。");
+                errors.AddRange(ValidateJdbcStatements(trimmed));
+            }
+            else
+            {
+                errors.AddRange(ValidateSingleStatement(trimmed));
             }
 
-            trimmed = trimmed.TrimEnd(';').Trim();
-            MatchCollection matches = Regex.Matches(trimmed, @"[A-Za-z_][A-Za-z0-9_$]*");
+            string analyzed = trimmed.TrimEnd(';').Trim();
+            MatchCollection matches = Regex.Matches(analyzed, @"[A-Za-z_][A-Za-z0-9_$]*");
             List<string> tokens = matches.Cast<Match>().Select(match => match.Value).ToList();
-            if (tokens.Count == 0 ||
+            if (!string.Equals(providerId, "jdbc", StringComparison.OrdinalIgnoreCase) &&
+                (tokens.Count == 0 ||
                 (!tokens[0].Equals("select", StringComparison.OrdinalIgnoreCase) &&
-                 !tokens[0].Equals("with", StringComparison.OrdinalIgnoreCase)))
+                 !tokens[0].Equals("with", StringComparison.OrdinalIgnoreCase))))
             {
                 errors.Add("仅允许 SELECT 或只读 WITH 查询。");
             }
@@ -84,6 +88,84 @@ namespace DB2Sheet.Services
             }
 
             return errors.Distinct().ToList().AsReadOnly();
+        }
+
+        private static IReadOnlyList<string> ValidateSingleStatement(string trimmed)
+        {
+            List<string> errors = new List<string>();
+            int semicolon = trimmed.IndexOf(';');
+            if (semicolon >= 0 && semicolon != trimmed.Length - 1)
+            {
+                errors.Add("仅允许执行单条查询语句。");
+            }
+
+            return errors;
+        }
+
+        /// <summary>
+        /// JDBC 允许若干条前置 SET，最后必须是一条 SELECT 或 WITH。
+        /// SET 与查询之间必须用分号分开。写操作仍由关键字规则拒绝。
+        /// </summary>
+        private static IReadOnlyList<string> ValidateJdbcStatements(string trimmed)
+        {
+            List<string> errors = new List<string>();
+            List<string> statements = trimmed
+                .Split(';')
+                .Select(statement => statement.Trim())
+                .Where(statement => statement.Length > 0)
+                .ToList();
+            if (statements.Count == 0)
+            {
+                errors.Add("仅允许 SELECT 或只读 WITH 查询。");
+                return errors;
+            }
+
+            bool sawQuery = false;
+            bool sawInvalid = false;
+            foreach (string statement in statements)
+            {
+                string first = FirstToken(statement);
+                bool isSet = first.Equals("set", StringComparison.OrdinalIgnoreCase);
+                bool isQuery = first.Equals("select", StringComparison.OrdinalIgnoreCase) ||
+                    first.Equals("with", StringComparison.OrdinalIgnoreCase);
+                if (isSet)
+                {
+                    if (sawQuery)
+                    {
+                        errors.Add("SET 只能出现在查询之前。");
+                    }
+
+                    continue;
+                }
+
+                if (!isQuery)
+                {
+                    sawInvalid = true;
+                    errors.Add("仅允许 SELECT 或只读 WITH 查询。");
+                    continue;
+                }
+
+                if (sawQuery)
+                {
+                    errors.Add("仅允许执行单条查询语句。");
+                    continue;
+                }
+
+                sawQuery = true;
+            }
+
+            if (!sawQuery && !sawInvalid)
+            {
+                errors.Add("JDBC 允许在查询前使用 SET，但最后必须是一条 SELECT 或 WITH。SET 与查询之间请用分号分开。");
+            }
+
+            return errors;
+        }
+
+        private static string FirstToken(string statement)
+        {
+            Match match = Regex.Match(statement ?? string.Empty, @"[A-Za-z_][A-Za-z0-9_$]*");
+            return match.Success ? match.Value : string.Empty;
         }
 
         private static bool ContainsSequence(IReadOnlyList<string> tokens, string first, string second)

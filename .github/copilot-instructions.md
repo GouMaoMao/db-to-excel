@@ -9,6 +9,10 @@
 - 不要修改 `DB2Sheet1.csproj`。
 - 不使用 VSTO ClickOnce。部署由 Advanced Installer 封装。
 - 用户可见名称、窗口标题、界面字体和代码字体只改 `UI/AppPresentation.cs`。程序集名、命名空间、Ribbon 控件 ID、持久化目录是独立技术标识。
+- JDBC 是通用数据源。连接编辑填写完整 JDBC URL、驱动 jar、驱动类和凭据。不要把 JDK 或厂商驱动打进安装包。
+- `db2sheet-jdbc-bridge.jar` 嵌在 `DB2Sheet.dll` 内，首次使用释放到 `%LocalAppData%\DB2Sheet`。不要改回只在插件 DLL 旁边查找；Excel 经 VSTO 加载时那个目录里没有这个文件。
+- 「JDBC 环境」只管本机 Java：点「检测 Java」搜索本机，或浏览指定 java.exe；也可打开 JDK 下载页自行安装。厂商驱动 jar 写在连接方案里，不要再做集中驱动文件夹。不要让用户去下载转接程序。不要在插件内一键下载 JDK。
+- 用户操作失败不得只写状态栏、吞掉异常或空 `catch` 后继续；须弹出错误详情窗（含异常类型、消息、堆栈与 InnerException，可用 `ExceptionDetailForm`）。仅清理、取消、资源释放等非用户主路径可故意吞异常，并在代码注释里写明原因。
 
 ## 代码文档
 
@@ -26,7 +30,7 @@
 - 进度窗口在任务成功后自动关闭；只有出错时保留，供用户查看。
 - 查询方案信息显示在左下角的查询方案区域，不要放进底部状态栏。
 - 功能窗体相对工作区居中，使用 `FormStartPosition.Manual`，不要用 `CenterScreen`。
-- 四个功能窗体记住宽高和最大化状态，键为 `session.formBounds`：SQL 查询、批量刷新、连接管理、设置。进度、文本输入、连接编辑这些小窗不记。
+- 五个功能窗体记住宽高和最大化状态，键为 `session.formBounds`：SQL 查询、批量刷新、连接管理、设置、JDBC 环境。进度、文本输入、连接编辑这些小窗不记。
 
 ## SQL 查询窗体
 

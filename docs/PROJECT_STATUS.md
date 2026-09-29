@@ -21,14 +21,16 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 
 当前处于“核心纯逻辑自动化测试完成，进入真实 Excel 集成测试和稳定化”阶段。
 
-最近一次验证：Debug / Release 构建成功；MSTest v2 自动化测试 41 个全部通过，0 个失败。
+最近一次验证：Debug 构建成功；MSTest v2 自动化测试 60 个全部通过，0 个失败。
 
 ## 已完成
 
 - 分层目录：`Contracts`、`Models`、`Providers`、`Services`、`Storage`、`Infrastructure`、`Excel`、`UI`。
 - 通用数据源 Provider、动态参数、流式结果和可取消执行契约。
 - SQL Server、MySQL、PostgreSQL、SQLite Provider。
-- 通用及 Provider 特定只读 SQL 校验。
+- 通用 JDBC Provider。Java 运行时由「JDBC 环境」检测或指定；厂商驱动 jar 写在连接方案中。连接编辑填写完整 JDBC URL。
+- Ribbon XML 动态加载，提供“SQL 查询”“批量刷新”“连接管理”，以及「设置」下拉（「参数设置」「JDBC 环境」）。
+- 通用及 Provider 特定只读 SQL 校验。JDBC 允许查询前的 `SET` 语句。
 - MySQL、PostgreSQL、SQLite 只读会话；SQL Server 使用只读连接意图。
 - `DbDataReader` 流式读取、结果分块、行数限制和截断检测。
 - 独立通用进度窗体和统一操作执行协调器。
@@ -43,7 +45,6 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 - Excel 目标 Sheet 创建、旧内容清理、标题写入和结果分块写入。
 - 批量串行或受限并行数据库读取；Excel COM 写入保持串行。
 - 同一批次重复目标 Sheet 的后续任务跳过。
-- Ribbon XML 动态加载，提供“SQL 查询”“批量刷新”“连接管理”“设置”四个入口。
 - `ThisAddIn` 中的服务组装和业务窗体生命周期管理。
 - Office PIA 引用已通过 `UseOfficeInterop` 启用，Ribbon 相关代码编译通过。
 - 已建立 `DB2Sheet.Tests`（.NET Framework 4.7.2、MSTest v2）自动化测试项目。

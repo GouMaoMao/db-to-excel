@@ -26,6 +26,8 @@ namespace DB2Sheet.Infrastructure
         public string QueryProfilesDirectory => Path.Combine(RootDirectory, "queries");
         /// <summary>获取用户设置 JSON 文件路径。</summary>
         public string SettingsFile => Path.Combine(RootDirectory, "settings.json");
+        /// <summary>获取 JDBC 环境 JSON 文件路径。</summary>
+        public string JdbcEnvironmentFile => Path.Combine(RootDirectory, "jdbc-environment.json");
         /// <summary>获取日志目录路径。</summary>
         public string LogsDirectory => Path.Combine(RootDirectory, "Logs");
 

@@ -47,8 +47,9 @@
 - `MySqlProvider`
 - `PostgreSqlProvider`
 - `SqliteProvider`
+- `JdbcProvider`：通用 JDBC。Java 运行时由用户在「JDBC 环境」中检测或指定；厂商驱动 jar 写在连接方案中。转接程序嵌在插件内，首次使用时释放到本地数据目录，再由 Excel 进程外的 `java.exe` 启动。连接编辑填写完整 JDBC URL、驱动 jar、驱动类和凭据。
 
-未来非数据库数据源应直接实现 `IDataSourceProvider`，不必继承 `DatabaseProviderBase`。
+未来非数据库数据源应直接实现 `IDataSourceProvider`，不必继承 `DatabaseProviderBase`。JDBC 同样不继承 `DatabaseProviderBase`，因为它不是 ADO.NET 连接。
 
 ### Services
 
@@ -93,6 +94,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `SettingsForm`：由设置注册表动态生成编辑界面。
 - `QueryEditorForm`：交互式 SQL 查询、方案复用、预览和导出。
 - `SheetRefreshForm`：SQL Sheet 任务展示和批量刷新。
+- `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
 - `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。
 
 ## 应用组装
@@ -100,7 +102,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 `ThisAddIn` 在启动时组装单例服务：
 
 1. `ApplicationPaths` 和 `FileLogger`
-2. 四个数据库 Provider 及 `ProviderRegistry`
+2. SQL Server、MySQL、PostgreSQL、SQLite 和 JDBC 提供程序，以及 `ProviderRegistry`
 3. 设置注册表和 JSON 设置存储
 4. 连接与查询仓储
 5. 执行服务、操作协调器和查询缓冲服务
@@ -146,6 +148,8 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 3. 返回 `IDataResultStream`，不要让 UI 依赖具体响应格式。
 4. 在 `ThisAddIn` 的 Provider 注册处注册实现。
 5. 增加 Provider 特定测试和只读策略说明。
+
+新增 JDBC 数据源时不要把 JDK 或厂商驱动打进安装包。用户通过「JDBC 环境」检测或指定 `java.exe`，并在连接方案中选择驱动 jar 与驱动类。转接程序嵌在 DLL 内，首次使用时释放到 `%LocalAppData%\DB2Sheet\db2sheet-jdbc-bridge.jar`。
 
 新增设置时：
 

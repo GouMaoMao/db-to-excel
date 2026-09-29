@@ -14,22 +14,26 @@ namespace DB2Sheet.UI
         private readonly Action _openSheetRefresh;
         private readonly Action _openConnections;
         private readonly Action _openSettings;
+        private readonly Action _openJdbcEnvironment;
 
         /// <summary>创建 Ribbon 并注入各按钮对应的 UI 操作。</summary>
         /// <param name="openQueryEditor">打开 SQL 查询窗体的操作。</param>
         /// <param name="openSheetRefresh">打开批量刷新窗体的操作。</param>
         /// <param name="openConnections">打开连接管理窗体的操作。</param>
         /// <param name="openSettings">打开设置窗体的操作。</param>
+        /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体的操作。</param>
         public DB2SheetRibbon(
             Action openQueryEditor,
             Action openSheetRefresh,
             Action openConnections,
-            Action openSettings)
+            Action openSettings,
+            Action openJdbcEnvironment)
         {
             _openQueryEditor = openQueryEditor ?? throw new ArgumentNullException(nameof(openQueryEditor));
             _openSheetRefresh = openSheetRefresh ?? throw new ArgumentNullException(nameof(openSheetRefresh));
             _openConnections = openConnections ?? throw new ArgumentNullException(nameof(openConnections));
             _openSettings = openSettings ?? throw new ArgumentNullException(nameof(openSettings));
+            _openJdbcEnvironment = openJdbcEnvironment ?? throw new ArgumentNullException(nameof(openJdbcEnvironment));
         }
 
         /// <summary>返回 Excel 请求的自定义 Ribbon XML。</summary>
@@ -48,7 +52,13 @@ namespace DB2Sheet.UI
         </group>
         <group id=""DB2SheetManageGroup"" label=""管理"">
           <button id=""DB2SheetConnectionsButton"" label=""连接管理"" imageMso=""Connections"" onAction=""OpenConnections"" />
-          <button id=""DB2SheetSettingsButton"" label=""设置"" imageMso=""ControlProperties"" onAction=""OpenSettings"" />
+          <menu id=""DB2SheetSettingsMenu"" label=""设置"" imageMso=""ControlProperties"">
+            <button id=""DB2SheetSettingsButton"" label=""参数设置"" imageMso=""ControlProperties"" onAction=""OpenSettings"" />
+            <button id=""DB2SheetJdbcEnvironmentButton"" label=""JDBC 环境"" imageMso=""DataConnectionWizard"" onAction=""OpenJdbcEnvironment"" />
+          </menu>
+        </group>
+        <group id=""DB2SheetAboutGroup"" label=""关于"">
+          <labelControl id=""DB2SheetVersionLabel"" getLabel=""GetAboutLabel"" />
         </group>
       </tab>
     </tabs>
@@ -83,11 +93,37 @@ namespace DB2Sheet.UI
             _openConnections();
         }
 
-        /// <summary>处理“设置”按钮回调。</summary>
+        /// <summary>处理“参数设置”按钮回调。</summary>
         /// <param name="control">触发回调的 Ribbon 控件。</param>
         public void OpenSettings(OfficeCore.IRibbonControl control)
         {
             _openSettings();
+        }
+
+        /// <summary>处理“JDBC 环境”按钮回调。</summary>
+        /// <param name="control">触发回调的 Ribbon 控件。</param>
+        public void OpenJdbcEnvironment(OfficeCore.IRibbonControl control)
+        {
+            _openJdbcEnvironment();
+        }
+
+        /// <summary>返回「关于」组的版本标签。由 Office 在绘制 Ribbon 时调用。</summary>
+        /// <param name="control">版本标签控件；Id 不是版本标签时返回空字符串。</param>
+        /// <returns>形如“版本 1.0.0.0”的文本；未知控件返回空字符串。</returns>
+        public string GetAboutLabel(OfficeCore.IRibbonControl control)
+        {
+            return FormatAboutLabel(control == null ? null : control.Id);
+        }
+
+        /// <summary>把关于组控件 ID 映射为版本文案，供 Ribbon 回调和测试共用。</summary>
+        /// <param name="controlId">Ribbon 控件 ID。</param>
+        /// <returns>版本标签文本；未知 ID 返回空字符串。</returns>
+        internal static string FormatAboutLabel(string controlId)
+        {
+            if (controlId == "DB2SheetVersionLabel")
+                return "版本 " + AppPresentation.FileVersion;
+
+            return string.Empty;
         }
     }
 }

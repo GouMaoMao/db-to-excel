@@ -26,6 +26,7 @@ namespace DB2Sheet.UI
         private readonly IExcelResultWriter _writer;
         private readonly IOperationRunner _operationRunner;
         private readonly ISettingsStore _settings;
+        private readonly Action _openJdbcEnvironment;
         private readonly ExcelInterop.Workbook _workbook;
         private readonly TreeView _connectionsTree;
         private readonly ListBox _queryProfiles;
@@ -38,6 +39,7 @@ namespace DB2Sheet.UI
         private readonly ImageList _treeImages;
         private readonly ContextMenuStrip _connectionNodeMenu;
         private readonly ContextMenuStrip _connectionBlankMenu;
+        private readonly ContextMenuStrip _treeNodeCopyMenu;
         private readonly ContextMenuStrip _queryProfileMenu;
         private readonly Font _previewHeaderTypeFont;
         private readonly ToolStripMenuItem _editConnectionMenuItem;
@@ -106,6 +108,7 @@ namespace DB2Sheet.UI
         /// <param name="operationRunner">进度窗体运行器。</param>
         /// <param name="settings">查询行数、超时和分块大小设置。</param>
         /// <param name="workbook">当前操作的 Excel 工作簿。</param>
+        /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体；为空时连接编辑不显示该入口。</param>
         public QueryEditorForm(
             IQueryProfileRepository queries,
             IConnectionProfileRepository connections,
@@ -115,7 +118,8 @@ namespace DB2Sheet.UI
             IExcelResultWriter writer,
             IOperationRunner operationRunner,
             ISettingsStore settings,
-            ExcelInterop.Workbook workbook)
+            ExcelInterop.Workbook workbook,
+            Action openJdbcEnvironment = null)
         {
             _queries = queries ?? throw new ArgumentNullException(nameof(queries));
             _connections = connections ?? throw new ArgumentNullException(nameof(connections));
@@ -126,6 +130,7 @@ namespace DB2Sheet.UI
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
+            _openJdbcEnvironment = openJdbcEnvironment;
 
             Text = AppPresentation.WindowTitle("SQL 查询");
             Rectangle workingArea = Screen.FromControl(this).WorkingArea;
@@ -194,6 +199,7 @@ namespace DB2Sheet.UI
             _status = new ToolStripStatusLabel { Text = "就绪。", ForeColor = SystemColors.GrayText, Spring = true, TextAlign = ContentAlignment.MiddleLeft };
             _connectionNodeMenu = BuildConnectionNodeMenu();
             _connectionBlankMenu = BuildConnectionBlankMenu();
+            _treeNodeCopyMenu = BuildTreeNodeCopyMenu();
             _queryProfileMenu = BuildQueryProfileMenu();
 
             _setCurrentConnectionMenuItem = new ToolStripMenuItem("设置为当前连接", null, (sender, args) => SetSelectedConnectionAsCurrent());
@@ -427,9 +433,6 @@ namespace DB2Sheet.UI
             _sql.SqlText = profile.QueryText;
             _currentTargetSheet = string.IsNullOrWhiteSpace(profile.TargetSheetName) ? "查询结果" : profile.TargetSheetName;
             _currentSavedUtc = profile.UpdatedUtc;
-            _activeConnection = _connections.GetById(profile.ConnectionProfileId);
-            RememberActiveConnection(_activeConnection);
-            ApplyTreeVisualState();
             ClearPreviewGrid();
             _hasPreview = false;
             _resultsSplit.Panel2Collapsed = true;
@@ -854,6 +857,7 @@ namespace DB2Sheet.UI
             menu.Items.Add("新建连接", null, (sender, args) => CreateConnection());
             menu.Items.Add("删除连接", null, (sender, args) => DeleteSelectedConnection());
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("复制名称", null, (sender, args) => CopySelectedNodeName());
             menu.Items.Add("刷新", null, (sender, args) => RefreshSelectedConnection());
             return menu;
         }
@@ -864,6 +868,53 @@ namespace DB2Sheet.UI
             menu.Items.Add("新建连接", null, (sender, args) => CreateConnection());
             menu.Items.Add("刷新连接列表", null, (sender, args) => ReloadConnectionsTree());
             return menu;
+        }
+
+        /// <summary>库、表、视图等非连接根节点的右键菜单。</summary>
+        private ContextMenuStrip BuildTreeNodeCopyMenu()
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Items.Add("复制名称", null, (sender, args) => CopySelectedNodeName());
+            return menu;
+        }
+
+        /// <summary>把当前选中树节点的名称复制到剪贴板。</summary>
+        private void CopySelectedNodeName()
+        {
+            TreeNode node = _connectionsTree.SelectedNode;
+            if (node == null) return;
+            string name = ResolveNodeCopyName(node);
+            if (string.IsNullOrEmpty(name)) return;
+            try
+            {
+                Clipboard.SetText(name);
+            }
+            catch (Exception)
+            {
+                // 剪贴板偶发占用；复制失败不打断操作。
+            }
+        }
+
+        /// <summary>按节点类型取可复制的干净名称（连接不含「 [当前]」后缀）。</summary>
+        private static string ResolveNodeCopyName(TreeNode node)
+        {
+            if (node == null) return string.Empty;
+            if (node.Tag is ConnectionProfileSnapshot connection)
+            {
+                return connection.Name ?? string.Empty;
+            }
+
+            if (node.Tag is DatabaseNodeTag databaseTag)
+            {
+                return databaseTag.DatabaseName ?? string.Empty;
+            }
+
+            if (node.Tag is DatabaseObjectMetadata objectMetadata)
+            {
+                return objectMetadata.Name ?? string.Empty;
+            }
+
+            return node.Text ?? string.Empty;
         }
 
         private ContextMenuStrip BuildQueryProfileMenu()
@@ -974,10 +1025,14 @@ namespace DB2Sheet.UI
         private void ConnectionsTreeNodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
         {
             _connectionsTree.SelectedNode = e.Node;
-            if (e.Button == MouseButtons.Right && e.Node?.Parent == null && e.Node?.Tag is ConnectionProfileSnapshot)
+            if (e.Button != MouseButtons.Right || e.Node == null) return;
+            if (e.Node.Parent == null && e.Node.Tag is ConnectionProfileSnapshot)
             {
                 _connectionNodeMenu.Show(_connectionsTree, e.Location);
+                return;
             }
+
+            _treeNodeCopyMenu.Show(_connectionsTree, e.Location);
         }
 
         private void ConnectionsTreeMouseUp(object sender, MouseEventArgs e)
@@ -1044,7 +1099,7 @@ namespace DB2Sheet.UI
 
         private void CreateConnection()
         {
-            using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(_providers, _executionService, _operationRunner, null))
+            using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(_providers, _executionService, _operationRunner, _connections, null, _openJdbcEnvironment))
             {
                 if (editor.ShowDialog(this) != DialogResult.OK || editor.Profile == null) return;
                 _connections.Save(editor.Profile);
@@ -1058,7 +1113,7 @@ namespace DB2Sheet.UI
             ConnectionProfileSnapshot selected = SelectedConnectionNode;
             if (selected == null) return;
             bool wasActive = string.Equals(_activeConnection?.Id, selected.Id, StringComparison.OrdinalIgnoreCase);
-            using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(_providers, _executionService, _operationRunner, selected))
+            using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(_providers, _executionService, _operationRunner, _connections, selected, _openJdbcEnvironment))
             {
                 if (editor.ShowDialog(this) != DialogResult.OK || editor.Profile == null) return;
                 _connections.Save(editor.Profile);
@@ -1135,6 +1190,7 @@ namespace DB2Sheet.UI
                 if (!result.Succeeded)
                 {
                     _status.Text = result.Message + "（" + result.Elapsed.TotalSeconds.ToString("0.0") + " 秒）";
+                    ExceptionDetailForm.Show(this, "连接测试失败", result.Message);
                     return;
                 }
 
@@ -1236,7 +1292,7 @@ namespace DB2Sheet.UI
 
         private async Task LoadDatabasesAsync(TreeNode connectionNode, ConnectionProfileSnapshot connection)
         {
-            IDatabaseQueryProvider provider = _providers.GetById(connection.ProviderId) as IDatabaseQueryProvider;
+            IDatabaseMetadataProvider provider = _providers.GetById(connection.ProviderId) as IDatabaseMetadataProvider;
             if (provider == null)
             {
                 await OnUiAsync(() => SetNodeMessage(connectionNode, "当前连接不支持数据库浏览。", PlaceholderKinds.Message));
@@ -1290,7 +1346,7 @@ namespace DB2Sheet.UI
                 return;
             }
 
-            IDatabaseQueryProvider provider = _providers.GetById(connection.ProviderId) as IDatabaseQueryProvider;
+            IDatabaseMetadataProvider provider = _providers.GetById(connection.ProviderId) as IDatabaseMetadataProvider;
             if (provider == null)
             {
                 await OnUiAsync(() => SetNodeMessage(databaseNode, "当前连接不支持对象浏览。", PlaceholderKinds.Message));
@@ -1394,7 +1450,7 @@ namespace DB2Sheet.UI
         {
             if (_activeConnection == null) return null;
             if (string.IsNullOrWhiteSpace(_activeDatabase)) return _activeConnection;
-            IDatabaseQueryProvider provider = _providers.GetById(_activeConnection.ProviderId) as IDatabaseQueryProvider;
+            IDatabaseMetadataProvider provider = _providers.GetById(_activeConnection.ProviderId) as IDatabaseMetadataProvider;
             if (provider == null) return _activeConnection;
             try
             {
@@ -1483,7 +1539,7 @@ namespace DB2Sheet.UI
         private void ShowError(Exception exception)
         {
             _status.Text = exception.Message;
-            MessageBox.Show(this, exception.Message, AppPresentation.DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ExceptionDetailForm.Show(this, exception);
         }
 
         private void UpdateConnectionMenuState()

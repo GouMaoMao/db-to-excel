@@ -222,7 +222,7 @@ namespace DB2Sheet.UI
         private void ShowError(Exception exception)
         {
             _status.Text = exception.Message;
-            MessageBox.Show(this, exception.Message, AppPresentation.DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ExceptionDetailForm.Show(this, exception);
         }
 
         private static string Summarize(string query)

@@ -40,6 +40,8 @@ namespace DB2Sheet.Models
         /// <param name="defaultValue">默认值。</param>
         /// <param name="isSensitive">是否包含密码等敏感信息。</param>
         /// <param name="choices">选择类型允许的候选值。</param>
+        /// <param name="visibleWhenKey">控制本参数是否显示的其他参数键；为空时始终显示。</param>
+        /// <param name="visibleWhenValue">仅当控制参数等于该值时显示。</param>
         public ParameterDefinition(
             string key,
             string displayName,
@@ -47,7 +49,9 @@ namespace DB2Sheet.Models
             bool isRequired = false,
             object defaultValue = null,
             bool isSensitive = false,
-            IEnumerable<string> choices = null)
+            IEnumerable<string> choices = null,
+            string visibleWhenKey = null,
+            string visibleWhenValue = null)
         {
             Key = key ?? throw new ArgumentNullException(nameof(key));
             DisplayName = displayName ?? throw new ArgumentNullException(nameof(displayName));
@@ -56,6 +60,8 @@ namespace DB2Sheet.Models
             DefaultValue = defaultValue;
             IsSensitive = isSensitive;
             Choices = new List<string>(choices ?? new string[0]).AsReadOnly();
+            VisibleWhenKey = visibleWhenKey ?? string.Empty;
+            VisibleWhenValue = visibleWhenValue ?? string.Empty;
         }
 
         /// <summary>获取稳定键名。</summary>
@@ -72,6 +78,12 @@ namespace DB2Sheet.Models
         public bool IsSensitive { get; }
         /// <summary>获取选择类型的候选值。</summary>
         public IReadOnlyList<string> Choices { get; }
+
+        /// <summary>获取控制本参数显示的其他参数键。为空表示始终显示。</summary>
+        public string VisibleWhenKey { get; }
+
+        /// <summary>获取控制参数需匹配的值。</summary>
+        public string VisibleWhenValue { get; }
     }
 
     /// <summary>描述查询结果中的一列及其 CLR 数据类型。</summary>
