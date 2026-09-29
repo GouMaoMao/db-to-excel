@@ -39,6 +39,10 @@ namespace DB2Sheet.UI
         private readonly ContextMenuStrip _connectionNodeMenu;
         private readonly ContextMenuStrip _connectionBlankMenu;
         private readonly ContextMenuStrip _queryProfileMenu;
+        private readonly Font _previewHeaderTypeFont;
+        private readonly ToolStripMenuItem _editConnectionMenuItem;
+        private readonly ToolStripMenuItem _deleteConnectionMenuItem;
+        private readonly ToolStripMenuItem _setCurrentConnectionMenuItem;
         private ConnectionProfileSnapshot _activeConnection;
         private string _activeDatabase;
         private string _currentQueryId;
@@ -143,14 +147,17 @@ namespace DB2Sheet.UI
                 IntegralHeight = false
             };
             _sql = new SqlEditorControl(new SqlFormattingService()) { Dock = DockStyle.Fill };
+            _previewHeaderTypeFont = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Italic);
             _preview = new DataGridView
             {
                 Dock = DockStyle.Fill,
                 ReadOnly = true,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+                AutoGenerateColumns = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+                ColumnHeadersHeight = 42,
                 RowHeadersVisible = true,
                 RowHeadersWidth = 56,
                 BackgroundColor = SystemColors.Control,
@@ -178,7 +185,7 @@ namespace DB2Sheet.UI
                 Dock = DockStyle.Fill,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(110, 0, 4, 0),
+                Padding = new Padding(0, 0, 8, 0),
                 Text = "当前方案：未保存"
             };
             _status = new ToolStripStatusLabel { Text = "就绪。", ForeColor = SystemColors.GrayText, Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -186,15 +193,29 @@ namespace DB2Sheet.UI
             _connectionBlankMenu = BuildConnectionBlankMenu();
             _queryProfileMenu = BuildQueryProfileMenu();
 
+            _setCurrentConnectionMenuItem = new ToolStripMenuItem("设置为当前连接", null, (sender, args) => SetSelectedConnectionAsCurrent());
+            _editConnectionMenuItem = new ToolStripMenuItem("编辑连接", null, (sender, args) => EditSelectedConnection());
+            _deleteConnectionMenuItem = new ToolStripMenuItem("删除连接", null, (sender, args) => DeleteSelectedConnection());
+            ToolStripMenuItem newConnectionMenuItem = new ToolStripMenuItem("新建连接", null, (sender, args) => CreateConnection());
+            ToolStripMenuItem refreshConnectionMenuItem = new ToolStripMenuItem("刷新", null, (sender, args) => RefreshSelectedConnection());
+            ToolStripMenuItem connectionMenu = new ToolStripMenuItem("连接");
+            connectionMenu.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                newConnectionMenuItem,
+                _editConnectionMenuItem,
+                _deleteConnectionMenuItem,
+                new ToolStripSeparator(),
+                _setCurrentConnectionMenuItem,
+                refreshConnectionMenuItem
+            });
+
             ToolStripMenuItem newMenuItem = new ToolStripMenuItem("新建查询", null, (sender, args) => NewQuery()) { ShortcutKeys = Keys.Control | Keys.N };
             ToolStripMenuItem saveMenuItem = new ToolStripMenuItem("保存方案", null, (sender, args) => SaveQuery()) { ShortcutKeys = Keys.Control | Keys.S };
             ToolStripMenuItem deleteMenuItem = new ToolStripMenuItem("删除方案", null, (sender, args) => DeleteQuery());
             ToolStripMenuItem previewMenuItem = new ToolStripMenuItem("预览", null, (sender, args) => PreviewQuery()) { ShortcutKeys = Keys.Control | Keys.Enter };
-            ToolStripMenuItem formatMenuItem = new ToolStripMenuItem("格式化 SQL", null, (sender, args) => _sql.FormatSql()) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.F };
-            ToolStripMenuItem commentMenuItem = new ToolStripMenuItem("注释/取消注释", null, (sender, args) => _sql.ToggleComment()) { ShortcutKeys = Keys.Control | Keys.OemQuestion };
             ToolStripMenuItem exportMenuItem = new ToolStripMenuItem("写入 Sheet", null, (sender, args) => ExportQuery()) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.E };
             ToolStripMenuItem closeMenuItem = new ToolStripMenuItem("关闭", null, (sender, args) => Close()) { ShortcutKeys = Keys.Alt | Keys.F4 };
-            ToolStripMenuItem queryMenu = new ToolStripMenuItem("查询方案");
+            ToolStripMenuItem queryMenu = new ToolStripMenuItem("查询");
             queryMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
                 newMenuItem,
@@ -202,14 +223,20 @@ namespace DB2Sheet.UI
                 deleteMenuItem,
                 new ToolStripSeparator(),
                 previewMenuItem,
-                formatMenuItem,
-                commentMenuItem,
                 exportMenuItem,
                 new ToolStripSeparator(),
                 closeMenuItem
             });
+
+            ToolStripMenuItem formatMenuItem = new ToolStripMenuItem("格式化 SQL", null, (sender, args) => _sql.FormatSql()) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.F };
+            ToolStripMenuItem commentMenuItem = new ToolStripMenuItem("注释/取消注释", null, (sender, args) => _sql.ToggleComment()) { ShortcutKeys = Keys.Control | Keys.OemQuestion };
+            ToolStripMenuItem editMenu = new ToolStripMenuItem("编辑");
+            editMenu.DropDownItems.AddRange(new ToolStripItem[] { formatMenuItem, commentMenuItem });
+
             MenuStrip menu = new MenuStrip { Dock = DockStyle.Top };
+            menu.Items.Add(connectionMenu);
             menu.Items.Add(queryMenu);
+            menu.Items.Add(editMenu);
             MainMenuStrip = menu;
 
             Button previewButton = ButtonOf("预览");
@@ -217,10 +244,11 @@ namespace DB2Sheet.UI
             Button saveButton = ButtonOf("保存方案");
             FlowLayoutPanel sqlActions = new FlowLayoutPanel
             {
-                Dock = DockStyle.Right,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
+                Anchor = AnchorStyles.Right,
                 Padding = Padding.Empty,
                 Margin = Padding.Empty
             };
@@ -252,7 +280,7 @@ namespace DB2Sheet.UI
                 Dock = DockStyle.Fill,
                 Orientation = Orientation.Horizontal
             };
-            leftSplit.Panel1.Controls.Add(SectionPanel("连接方案", _connectionsTree));
+            leftSplit.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionsTree));
             leftSplit.Panel2.Controls.Add(SectionPanel("查询方案", BuildQueryProfilesPanel()));
 
             SplitContainer workspace = new SplitContainer
@@ -278,6 +306,7 @@ namespace DB2Sheet.UI
             _queryProfiles.SelectedIndexChanged += QueryProfilesSelectedIndexChanged;
             _queryProfiles.MouseUp += QueryProfilesMouseUp;
             _preview.RowPostPaint += PreviewRowPostPaint;
+            _preview.CellPainting += PreviewCellPainting;
             _connectionsTree.NodeMouseClick += ConnectionsTreeNodeMouseClick;
             _connectionsTree.MouseUp += ConnectionsTreeMouseUp;
             _connectionsTree.NodeMouseDoubleClick += ConnectionsTreeNodeMouseDoubleClick;
@@ -296,10 +325,12 @@ namespace DB2Sheet.UI
                 }));
             };
 
+            RestoreActiveConnection();
             ReloadConnectionsTree();
             ReloadQueries(null, false);
             NewQuery();
             UpdateQueryInfo();
+            UpdateConnectionMenuState();
         }
 
         private void ReloadQueries(string selectedId = null, bool activateSelection = true)
@@ -353,7 +384,7 @@ namespace DB2Sheet.UI
             _currentTargetSheet = "查询结果";
             _currentSavedUtc = null;
             _sql.ClearAndFocus();
-            _preview.Columns.Clear();
+            ClearPreviewGrid();
             _hasPreview = false;
             _resultsSplit.Panel2Collapsed = true;
             _status.Text = "新查询方案。";
@@ -371,7 +402,9 @@ namespace DB2Sheet.UI
             _currentTargetSheet = string.IsNullOrWhiteSpace(profile.TargetSheetName) ? "查询结果" : profile.TargetSheetName;
             _currentSavedUtc = profile.UpdatedUtc;
             _activeConnection = _connections.GetById(profile.ConnectionProfileId);
-            _preview.Columns.Clear();
+            RememberActiveConnection(_activeConnection);
+            ApplyTreeVisualState();
+            ClearPreviewGrid();
             _hasPreview = false;
             _resultsSplit.Panel2Collapsed = true;
             _status.Text = "已加载查询方案。";
@@ -489,9 +522,34 @@ namespace DB2Sheet.UI
 
         private Panel BuildSqlHeader(Control actions)
         {
-            Panel header = SectionHeader("SQL");
-            header.Controls.Add(_sqlQueryNameLabel);
-            header.Controls.Add(actions);
+            Panel header = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = SystemColors.ControlLight };
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                Margin = Padding.Empty,
+                Padding = new Padding(8, 0, 4, 0)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            Label title = new Label
+            {
+                Text = "SQL编辑器（仅限查询）",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 6, 12, 0),
+                Font = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Bold)
+            };
+            _sqlQueryNameLabel.Margin = new Padding(0, 6, 8, 0);
+            actions.Margin = new Padding(0, 2, 0, 0);
+            layout.Controls.Add(title, 0, 0);
+            layout.Controls.Add(_sqlQueryNameLabel, 1, 0);
+            layout.Controls.Add(actions, 2, 0);
+            header.Controls.Add(layout);
             return header;
         }
 
@@ -519,10 +577,16 @@ namespace DB2Sheet.UI
                 BindPreview(result);
                 _hasPreview = true;
                 EnsurePreviewVisible();
-                _status.Text = string.Format("{0}完成，共 {1:N0} 行{2}。",
-                    selectedOnly ? "选中文本预览" : "预览",
-                    result.RowCount,
-                    result.IsTruncated ? "（已截断）" : string.Empty);
+                int previewLimit = _settings.Get(CoreSettings.MaxPreviewRows);
+                _status.Text = result.IsTruncated
+                    ? string.Format(
+                        "{0}完成，共 {1:N0} 行，已达上限 {2:N0} 行并截断。可在设置中修改“最大预览行数”。",
+                        selectedOnly ? "选中文本预览" : "预览",
+                        result.RowCount,
+                        previewLimit)
+                    : string.Format("{0}完成，共 {1:N0} 行。",
+                        selectedOnly ? "选中文本预览" : "预览",
+                        result.RowCount);
             }
             catch (OperationCanceledException)
             {
@@ -596,7 +660,8 @@ namespace DB2Sheet.UI
         {
             if (_resultsSplit.Panel2Collapsed)
                 _resultsSplit.Panel2Collapsed = false;
-            TrySetSplitterDistance(_resultsSplit, (_resultsSplit.ClientSize.Height * 2) / 3);
+            int available = _resultsSplit.ClientSize.Height - _resultsSplit.SplitterWidth;
+            TrySetSplitterDistance(_resultsSplit, available / 2);
         }
 
         /// <summary>在容器拥有足够可用尺寸后应用分割面板最小尺寸，避免构造期触发 WinForms 距离范围异常。</summary>
@@ -644,28 +709,45 @@ namespace DB2Sheet.UI
             }
         }
 
+        private void ClearPreviewGrid()
+        {
+            _preview.Rows.Clear();
+            _preview.Columns.Clear();
+        }
+
         private void BindPreview(BufferedQueryResult result)
         {
             _preview.SuspendLayout();
             try
             {
-                _preview.Columns.Clear();
-                foreach (ResultColumn column in result.Columns)
+                ClearPreviewGrid();
+                if (result == null || result.Columns.Count == 0)
+                    return;
+
+                Font headerFont = _preview.ColumnHeadersDefaultCellStyle.Font ?? _preview.Font;
+                for (int index = 0; index < result.Columns.Count; index++)
                 {
+                    ResultColumn column = result.Columns[index];
+                    int textWidth = TextRenderer.MeasureText(column.Name ?? string.Empty, headerFont).Width + 24;
                     _preview.Columns.Add(new DataGridViewTextBoxColumn
                     {
-                        HeaderText = FormatPreviewColumnHeader(column),
-                        Name = Guid.NewGuid().ToString("N")
+                        HeaderText = column.Name,
+                        Name = "c" + index,
+                        Tag = column,
+                        SortMode = DataGridViewColumnSortMode.NotSortable,
+                        Width = Math.Max(72, Math.Min(280, textWidth))
                     });
                 }
+
                 foreach (object[,] block in result.Blocks)
                 {
-                    int rows = block.GetLength(0);
-                    int columns = block.GetLength(1);
-                    for (int row = 0; row < rows; row++)
+                    int rowCount = block.GetLength(0);
+                    int columnCount = block.GetLength(1);
+                    for (int row = 0; row < rowCount; row++)
                     {
-                        object[] values = new object[columns];
-                        for (int column = 0; column < columns; column++) values[column] = block[row, column];
+                        object[] values = new object[columnCount];
+                        for (int column = 0; column < columnCount; column++)
+                            values[column] = block[row, column];
                         _preview.Rows.Add(values);
                     }
                 }
@@ -674,6 +756,27 @@ namespace DB2Sheet.UI
             {
                 _preview.ResumeLayout();
             }
+        }
+
+        private void RestoreActiveConnection()
+        {
+            string id = _settings.Get(CoreSettings.ActiveConnectionId);
+            if (string.IsNullOrWhiteSpace(id))
+                return;
+
+            ConnectionProfileSnapshot connection = _connections.GetById(id);
+            if (connection == null)
+            {
+                RememberActiveConnection(null);
+                return;
+            }
+
+            _activeConnection = connection;
+        }
+
+        private void RememberActiveConnection(ConnectionProfileSnapshot connection)
+        {
+            _settings.Set(CoreSettings.ActiveConnectionId, connection?.Id ?? string.Empty);
         }
 
         private bool ValidateInputs(bool requireTarget, out ConnectionProfileSnapshot connection, string sqlText = null)
@@ -689,13 +792,11 @@ namespace DB2Sheet.UI
             return false;
         }
 
-        private static string FormatPreviewColumnHeader(ResultColumn column)
+        private static string FormatPreviewTypeName(ResultColumn column)
         {
             if (column == null) return string.Empty;
             Type dataType = column.GetDataType();
-            string typeName = dataType == null ? string.Empty : dataType.Name;
-            if (string.IsNullOrWhiteSpace(typeName)) return column.Name;
-            return string.Format("{0}\r\n{1}", column.Name, typeName);
+            return dataType == null ? string.Empty : dataType.Name;
         }
 
         private ContextMenuStrip BuildConnectionNodeMenu()
@@ -751,10 +852,46 @@ namespace DB2Sheet.UI
             _connectionsTree.AfterSelect -= ConnectionsTreeAfterSelect;
             _queryProfiles.MouseUp -= QueryProfilesMouseUp;
             _preview.RowPostPaint -= PreviewRowPostPaint;
+            _preview.CellPainting -= PreviewCellPainting;
             _connectionNodeMenu.Dispose();
             _connectionBlankMenu.Dispose();
             _queryProfileMenu.Dispose();
             _treeImages.Dispose();
+            _previewHeaderTypeFont.Dispose();
+        }
+
+        private void PreviewCellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex != -1 || e.ColumnIndex < 0) return;
+
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+            ResultColumn column = _preview.Columns[e.ColumnIndex].Tag as ResultColumn;
+            string name = column == null ? _preview.Columns[e.ColumnIndex].HeaderText : column.Name;
+            string typeName = FormatPreviewTypeName(column);
+            Rectangle bounds = e.CellBounds;
+            bounds.Inflate(-4, -2);
+            int nameHeight = Math.Max(14, bounds.Height / 2);
+            Rectangle nameBounds = new Rectangle(bounds.X, bounds.Y, bounds.Width, nameHeight);
+            Rectangle typeBounds = new Rectangle(bounds.X, bounds.Y + nameHeight - 1, bounds.Width, bounds.Height - nameHeight + 1);
+            TextRenderer.DrawText(
+                e.Graphics,
+                name,
+                e.CellStyle.Font,
+                nameBounds,
+                e.CellStyle.ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    typeName,
+                    _previewHeaderTypeFont,
+                    typeBounds,
+                    SystemColors.GrayText,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            }
+
+            e.Handled = true;
         }
 
         private void PreviewRowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
@@ -855,6 +992,7 @@ namespace DB2Sheet.UI
                 _connectionsTree.EndUpdate();
             }
             ApplyTreeVisualState();
+            UpdateConnectionMenuState();
         }
 
         private void CreateConnection()
@@ -907,6 +1045,7 @@ namespace DB2Sheet.UI
             {
                 _activeConnection = null;
                 _activeDatabase = null;
+                RememberActiveConnection(null);
             }
             ReloadConnectionsTree();
             _status.Text = "连接方案已删除。";
@@ -954,6 +1093,7 @@ namespace DB2Sheet.UI
 
                 _activeConnection = connection;
                 _activeDatabase = null;
+                RememberActiveConnection(connection);
                 ReloadConnectionsTree(connection.Id);
                 TreeNode node = _connectionsTree.Nodes.Cast<TreeNode>().FirstOrDefault(item =>
                     string.Equals((item.Tag as ConnectionProfileSnapshot)?.Id, connection.Id, StringComparison.OrdinalIgnoreCase));
@@ -994,23 +1134,30 @@ namespace DB2Sheet.UI
 
         private void ConnectionsTreeAfterSelect(object sender, TreeViewEventArgs e)
         {
-            DatabaseNodeTag databaseTag = e.Node?.Tag as DatabaseNodeTag;
-            if (databaseTag != null)
+            try
             {
-                if (!string.Equals(_activeConnection?.Id, databaseTag.ConnectionId, StringComparison.OrdinalIgnoreCase))
+                DatabaseNodeTag databaseTag = e.Node?.Tag as DatabaseNodeTag;
+                if (databaseTag != null)
+                {
+                    if (!string.Equals(_activeConnection?.Id, databaseTag.ConnectionId, StringComparison.OrdinalIgnoreCase))
+                        return;
+                    _activeDatabase = databaseTag.DatabaseName;
+                    ApplyTreeVisualState();
+                    _status.Text = "当前数据库：" + _activeDatabase;
                     return;
-                _activeDatabase = databaseTag.DatabaseName;
-                ApplyTreeVisualState();
-                _status.Text = "当前数据库：" + _activeDatabase;
-                return;
-            }
+                }
 
-            ConnectionProfileSnapshot connection = e.Node?.Tag as ConnectionProfileSnapshot;
-            if (connection != null && string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase))
+                ConnectionProfileSnapshot connection = e.Node?.Tag as ConnectionProfileSnapshot;
+                if (connection != null && string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    _activeDatabase = null;
+                    ApplyTreeVisualState();
+                    _status.Text = "当前连接已激活：" + connection.Name;
+                }
+            }
+            finally
             {
-                _activeDatabase = null;
-                ApplyTreeVisualState();
-                _status.Text = "当前连接已激活：" + connection.Name;
+                UpdateConnectionMenuState();
             }
         }
 
@@ -1226,6 +1373,7 @@ namespace DB2Sheet.UI
                 if (connection == null) continue;
                 bool connectionActive = string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase);
                 string providerKey = DatabaseTreeImageCatalog.Provider(connection.ProviderId, connectionActive);
+                root.Text = connectionActive ? connection.Name + " [当前]" : connection.Name;
                 root.ImageKey = providerKey;
                 root.SelectedImageKey = providerKey;
                 ApplyChildrenState(root, connectionActive);
@@ -1289,6 +1437,14 @@ namespace DB2Sheet.UI
         {
             _status.Text = exception.Message;
             MessageBox.Show(this, exception.Message, AppPresentation.DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void UpdateConnectionMenuState()
+        {
+            bool hasSelection = SelectedConnectionNode != null;
+            _editConnectionMenuItem.Enabled = hasSelection;
+            _deleteConnectionMenuItem.Enabled = hasSelection;
+            _setCurrentConnectionMenuItem.Enabled = hasSelection;
         }
 
         private static Button ButtonOf(string text) => new Button { Text = text, AutoSize = true };

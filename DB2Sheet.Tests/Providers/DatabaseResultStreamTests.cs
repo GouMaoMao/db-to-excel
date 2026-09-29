@@ -14,7 +14,7 @@ namespace DB2Sheet.Tests.Providers
     public sealed class DatabaseResultStreamTests
     {
         [TestMethod]
-        public async Task ReadBlockAsync_ReachingRowLimitMarksTruncatedWithoutCancelCommand()
+        public async Task ReadBlockAsync_ReachingRowLimitMarksTruncatedAndCancelsCommand()
         {
             DataTable table = new DataTable();
             table.Columns.Add("id", typeof(int));
@@ -38,7 +38,7 @@ namespace DB2Sheet.Tests.Providers
                 Assert.AreEqual(2, block.RowCount);
                 Assert.IsTrue(stream.IsTruncated);
                 Assert.IsTrue(stream.IsCompleted);
-                Assert.IsFalse(command.CancelCalled);
+                Assert.IsTrue(command.CancelCalled);
             }
         }
 

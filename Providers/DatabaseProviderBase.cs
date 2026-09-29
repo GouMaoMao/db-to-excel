@@ -163,6 +163,19 @@ namespace DB2Sheet.Providers
             return Task.CompletedTask;
         }
 
+        /// <summary>在预览查询前设置会话级行数上限。默认不限制；连接在查询结束后释放。</summary>
+        /// <param name="connection">已打开的连接。</param>
+        /// <param name="rowLimit">服务端最多返回的行数，含用于判断截断的额外一行。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>表示命令完成的任务。</returns>
+        protected virtual Task ApplyPreviewRowLimitAsync(
+            DbConnection connection,
+            int rowLimit,
+            CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
         /// <summary>在已打开连接上执行一条会话级非查询命令。</summary>
         /// <param name="connection">已打开的连接。</param>
         /// <param name="commandText">会话配置命令。</param>
@@ -212,6 +225,11 @@ namespace DB2Sheet.Providers
                 connection = CreateConnection(request.Connection);
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
                 await ConfigureReadOnlySessionAsync(connection, cancellationToken).ConfigureAwait(false);
+                if (request.Purpose == ExecutionPurpose.Preview && request.RowLimit > 0)
+                {
+                    int serverLimit = request.RowLimit < int.MaxValue ? request.RowLimit + 1 : int.MaxValue;
+                    await ApplyPreviewRowLimitAsync(connection, serverLimit, cancellationToken).ConfigureAwait(false);
+                }
 
                 progress?.Report(new OperationProgress
                 {

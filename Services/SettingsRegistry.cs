@@ -59,6 +59,7 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.QueryTimeoutSeconds);
             registry.Register(CoreSettings.ResultBlockSize);
             registry.Register(CoreSettings.LogLevel);
+            registry.Register(CoreSettings.ActiveConnectionId);
             return registry;
         }
     }
@@ -95,6 +96,11 @@ namespace DB2Sheet.Services
                 "logging.level", "日志级别", "日志", "Information",
                 value => Tuple.Create(!string.IsNullOrWhiteSpace(value), value),
                 value => value == "Debug" || value == "Information" || value == "Warning" || value == "Error");
+
+        public static readonly SettingDefinition<string> ActiveConnectionId =
+            new SettingDefinition<string>(
+                "session.activeConnectionId", "当前连接", "会话", string.Empty,
+                value => Tuple.Create(true, value ?? string.Empty));
 
         private static SettingDefinition<int> Integer(
             string key, string displayName, string category, int defaultValue, int minimum, int maximum)

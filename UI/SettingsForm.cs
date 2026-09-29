@@ -79,8 +79,9 @@ namespace DB2Sheet.UI
 
         private void BuildCategories(TabControl categories)
         {
-            foreach (IGrouping<string, SettingDefinition> category in _registry.GetAll().GroupBy(
-                definition => string.IsNullOrWhiteSpace(definition.Category) ? "常规" : definition.Category))
+            foreach (IGrouping<string, SettingDefinition> category in _registry.GetAll()
+                .Where(definition => !definition.Key.StartsWith("session.", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(definition => string.IsNullOrWhiteSpace(definition.Category) ? "常规" : definition.Category))
             {
                 TabPage page = new TabPage(category.Key) { Padding = new Padding(8) };
                 TableLayoutPanel table = new TableLayoutPanel

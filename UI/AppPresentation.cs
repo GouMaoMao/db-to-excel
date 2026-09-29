@@ -1,3 +1,6 @@
+using System;
+using System.Drawing;
+
 namespace DB2Sheet.UI
 {
     /// <summary>集中定义所有用户可见品牌名称和公共 UI 字体。</summary>
@@ -12,8 +15,28 @@ namespace DB2Sheet.UI
         public const float DefaultFontSize = 9F;
         public const string LogFontName = "Consolas";
         public const float LogFontSize = 9F;
-        public const string CodeFontName = "Microsoft YaHei UI";
+        public const string CodeFontName = "Microsoft YaHei UI Light";
         public const float CodeFontSize = 9.5F;
+
+        /// <summary>为 SQL 编辑器创建中英文同一字面高度的代码字体；优先细体雅黑，缺失时回退。</summary>
+        /// <param name="style">字重样式；关键字使用粗体。</param>
+        /// <returns>已解析到本机已安装字体族的字体实例。</returns>
+        public static Font CreateCodeFont(FontStyle style)
+        {
+            string[] candidates = { "Microsoft YaHei UI Light", "DengXian Light", "Microsoft YaHei UI" };
+            foreach (string name in candidates)
+            {
+                using (Font probe = new Font(name, CodeFontSize, style, GraphicsUnit.Point))
+                {
+                    if (!string.Equals(probe.FontFamily.Name, name, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+
+                return new Font(name, CodeFontSize, style, GraphicsUnit.Point);
+            }
+
+            return new Font(DefaultFontName, CodeFontSize, style, GraphicsUnit.Point);
+        }
 
         /// <summary>生成统一格式的功能窗体标题。</summary>
         /// <param name="featureName">功能名称；为空时只返回产品展示名称。</param>

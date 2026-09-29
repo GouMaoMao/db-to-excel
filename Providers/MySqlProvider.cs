@@ -105,5 +105,17 @@ namespace DB2Sheet.Providers
         {
             return ExecuteSessionCommandAsync(connection, "SET SESSION TRANSACTION READ ONLY", cancellationToken);
         }
+
+        /// <inheritdoc/>
+        protected override Task ApplyPreviewRowLimitAsync(
+            DbConnection connection,
+            int rowLimit,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteSessionCommandAsync(
+                connection,
+                "SET SQL_SELECT_LIMIT = " + rowLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                cancellationToken);
+        }
     }
 }

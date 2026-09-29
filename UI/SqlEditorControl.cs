@@ -34,8 +34,8 @@ namespace DB2Sheet.UI
         public SqlEditorControl(ISqlFormattingService formattingService)
         {
             _formattingService = formattingService ?? throw new ArgumentNullException(nameof(formattingService));
-            _regularFont = new Font(AppPresentation.CodeFontName, AppPresentation.CodeFontSize, FontStyle.Regular);
-            _keywordFont = new Font(AppPresentation.CodeFontName, AppPresentation.CodeFontSize, FontStyle.Bold);
+            _regularFont = AppPresentation.CreateCodeFont(FontStyle.Regular);
+            _keywordFont = AppPresentation.CreateCodeFont(FontStyle.Bold);
 
             _editor = new RichTextBox
             {
@@ -207,15 +207,9 @@ namespace DB2Sheet.UI
 
         private void ToggleLineComments()
         {
-            int originalStart = _editor.SelectionStart;
-            int originalEnd = originalStart + Math.Max(1, _editor.SelectionLength);
-            int start = _editor.GetFirstCharIndexFromLine(_editor.GetLineFromCharIndex(originalStart));
-            int endLine = _editor.GetLineFromCharIndex(Math.Min(originalEnd, Math.Max(0, _editor.TextLength - 1)));
-            int end = endLine + 1 < _editor.Lines.Length
-                ? _editor.GetFirstCharIndexFromLine(endLine + 1)
-                : _editor.TextLength;
+            GetAffectedLineRange(out int start, out int end);
             string block = _editor.Text.Substring(start, end - start);
-            string[] lines = block.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            string[] lines = SplitLinesPreservingTrailingBreak(block);
             bool uncomment = true;
             foreach (string line in lines)
             {
@@ -243,25 +237,18 @@ namespace DB2Sheet.UI
                 }
             }
 
-            string replacement = string.Join(Environment.NewLine, lines);
+            string replacement = string.Join("\n", lines);
             _editor.Select(start, end - start);
             _editor.SelectedText = replacement;
-            _editor.Select(start, replacement.Length);
+            _editor.Select(start, SelectionLengthWithoutTrailingBreak(replacement));
             ApplyHighlight();
         }
 
         private void ChangeSelectionIndent(bool outdent)
         {
-            int originalStart = _editor.SelectionStart;
-            int originalEnd = originalStart + Math.Max(1, _editor.SelectionLength);
-            int start = _editor.GetFirstCharIndexFromLine(_editor.GetLineFromCharIndex(originalStart));
-            int endLine = _editor.GetLineFromCharIndex(Math.Min(originalEnd, Math.Max(0, _editor.TextLength - 1)));
-            int end = endLine + 1 < _editor.Lines.Length
-                ? _editor.GetFirstCharIndexFromLine(endLine + 1)
-                : _editor.TextLength;
-
+            GetAffectedLineRange(out int start, out int end);
             string block = _editor.Text.Substring(start, end - start);
-            string[] lines = block.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            string[] lines = SplitLinesPreservingTrailingBreak(block);
             for (int index = 0; index < lines.Length; index++)
             {
                 if (lines[index].Length == 0) continue;
@@ -277,11 +264,63 @@ namespace DB2Sheet.UI
                 }
             }
 
-            string replacement = string.Join(Environment.NewLine, lines);
+            string replacement = string.Join("\n", lines);
             _editor.Select(start, end - start);
             _editor.SelectedText = replacement;
-            _editor.Select(start, replacement.Length);
+            _editor.Select(start, SelectionLengthWithoutTrailingBreak(replacement));
             ApplyHighlight();
+        }
+
+        private static int SelectionLengthWithoutTrailingBreak(string replacement)
+        {
+            if (string.IsNullOrEmpty(replacement)) return 0;
+            int length = replacement.Length;
+            if (replacement[length - 1] == '\n') length--;
+            return length;
+        }
+
+        private void GetAffectedLineRange(out int start, out int end)
+        {
+            int textLength = _editor.TextLength;
+            if (textLength <= 0)
+            {
+                start = 0;
+                end = 0;
+                return;
+            }
+
+            int selectionStart = _editor.SelectionStart;
+            int selectionLength = _editor.SelectionLength;
+            int startLine = _editor.GetLineFromCharIndex(selectionStart);
+            int endIndex;
+            if (selectionLength <= 0)
+            {
+                endIndex = selectionStart;
+            }
+            else
+            {
+                int selectionEnd = selectionStart + selectionLength;
+                int lastIncluded = Math.Min(selectionEnd, textLength) - 1;
+                if (lastIncluded < selectionStart) lastIncluded = selectionStart;
+                int endLine = _editor.GetLineFromCharIndex(lastIncluded);
+                int lineStart = _editor.GetFirstCharIndexFromLine(endLine);
+                if (selectionEnd == lineStart && selectionEnd > selectionStart && endLine > startLine)
+                    endIndex = selectionEnd - 1;
+                else
+                    endIndex = lastIncluded;
+            }
+
+            int lastLine = _editor.GetLineFromCharIndex(Math.Min(Math.Max(endIndex, 0), textLength - 1));
+            start = _editor.GetFirstCharIndexFromLine(startLine);
+            end = lastLine + 1 < _editor.Lines.Length
+                ? _editor.GetFirstCharIndexFromLine(lastLine + 1)
+                : textLength;
+        }
+
+        private static string[] SplitLinesPreservingTrailingBreak(string block)
+        {
+            if (string.IsNullOrEmpty(block)) return new[] { string.Empty };
+            return block.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         }
 
         private void UpdateMenuState()

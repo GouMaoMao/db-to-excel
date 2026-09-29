@@ -107,7 +107,12 @@ namespace DB2Sheet.Providers
             _progress?.Report(new OperationProgress
             {
                 Stage = OperationStage.Reading,
-                Message = IsTruncated ? "读取达到行数限制，结果已截断。" : "正在读取结果…",
+                Message = IsTruncated
+                    ? string.Format(
+                        "已读取 {0:N0} 行，达到上限 {1:N0} 行，结果已截断。可在设置中修改上限行数。",
+                        RowsRead,
+                        _rowLimit)
+                    : "正在读取结果…",
                 RowsRead = RowsRead,
                 IsIndeterminate = true,
                 IsTruncated = IsTruncated
@@ -128,14 +133,33 @@ namespace DB2Sheet.Providers
         }
 
         /// <summary>释放取消注册、读取器、命令和连接。</summary>
+        /// <remarks>主动截断后驱动可能把取消当成语句失败；清理阶段的异常不再冒泡，避免成功读取被记成用户取消。</remarks>
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            _cancellationRegistration.Dispose();
-            _reader.Dispose();
-            _command.Dispose();
-            _connection.Dispose();
+            try
+            {
+                _cancellationRegistration.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+            DisposeQuietly(_reader);
+            DisposeQuietly(_command);
+            DisposeQuietly(_connection);
+        }
+
+        private static void DisposeQuietly(IDisposable disposable)
+        {
+            if (disposable == null) return;
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception)
+            {
+            }
         }
 
         private async Task CheckLimitAsync(CancellationToken cancellationToken)
@@ -145,6 +169,7 @@ namespace DB2Sheet.Providers
             if (await _reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 IsTruncated = true;
+                Cancel();
             }
             IsCompleted = true;
         }
