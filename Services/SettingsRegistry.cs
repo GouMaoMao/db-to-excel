@@ -60,6 +60,8 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.ResultBlockSize);
             registry.Register(CoreSettings.LogLevel);
             registry.Register(CoreSettings.ActiveConnectionId);
+            registry.Register(CoreSettings.WorkspaceSplitRatio);
+            registry.Register(CoreSettings.FormBounds);
             return registry;
         }
     }
@@ -100,6 +102,14 @@ namespace DB2Sheet.Services
         public static readonly SettingDefinition<string> ActiveConnectionId =
             new SettingDefinition<string>(
                 "session.activeConnectionId", "当前连接", "会话", string.Empty,
+                value => Tuple.Create(true, value ?? string.Empty));
+
+        public static readonly SettingDefinition<int> WorkspaceSplitRatio = Integer(
+            "session.workspaceSplitRatio", "左右分栏比例", "会话", 0, 0, 999);
+
+        public static readonly SettingDefinition<string> FormBounds =
+            new SettingDefinition<string>(
+                "session.formBounds", "窗体尺寸", "会话", string.Empty,
                 value => Tuple.Create(true, value ?? string.Empty));
 
         private static SettingDefinition<int> Integer(

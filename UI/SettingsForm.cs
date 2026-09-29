@@ -31,7 +31,8 @@ namespace DB2Sheet.UI
             Width = 660;
             Height = 600;
             MinimumSize = new Size(520, 420);
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.Manual;
+            FormSizeMemory.Attach(this, _store, "Settings");
 
             TabControl categories = new TabControl { Dock = DockStyle.Fill };
             _status = new Label

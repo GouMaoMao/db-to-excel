@@ -51,6 +51,8 @@ namespace DB2Sheet.UI
         private DateTime _currentCreatedUtc;
         private DateTime? _currentSavedUtc;
         private bool _hasPreview;
+        private bool _applyingWorkspaceSplit;
+        private bool _userDraggingWorkspaceSplit;
         private CancellationTokenSource _metadataCancellation;
 
         private Task OnUiAsync(Action action)
@@ -130,7 +132,8 @@ namespace DB2Sheet.UI
             Width = Math.Min(1320, workingArea.Width - 40);
             Height = Math.Min(860, workingArea.Height - 60);
             MinimumSize = new Size(820, 600);
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.Manual;
+            FormSizeMemory.Attach(this, _settings, "QueryEditor");
 
             _treeImages = DatabaseTreeImageCatalog.CreateImageList();
             _connectionsTree = new TreeView
@@ -314,14 +317,37 @@ namespace DB2Sheet.UI
             _connectionsTree.AfterSelect += ConnectionsTreeAfterSelect;
             _connections.Changed += ConnectionsChanged;
             FormClosed += QueryEditorFormFormClosed;
-            workspace.SizeChanged += (sender, args) => ApplySplitterPanelMinSizes(workspace, 220, 420);
+            workspace.SizeChanged += (sender, args) =>
+            {
+                _userDraggingWorkspaceSplit = false;
+                _applyingWorkspaceSplit = true;
+                try
+                {
+                    ApplySplitterPanelMinSizes(workspace, 140, 420);
+                    TrySetSplitterDistance(workspace, WorkspaceSplitDistance(workspace));
+                }
+                finally
+                {
+                    _applyingWorkspaceSplit = false;
+                }
+            };
+            workspace.SplitterMoving += (sender, args) => _userDraggingWorkspaceSplit = true;
+            workspace.SplitterMoved += (sender, args) => RememberWorkspaceSplit(workspace);
             Shown += (sender, args) =>
             {
                 BeginInvoke(new Action(() =>
                 {
-                    ApplySplitterPanelMinSizes(workspace, 220, 420);
-                    TrySetSplitterDistance(workspace, workspace.Width / 4);
-                    TrySetSplitterDistance(leftSplit, leftSplit.Height / 2);
+                    _applyingWorkspaceSplit = true;
+                    try
+                    {
+                        ApplySplitterPanelMinSizes(workspace, 140, 420);
+                        TrySetSplitterDistance(workspace, WorkspaceSplitDistance(workspace));
+                        TrySetSplitterDistance(leftSplit, leftSplit.Height / 2);
+                    }
+                    finally
+                    {
+                        _applyingWorkspaceSplit = false;
+                    }
                 }));
             };
 
@@ -680,6 +706,27 @@ namespace DB2Sheet.UI
                 split.Panel1MinSize = panel1MinSize;
             if (split.Panel2MinSize != panel2MinSize)
                 split.Panel2MinSize = panel2MinSize;
+        }
+
+        private int WorkspaceSplitDistance(SplitContainer workspace)
+        {
+            int available = workspace.Width - workspace.SplitterWidth;
+            if (available <= 0) return 0;
+            int ratio = _settings.Get(CoreSettings.WorkspaceSplitRatio);
+            return ratio > 0 ? available * ratio / 1000 : available / 6;
+        }
+
+        private void RememberWorkspaceSplit(SplitContainer workspace)
+        {
+            if (!_userDraggingWorkspaceSplit) return;
+            _userDraggingWorkspaceSplit = false;
+            if (_applyingWorkspaceSplit || workspace == null || workspace.IsDisposed) return;
+            int available = workspace.Width - workspace.SplitterWidth;
+            if (available <= 0) return;
+            int ratio = (int)Math.Round(workspace.SplitterDistance * 1000d / available);
+            ratio = Math.Max(1, Math.Min(999, ratio));
+            if (ratio == _settings.Get(CoreSettings.WorkspaceSplitRatio)) return;
+            _settings.Set(CoreSettings.WorkspaceSplitRatio, ratio);
         }
 
         /// <summary>在满足面板最小尺寸约束时安全设置分割条位置，避免 WinForms 抛出范围异常。</summary>

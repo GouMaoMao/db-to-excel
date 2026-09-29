@@ -14,9 +14,11 @@ namespace DB2Sheet.Tests.Services
         {
             SettingsRegistry registry = SettingsRegistry.CreateDefault();
 
-            Assert.AreEqual(8, registry.GetAll().Count);
+            Assert.AreEqual(10, registry.GetAll().Count);
             Assert.AreSame(CoreSettings.MaxPreviewRows, registry.GetByKey("QUERY.MAXPREVIEWROWS"));
             Assert.AreSame(CoreSettings.ActiveConnectionId, registry.GetByKey("session.activeConnectionId"));
+            Assert.AreSame(CoreSettings.WorkspaceSplitRatio, registry.GetByKey("session.workspaceSplitRatio"));
+            Assert.AreSame(CoreSettings.FormBounds, registry.GetByKey("session.formBounds"));
             Assert.AreSame(CoreSettings.MaxExportRows, registry.GetByKey("excel.maxExportRows"));
             Assert.IsNull(registry.GetByKey("unknown"));
             Assert.IsNull(registry.GetByKey(null));

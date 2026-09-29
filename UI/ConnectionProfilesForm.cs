@@ -23,24 +23,28 @@ namespace DB2Sheet.UI
         /// <param name="providers">数据源提供程序注册表。</param>
         /// <param name="executionService">连接测试服务。</param>
         /// <param name="operationRunner">连接测试进度运行器。</param>
+        /// <param name="settings">用于记住窗体尺寸的设置存储。</param>
         /// <param name="selectedProfileId">打开时优先选中的方案标识。</param>
         public ConnectionProfilesForm(
             IConnectionProfileRepository repository,
             IProviderRegistry providers,
             IDataSourceExecutionService executionService,
             IOperationRunner operationRunner,
+            ISettingsStore settings,
             string selectedProfileId = null)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _providers = providers ?? throw new ArgumentNullException(nameof(providers));
             _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
 
             Text = AppPresentation.WindowTitle("连接方案管理");
             Width = 720;
             Height = 500;
             MinimumSize = new Size(560, 360);
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.Manual;
+            FormSizeMemory.Attach(this, settings, "Connections");
 
             _profiles = new ListView
             {

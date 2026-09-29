@@ -61,7 +61,8 @@ namespace DB2Sheet.UI
             Width = 900;
             Height = 620;
             MinimumSize = new Size(700, 460);
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.Manual;
+            FormSizeMemory.Attach(this, _settings, "SheetRefresh");
 
             _connectionSelector = new ConnectionProfileSelector(_connections) { Dock = DockStyle.Fill };
             _tasks = new ListView
@@ -210,7 +211,7 @@ namespace DB2Sheet.UI
         private void ManageConnections(object sender, EventArgs e)
         {
             using (ConnectionProfilesForm form = new ConnectionProfilesForm(
-                _connections, _providers, _executionService, _operationRunner, _connectionSelector.SelectedProfileId))
+                _connections, _providers, _executionService, _operationRunner, _settings, _connectionSelector.SelectedProfileId))
             {
                 form.ShowDialog(this);
                 if (!string.IsNullOrWhiteSpace(form.SelectedProfileId))

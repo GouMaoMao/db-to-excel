@@ -131,7 +131,7 @@ namespace DB2Sheet
             ExecuteUiAction(() =>
             {
                 using (ConnectionProfilesForm form = new ConnectionProfilesForm(
-                    _connections, _providers, _executionService, _operationRunner))
+                    _connections, _providers, _executionService, _operationRunner, _settings))
                 {
                     form.ShowDialog();
                 }
