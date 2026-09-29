@@ -27,8 +27,8 @@ namespace DB2Sheet.UI
         {
             Text = AppPresentation.WindowTitle(title);
             Width = 680;
-            Height = 440;
-            MinimumSize = new Size(560, 360);
+            Height = 400;
+            MinimumSize = new Size(560, 320);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             TopMost = true;
@@ -43,10 +43,10 @@ namespace DB2Sheet.UI
                 BackColor = SystemColors.Window,
                 ForeColor = SystemColors.WindowText,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font(AppPresentation.LogFontName, AppPresentation.LogFontSize),
-                WordWrap = false,
+                Font = new Font(AppPresentation.LogFontName, 8F),
+                WordWrap = true,
                 DetectUrls = false,
-                ScrollBars = RichTextBoxScrollBars.Both
+                ScrollBars = RichTextBoxScrollBars.Vertical
             };
             _cancelButton = new Button { Text = "取消", AutoSize = true, Enabled = canCancel };
             _closeButton = new Button { Text = "关闭", AutoSize = true, Enabled = false, DialogResult = DialogResult.OK };

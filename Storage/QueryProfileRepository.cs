@@ -10,8 +10,9 @@ using DB2Sheet.Models;
 
 namespace DB2Sheet.Storage
 {
-    /// <summary>在线程安全的内存集合与 queries.json 之间持久化查询方案。</summary>
+    /// <summary>在线程安全的内存集合与磁盘查询方案文件之间持久化查询方案。</summary>
     /// <remarks>
+    /// 当前版本按“一方案一文件”保存到查询目录；首次启动会兼容读取旧版 queries.json 并迁移。
     /// 读取和保存均使用深复制，防止调用方绕过仓储修改内部状态。保存采用临时文件替换；损坏文件会重命名备份。
     /// </remarks>
     public sealed class QueryProfileRepository : IQueryProfileRepository
@@ -64,7 +65,7 @@ namespace DB2Sheet.Storage
                     string.Equals(item.Id, copy.Id, StringComparison.OrdinalIgnoreCase));
                 if (index >= 0) _profiles[index] = copy;
                 else _profiles.Add(copy);
-                SaveUnsafe();
+                SaveProfileUnsafe(copy);
             }
         }
 
@@ -73,9 +74,12 @@ namespace DB2Sheet.Storage
         {
             lock (_syncRoot)
             {
-                if (_profiles.RemoveAll(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase)) > 0)
+                QueryProfile existing = _profiles.FirstOrDefault(item =>
+                    string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
                 {
-                    SaveUnsafe();
+                    _profiles.Remove(existing);
+                    DeleteProfileUnsafe(existing.Id);
                 }
             }
         }
@@ -83,31 +87,31 @@ namespace DB2Sheet.Storage
         private List<QueryProfile> Load()
         {
             _paths.EnsureDirectories();
-            if (!File.Exists(_paths.QueriesFile)) return new List<QueryProfile>();
+
+            List<QueryProfile> profiles = LoadFromDirectory();
+            if (!File.Exists(_paths.QueriesFile)) return profiles;
+
             try
             {
                 QueryDocument document = _serializer.Deserialize<QueryDocument>(
                     File.ReadAllText(_paths.QueriesFile, Encoding.UTF8));
-                return (document?.Profiles ?? new List<QueryProfile>()).Select(Copy).ToList();
+                foreach (QueryProfile profile in document?.Profiles ?? new List<QueryProfile>())
+                {
+                    QueryProfile normalized = NormalizeLoadedProfile(profile);
+                    int index = profiles.FindIndex(item => string.Equals(item.Id, normalized.Id, StringComparison.OrdinalIgnoreCase));
+                    if (index >= 0) profiles[index] = normalized;
+                    else profiles.Add(normalized);
+                    SaveProfileUnsafe(normalized);
+                }
+
+                ArchiveMigratedLegacyFile();
+                return profiles;
             }
             catch (Exception)
             {
-                File.Move(_paths.QueriesFile, _paths.QueriesFile + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
-                return new List<QueryProfile>();
+                BackupCorrupt(_paths.QueriesFile);
+                return profiles;
             }
-        }
-
-        private void SaveUnsafe()
-        {
-            string temporary = _paths.QueriesFile + ".tmp";
-            string json = _serializer.Serialize(new QueryDocument
-            {
-                Version = 1,
-                Profiles = _profiles.Select(Copy).ToList()
-            });
-            File.WriteAllText(temporary, json, Encoding.UTF8);
-            if (File.Exists(_paths.QueriesFile)) File.Replace(temporary, _paths.QueriesFile, _paths.QueriesFile + ".bak", true);
-            else File.Move(temporary, _paths.QueriesFile);
         }
 
         private static QueryProfile Copy(QueryProfile source)
@@ -126,6 +130,98 @@ namespace DB2Sheet.Storage
                 UpdatedUtc = source.UpdatedUtc,
                 ProviderOptions = new Dictionary<string, string>(source.ProviderOptions ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)
             };
+        }
+
+        private List<QueryProfile> LoadFromDirectory()
+        {
+            List<QueryProfile> profiles = new List<QueryProfile>();
+            if (!Directory.Exists(_paths.QueryProfilesDirectory)) return profiles;
+
+            foreach (string file in Directory.GetFiles(_paths.QueryProfilesDirectory, "*.json"))
+            {
+                try
+                {
+                    QueryProfileDocument document = _serializer.Deserialize<QueryProfileDocument>(File.ReadAllText(file, Encoding.UTF8));
+                    QueryProfile profile = NormalizeLoadedProfile(document?.Profile);
+                    if (profile != null) profiles.Add(profile);
+                }
+                catch (Exception)
+                {
+                    BackupCorrupt(file);
+                }
+            }
+
+            return profiles;
+        }
+
+        private QueryProfile NormalizeLoadedProfile(QueryProfile profile)
+        {
+            if (profile == null) return null;
+
+            QueryProfile copy = Copy(profile);
+            if (string.IsNullOrWhiteSpace(copy.Id)) copy.Id = Guid.NewGuid().ToString("N");
+            if (copy.ProviderOptions == null)
+                copy.ProviderOptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (copy.CreatedUtc == default(DateTime)) copy.CreatedUtc = DateTime.UtcNow;
+            if (copy.UpdatedUtc == default(DateTime)) copy.UpdatedUtc = copy.CreatedUtc;
+            return copy;
+        }
+
+        private void SaveProfileUnsafe(QueryProfile profile)
+        {
+            QueryProfile copy = Copy(profile);
+            copy.ProviderOptions = copy.ProviderOptions ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string filePath = GetProfileFilePath(copy.Id);
+            QueryProfileDocument document = new QueryProfileDocument
+            {
+                Version = 1,
+                Profile = copy
+            };
+            AtomicWrite(filePath, _serializer.Serialize(document));
+        }
+
+        private void DeleteProfileUnsafe(string id)
+        {
+            string filePath = GetProfileFilePath(id);
+            if (File.Exists(filePath)) File.Delete(filePath);
+        }
+
+        private string GetProfileFilePath(string profileId)
+        {
+            if (string.IsNullOrWhiteSpace(profileId))
+                profileId = Guid.NewGuid().ToString("N");
+
+            char[] invalid = Path.GetInvalidFileNameChars();
+            string safe = new string(profileId.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+            return Path.Combine(_paths.QueryProfilesDirectory, safe + ".json");
+        }
+
+        private void AtomicWrite(string path, string content)
+        {
+            _paths.EnsureDirectories();
+            string temporary = path + ".tmp";
+            File.WriteAllText(temporary, content, Encoding.UTF8);
+            if (File.Exists(path)) File.Replace(temporary, path, path + ".bak", true);
+            else File.Move(temporary, path);
+        }
+
+        private void ArchiveMigratedLegacyFile()
+        {
+            string archive = _paths.QueriesFile + ".migrated-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            File.Move(_paths.QueriesFile, archive);
+        }
+
+        private static void BackupCorrupt(string path)
+        {
+            string backup = path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            File.Move(path, backup);
+        }
+
+        /// <summary>定义单个查询方案文件的版本化对象。</summary>
+        private sealed class QueryProfileDocument
+        {
+            public int Version { get; set; }
+            public QueryProfile Profile { get; set; }
         }
 
         /// <summary>定义 queries.json 的版本化根对象。</summary>

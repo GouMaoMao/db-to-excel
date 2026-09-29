@@ -22,6 +22,8 @@ namespace DB2Sheet.Infrastructure
         public string ConnectionsFile => Path.Combine(RootDirectory, "connections.json");
         /// <summary>获取查询方案 JSON 文件路径。</summary>
         public string QueriesFile => Path.Combine(RootDirectory, "queries.json");
+        /// <summary>获取查询方案目录路径；目录内按“一方案一文件”存储查询方案。</summary>
+        public string QueryProfilesDirectory => Path.Combine(RootDirectory, "queries");
         /// <summary>获取用户设置 JSON 文件路径。</summary>
         public string SettingsFile => Path.Combine(RootDirectory, "settings.json");
         /// <summary>获取日志目录路径。</summary>
@@ -31,6 +33,7 @@ namespace DB2Sheet.Infrastructure
         public void EnsureDirectories()
         {
             Directory.CreateDirectory(RootDirectory);
+            Directory.CreateDirectory(QueryProfilesDirectory);
             Directory.CreateDirectory(LogsDirectory);
         }
     }

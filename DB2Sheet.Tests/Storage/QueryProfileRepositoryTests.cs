@@ -149,6 +149,41 @@ namespace DB2Sheet.Tests.Storage
             }
         }
 
+        [TestMethod]
+        public void Save_PersistsEachProfileToDedicatedJsonFile()
+        {
+            using (TemporaryDirectory temporary = new TemporaryDirectory())
+            {
+                ApplicationPaths paths = new ApplicationPaths(temporary.Path);
+                QueryProfileRepository repository = new QueryProfileRepository(paths);
+                repository.Save(CreateProfile("One"));
+                repository.Save(CreateProfile("Two"));
+
+                Assert.AreEqual(2, repository.GetAll().Count);
+                Assert.AreEqual(2, Directory.GetFiles(paths.QueryProfilesDirectory, "*.json").Length);
+            }
+        }
+
+        [TestMethod]
+        public void Constructor_MigratesLegacyQueriesFileToProfileDirectory()
+        {
+            using (TemporaryDirectory temporary = new TemporaryDirectory())
+            {
+                ApplicationPaths paths = new ApplicationPaths(temporary.Path);
+                paths.EnsureDirectories();
+                string legacyJson =
+                    "{\"Version\":1,\"Profiles\":[{\"Id\":\"legacy-1\",\"Name\":\"Legacy\",\"ProviderId\":\"postgresql\",\"ConnectionProfileId\":\"connection-1\",\"QueryText\":\"SELECT 1\",\"TargetSheetName\":\"Sheet1\",\"Description\":\"\",\"ProviderOptions\":{}}]}";
+                File.WriteAllText(paths.QueriesFile, legacyJson);
+
+                QueryProfileRepository repository = new QueryProfileRepository(paths);
+
+                Assert.AreEqual(1, repository.GetAll().Count);
+                Assert.IsFalse(File.Exists(paths.QueriesFile));
+                Assert.AreEqual(1, Directory.GetFiles(paths.QueryProfilesDirectory, "*.json").Length);
+                Assert.AreEqual(1, Directory.GetFiles(temporary.Path, "queries.json.migrated-*").Length);
+            }
+        }
+
         private static QueryProfileRepository CreateRepository(TemporaryDirectory temporary)
         {
             return new QueryProfileRepository(new ApplicationPaths(temporary.Path));

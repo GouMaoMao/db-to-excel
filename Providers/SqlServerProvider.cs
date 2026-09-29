@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.SqlClient;
+using System.Threading;
+using System.Threading.Tasks;
 using DB2Sheet.Models;
 
 namespace DB2Sheet.Providers
@@ -50,6 +52,56 @@ namespace DB2Sheet.Providers
             }
 
             return new SqlConnection(builder.ConnectionString);
+        }
+
+        /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseMetadata>> GetDatabasesAsync(
+            ConnectionProfileSnapshot profile,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseMetadata> databases = new List<DatabaseMetadata>();
+            using (DbConnection connection = CreateConnection(profile))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT [name] FROM sys.databases WHERE [state] = 0 AND HAS_DBACCESS([name]) = 1 ORDER BY [name]";
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                            databases.Add(new DatabaseMetadata(reader.GetString(0)));
+                    }
+                }
+            }
+            return databases.AsReadOnly();
+        }
+
+        /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseObjectMetadata>> GetDatabaseObjectsAsync(
+            ConnectionProfileSnapshot profile,
+            string databaseName,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbConnection connection = CreateConnection(CreateDatabaseSnapshot(profile, databaseName)))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT s.[name], o.[name], o.[type] FROM sys.objects o INNER JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE o.[type] IN ('U', 'V') AND o.is_ms_shipped = 0 ORDER BY s.[name], o.[type], o.[name]";
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            objects.Add(new DatabaseObjectMetadata(
+                                reader.GetString(0),
+                                reader.GetString(1),
+                                reader.GetString(2) == "V" ? DatabaseObjectKind.View : DatabaseObjectKind.Table));
+                        }
+                    }
+                }
+            }
+            return objects.AsReadOnly();
         }
     }
 }

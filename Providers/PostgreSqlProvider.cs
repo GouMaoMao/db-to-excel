@@ -45,6 +45,58 @@ namespace DB2Sheet.Providers
         }
 
         /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseMetadata>> GetDatabasesAsync(
+            ConnectionProfileSnapshot profile,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseMetadata> databases = new List<DatabaseMetadata>();
+            using (DbConnection connection = CreateConnection(profile))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT datname FROM pg_database WHERE datallowconn AND has_database_privilege(datname, 'CONNECT') ORDER BY datname";
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                            databases.Add(new DatabaseMetadata(reader.GetString(0)));
+                    }
+                }
+            }
+            return databases.AsReadOnly();
+        }
+
+        /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseObjectMetadata>> GetDatabaseObjectsAsync(
+            ConnectionProfileSnapshot profile,
+            string databaseName,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbConnection connection = CreateConnection(CreateDatabaseSnapshot(profile, databaseName)))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database() ORDER BY table_schema, table_type, table_name";
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            objects.Add(new DatabaseObjectMetadata(
+                                reader.GetString(0),
+                                reader.GetString(1),
+                                reader.GetString(2).Equals("VIEW", System.StringComparison.OrdinalIgnoreCase)
+                                    ? DatabaseObjectKind.View
+                                    : DatabaseObjectKind.Table));
+                        }
+                    }
+                }
+            }
+            return objects.AsReadOnly();
+        }
+
+        /// <inheritdoc/>
         public override Task ConfigureReadOnlySessionAsync(DbConnection connection, CancellationToken cancellationToken)
         {
             return ExecuteSessionCommandAsync(connection, "SET default_transaction_read_only = on", cancellationToken);

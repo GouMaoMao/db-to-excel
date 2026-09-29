@@ -11,7 +11,7 @@ namespace DB2Sheet.Contracts
     /// <remarks>
     /// 调用方负责释放本接口创建的连接和命令。实现应只创建对象，不应在创建方法中隐式执行查询。
     /// </remarks>
-    public interface IDatabaseQueryProvider : IDataSourceProvider
+    public interface IDatabaseQueryProvider : IDataSourceProvider, IDatabaseMetadataProvider
     {
         /// <summary>根据不可变连接快照创建尚未使用的数据库连接。</summary>
         /// <param name="profile">包含提供程序标识和连接参数的快照。</param>

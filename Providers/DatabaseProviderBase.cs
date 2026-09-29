@@ -125,6 +125,30 @@ namespace DB2Sheet.Providers
         public abstract DbConnection CreateConnection(ConnectionProfileSnapshot profile);
 
         /// <inheritdoc/>
+        public abstract Task<IReadOnlyList<DatabaseMetadata>> GetDatabasesAsync(
+            ConnectionProfileSnapshot profile,
+            CancellationToken cancellationToken);
+
+        /// <inheritdoc/>
+        public abstract Task<IReadOnlyList<DatabaseObjectMetadata>> GetDatabaseObjectsAsync(
+            ConnectionProfileSnapshot profile,
+            string databaseName,
+            CancellationToken cancellationToken);
+
+        /// <inheritdoc/>
+        public virtual ConnectionProfileSnapshot CreateDatabaseSnapshot(
+            ConnectionProfileSnapshot profile,
+            string databaseName)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (string.IsNullOrWhiteSpace(databaseName)) throw new ArgumentException("数据库名称不能为空。", nameof(databaseName));
+
+            Dictionary<string, string> parameters = profile.Parameters.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
+            parameters[DatabaseParameterKeys.Database] = databaseName;
+            return new ConnectionProfileSnapshot(profile.Id, profile.Name, profile.ProviderId, parameters);
+        }
+
+        /// <inheritdoc/>
         public virtual DbCommand CreateCommand(DbConnection connection, string queryText, int timeoutSeconds)
         {
             DbCommand command = connection.CreateCommand();

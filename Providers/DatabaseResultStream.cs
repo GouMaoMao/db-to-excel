@@ -145,7 +145,6 @@ namespace DB2Sheet.Providers
             if (await _reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 IsTruncated = true;
-                Cancel();
             }
             IsCompleted = true;
         }

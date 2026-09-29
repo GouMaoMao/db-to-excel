@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Data.SQLite;
+using System.IO;
 using DB2Sheet.Models;
 
 namespace DB2Sheet.Providers
@@ -35,6 +36,60 @@ namespace DB2Sheet.Providers
                 FailIfMissing = true
             };
             return new SQLiteConnection(builder.ConnectionString);
+        }
+
+        /// <inheritdoc/>
+        public override Task<IReadOnlyList<DatabaseMetadata>> GetDatabasesAsync(
+            ConnectionProfileSnapshot profile,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string path = profile.GetValue(DatabaseParameterKeys.FilePath);
+            IReadOnlyList<DatabaseMetadata> databases = new List<DatabaseMetadata>
+            {
+                new DatabaseMetadata(Path.GetFileNameWithoutExtension(path))
+            }.AsReadOnly();
+            return Task.FromResult(databases);
+        }
+
+        /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseObjectMetadata>> GetDatabaseObjectsAsync(
+            ConnectionProfileSnapshot profile,
+            string databaseName,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbConnection connection = CreateConnection(profile))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name";
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            objects.Add(new DatabaseObjectMetadata(
+                                "main",
+                                reader.GetString(0),
+                                reader.GetString(1) == "view" ? DatabaseObjectKind.View : DatabaseObjectKind.Table));
+                        }
+                    }
+                }
+            }
+            return objects.AsReadOnly();
+        }
+
+        /// <inheritdoc/>
+        public override ConnectionProfileSnapshot CreateDatabaseSnapshot(
+            ConnectionProfileSnapshot profile,
+            string databaseName)
+        {
+            if (profile == null) throw new System.ArgumentNullException(nameof(profile));
+            Dictionary<string, string> parameters = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, string> parameter in profile.Parameters)
+                parameters[parameter.Key] = parameter.Value;
+            return new ConnectionProfileSnapshot(profile.Id, profile.Name, profile.ProviderId, parameters);
         }
 
         /// <inheritdoc/>

@@ -12,8 +12,8 @@ namespace DB2Sheet.UI
         public const float DefaultFontSize = 9F;
         public const string LogFontName = "Consolas";
         public const float LogFontSize = 9F;
-        public const string CodeFontName = "Consolas";
-        public const float CodeFontSize = 10F;
+        public const string CodeFontName = "Microsoft YaHei UI";
+        public const float CodeFontSize = 9.5F;
 
         /// <summary>生成统一格式的功能窗体标题。</summary>
         /// <param name="featureName">功能名称；为空时只返回产品展示名称。</param>

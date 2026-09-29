@@ -45,6 +45,62 @@ namespace DB2Sheet.Providers
         }
 
         /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseMetadata>> GetDatabasesAsync(
+            ConnectionProfileSnapshot profile,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseMetadata> databases = new List<DatabaseMetadata>();
+            using (DbConnection connection = CreateConnection(profile))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA ORDER BY SCHEMA_NAME";
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                            databases.Add(new DatabaseMetadata(reader.GetString(0)));
+                    }
+                }
+            }
+            return databases.AsReadOnly();
+        }
+
+        /// <inheritdoc/>
+        public override async Task<IReadOnlyList<DatabaseObjectMetadata>> GetDatabaseObjectsAsync(
+            ConnectionProfileSnapshot profile,
+            string databaseName,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbConnection connection = CreateConnection(profile))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (DbCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @database ORDER BY TABLE_TYPE, TABLE_NAME";
+                    DbParameter parameter = command.CreateParameter();
+                    parameter.ParameterName = "@database";
+                    parameter.Value = databaseName;
+                    command.Parameters.Add(parameter);
+                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            objects.Add(new DatabaseObjectMetadata(
+                                reader.GetString(0),
+                                reader.GetString(1),
+                                reader.GetString(2).Equals("VIEW", System.StringComparison.OrdinalIgnoreCase)
+                                    ? DatabaseObjectKind.View
+                                    : DatabaseObjectKind.Table));
+                        }
+                    }
+                }
+            }
+            return objects.AsReadOnly();
+        }
+
+        /// <inheritdoc/>
         public override Task ConfigureReadOnlySessionAsync(DbConnection connection, CancellationToken cancellationToken)
         {
             return ExecuteSessionCommandAsync(connection, "SET SESSION TRANSACTION READ ONLY", cancellationToken);

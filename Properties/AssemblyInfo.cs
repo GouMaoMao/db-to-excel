@@ -9,9 +9,9 @@ using System.Security;
 [assembly: AssemblyTitle("DB2Sheet")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("元气森林（北京）食品科技集团有限公司")]
+[assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("DB2Sheet")]
-[assembly: AssemblyCopyright("Copyright © 元气森林（北京）食品科技集团有限公司 2026")]
+[assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -19,6 +19,7 @@ using System.Security;
 //对 COM 组件不可见。  如果需要从 COM 访问此程序集中的类型，
 //请将此类型的 ComVisible 特性设置为 true。
 [assembly: ComVisible(false)]
+[assembly: InternalsVisibleTo("DB2Sheet.Tests")]
 
 // 如果此项目向 COM 公开，则下列 GUID 用于类型库的 ID
 [assembly: Guid("b01ba5cc-a1f1-4198-b9ef-5ed80357c178")]

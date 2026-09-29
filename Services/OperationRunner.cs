@@ -24,7 +24,7 @@ namespace DB2Sheet.Services
         }
 
         /// <inheritdoc/>
-        public T Run<T>(
+        public async Task<T> RunAsync<T>(
             IWin32Window owner,
             string title,
             bool canCancel,
@@ -36,6 +36,8 @@ namespace DB2Sheet.Services
             using (CancellationTokenSource cancellation = new CancellationTokenSource())
             using (OperationProgressForm form = new OperationProgressForm(title, canCancel))
             {
+                TaskCompletionSource<T> completion = new TaskCompletionSource<T>();
+
                 form.CancelRequested += (sender, args) => cancellation.Cancel();
                 Progress<OperationProgress> progress = new Progress<OperationProgress>(value =>
                 {
@@ -43,26 +45,54 @@ namespace DB2Sheet.Services
                     form.UpdateProgress(value);
                 });
 
-                Task<T> task;
-                try
+                form.Shown += async (sender, args) =>
                 {
-                    task = operation(progress, cancellation.Token);
-                }
-                catch (Exception exception)
-                {
-                    task = Task.FromException<T>(exception);
-                }
-
-                task.ContinueWith(completed =>
-                {
-                    Exception error = completed.IsFaulted ? completed.Exception?.GetBaseException() : null;
-                    form.Complete(error, completed.IsCanceled);
-                    if (error != null) _logger.Write(LogSeverity.Error, title + "失败。", operationId, error);
-                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext());
+                    try
+                    {
+                        T result = await operation(progress, cancellation.Token);
+                        form.Complete(null, false);
+                        completion.TrySetResult(result);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        form.Complete(null, true);
+                        completion.TrySetCanceled();
+                    }
+                    catch (Exception exception)
+                    {
+                        form.Complete(exception, false);
+                        _logger.Write(LogSeverity.Error, title + "失败。", operationId, exception);
+                        completion.TrySetException(exception);
+                    }
+                };
 
                 form.ShowDialog(owner);
-                return task.GetAwaiter().GetResult();
+                return await completion.Task;
             }
+        }
+
+        /// <inheritdoc/>
+        public async Task RunAsync(
+            IWin32Window owner,
+            string title,
+            bool canCancel,
+            Func<IProgress<OperationProgress>, CancellationToken, Task> operation)
+        {
+            await RunAsync<object>(owner, title, canCancel, async (progress, cancellationToken) =>
+            {
+                await operation(progress, cancellationToken);
+                return null;
+            });
+        }
+
+        /// <inheritdoc/>
+        public T Run<T>(
+            IWin32Window owner,
+            string title,
+            bool canCancel,
+            Func<IProgress<OperationProgress>, CancellationToken, Task<T>> operation)
+        {
+            return RunAsync(owner, title, canCancel, operation).GetAwaiter().GetResult();
         }
 
         /// <inheritdoc/>
@@ -72,11 +102,7 @@ namespace DB2Sheet.Services
             bool canCancel,
             Func<IProgress<OperationProgress>, CancellationToken, Task> operation)
         {
-            Run<object>(owner, title, canCancel, async (progress, cancellationToken) =>
-            {
-                await operation(progress, cancellationToken).ConfigureAwait(false);
-                return null;
-            });
+            RunAsync(owner, title, canCancel, operation).GetAwaiter().GetResult();
         }
     }
 }

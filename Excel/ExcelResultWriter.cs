@@ -92,7 +92,7 @@ namespace DB2Sheet.Excel
             object[,] headers = new object[1, columnCount];
             for (int column = 0; column < columnCount; column++)
             {
-                headers[0, column] = result.Columns[column].Name;
+                headers[0, column] = FormatHeaderText(result.Columns[column]);
             }
 
             ExcelInterop.Range start = null;
@@ -132,6 +132,15 @@ namespace DB2Sheet.Excel
                 Release(ref end);
                 Release(ref start);
             }
+        }
+
+        private static string FormatHeaderText(ResultColumn column)
+        {
+            if (column == null) return string.Empty;
+            Type dataType = column.GetDataType();
+            string typeName = dataType == null ? string.Empty : dataType.Name;
+            if (string.IsNullOrWhiteSpace(typeName)) return column.Name;
+            return string.Format("{0}{1}{2}", column.Name, Environment.NewLine, typeName);
         }
 
         private static void ValidateSheetName(string name)
