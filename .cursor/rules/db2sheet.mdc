@@ -1,0 +1,10 @@
+---
+description: DB2Sheet 项目约定的入口
+alwaysApply: true
+---
+
+# 项目约定
+
+修改本仓库前，遵守 `.github/copilot-instructions.md`。约定正文只在该文件，不要在别处再写一份。
+
+用户主目录 `~\.copilot\plans` 里的旧计划不是当前规格。与仓库约定或当前代码冲突时，以 `.github/copilot-instructions.md` 和当前代码为准。
