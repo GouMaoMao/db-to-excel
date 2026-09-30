@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Threading.Tasks;
@@ -22,6 +23,7 @@ namespace DB2Sheet.UI
         private readonly Button _detectJavaButton;
         private readonly Button _openDownloadButton;
         private readonly Label _javaStatus;
+        private readonly List<Label> _guideLabels = new List<Label>();
 
         /// <summary>创建 JDBC 环境窗体。</summary>
         /// <param name="store">环境设置存储。</param>
@@ -33,8 +35,8 @@ namespace DB2Sheet.UI
 
             Text = AppPresentation.WindowTitle("JDBC 环境");
             Width = 720;
-            Height = 400;
-            MinimumSize = new Size(560, 340);
+            Height = 520;
+            MinimumSize = new Size(560, 460);
             StartPosition = FormStartPosition.Manual;
             FormSizeMemory.Attach(this, settings, "JdbcEnvironment");
 
@@ -64,9 +66,9 @@ namespace DB2Sheet.UI
                 javaLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
 
-            javaLayout.Controls.Add(CreateHint(
-                "本页只配置运行 JDBC 所需的 Java（JDK 8 或更高）。请先点击「检测 Java」自动搜索本机；" +
-                "若未找到，再点「打开 JDK 下载页」安装后重新检测。插件不附带 Java。"), 0, 0);
+            Control guide = CreateGuide();
+            guide.SizeChanged += GuideSizeChanged;
+            javaLayout.Controls.Add(guide, 0, 0);
             FlowLayoutPanel detectActions = CreateActions();
             detectActions.Controls.Add(_detectJavaButton);
             javaLayout.Controls.Add(detectActions, 0, 1);
@@ -216,15 +218,81 @@ namespace DB2Sheet.UI
             };
         }
 
-        private static Label CreateHint(string text)
+        /// <summary>拼出三段引导：为何需要 Java、何时安装、以及逐步操作。步骤各占一行。</summary>
+        /// <returns>随窗体宽度换行的说明面板。调用方把它放进 Java 分组，并在尺寸变化时收窄标签。</returns>
+        private Control CreateGuide()
         {
-            return new Label
+            TableLayoutPanel guide = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 1,
+                RowCount = 6,
+                Margin = new Padding(0, 0, 0, 4)
+            };
+            guide.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int index = 0; index < 6; index++)
+            {
+                guide.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
+
+            AddGuideSection(guide, 0, "为什么需要 Java？",
+                "只有 JDBC 连接需要本机 Java（JDK 8 或更高）。使用 MySQL、SQL Server、PostgreSQL、SQLite 等内置连接时，不必安装 Java。",
+                first: true);
+            AddGuideSection(guide, 2, "什么时候需要安装？",
+                "连接方式是 JDBC，且本机还没有 Java；或者已有 Java，但版本低于 JDK 8。",
+                first: false);
+            AddGuideSection(guide, 4, "操作步骤：",
+                "1. 点击「检测 Java」，自动搜索本机已安装的 Java。" + Environment.NewLine +
+                "2. 若未找到，可点「浏览…」指定 java.exe，或点「打开 JDK 下载页」自行安装。" + Environment.NewLine +
+                "3. 安装完成后，再点一次「检测 Java」。",
+                first: false);
+            return guide;
+        }
+
+        /// <summary>向引导面板追加一个加粗小标题和一段正文。小标题使用独立字体，由标签在释放时一并释放。</summary>
+        /// <param name="guide">引导面板。</param>
+        /// <param name="row">小标题所在行；正文占用下一行。</param>
+        /// <param name="title">加粗小标题。</param>
+        /// <param name="body">正文。操作步骤在文本内用换行分成多行。</param>
+        /// <param name="first">是否为第一段。后续段落与上一段之间留出空行。</param>
+        private void AddGuideSection(TableLayoutPanel guide, int row, string title, string body, bool first)
+        {
+            Label heading = CreateWrappingLabel(title);
+            heading.Font = new Font(Font, FontStyle.Bold);
+            heading.Margin = new Padding(0, first ? 0 : 10, 0, 2);
+            Label text = CreateWrappingLabel(body);
+            text.Margin = new Padding(0, 0, 0, 2);
+            guide.Controls.Add(heading, 0, row);
+            guide.Controls.Add(text, 0, row + 1);
+        }
+
+        /// <summary>创建会随引导面板宽度折行的标签，并登记以便在面板变窄时更新最大宽度。</summary>
+        /// <param name="text">标签文本。</param>
+        /// <returns>自动高度、限制宽度的标签。</returns>
+        private Label CreateWrappingLabel(string text)
+        {
+            Label label = new Label
             {
                 AutoSize = true,
-                MaximumSize = new Size(1000, 0),
-                Text = text,
-                Padding = new Padding(0, 0, 0, 8)
+                MaximumSize = new Size(640, 0),
+                Text = text
             };
+            _guideLabels.Add(label);
+            return label;
+        }
+
+        /// <summary>把引导文字的最大宽度收成面板客户区宽度，避免长句横向撑出窗体。</summary>
+        private void GuideSizeChanged(object sender, EventArgs e)
+        {
+            Control host = sender as Control;
+            if (host == null || host.ClientSize.Width <= 0) return;
+            int width = host.ClientSize.Width;
+            foreach (Label label in _guideLabels)
+            {
+                if (label.MaximumSize.Width == width) continue;
+                label.MaximumSize = new Size(width, 0);
+            }
         }
 
         private static Control CreatePathRow(Control editor, params Button[] buttons)
