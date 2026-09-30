@@ -96,17 +96,58 @@ namespace DB2Sheet.Models
     /// <summary>表示从 SQL Sheet 单元格解析出的一个批量刷新任务。</summary>
     public sealed class RefreshTaskDefinition
     {
-        /// <summary>创建刷新任务定义。</summary>
+        /// <summary>创建使用默认写入选项的刷新任务定义。</summary>
         /// <param name="id">任务标识；为空时自动生成。</param>
         /// <param name="targetSheetName">目标工作表名称。</param>
         /// <param name="queryText">要执行的 SQL。</param>
         /// <param name="sourceColumn">任务在 SQL Sheet 中的源列号。</param>
         public RefreshTaskDefinition(string id, string targetSheetName, string queryText, int sourceColumn)
+            : this(id, targetSheetName, queryText, sourceColumn, string.Empty, "A1", 1, 1, true, null, string.Empty, false)
+        {
+        }
+
+        /// <summary>创建带首行特殊参数的刷新任务定义。</summary>
+        /// <param name="id">任务标识；为空时自动生成。</param>
+        /// <param name="targetSheetName">目标工作表名称，不含 <c>//</c> 后的参数。</param>
+        /// <param name="queryText">要执行的 SQL，包含前置注释。</param>
+        /// <param name="sourceColumn">任务在 SQL Sheet 中的源列号。</param>
+        /// <param name="optionsText"><c>//</c> 后面的特殊参数原文。没有参数时为空。</param>
+        /// <param name="startCell">结果表左上角单元格，例如 A1。</param>
+        /// <param name="startRow">起始单元格的行号，从 1 开始。</param>
+        /// <param name="startColumn">起始单元格的列号，从 1 开始。</param>
+        /// <param name="clearExtraColumns">是否清空结果没有覆盖到的原数据列。</param>
+        /// <param name="optionsError">已知参数无法解析时的说明。没有错误时为空。</param>
+        /// <param name="summary">SQL 命令前的注释摘要。没有注释时为空。</param>
+        /// <param name="optionsNormalized">特殊参数在解析时被规范成可写回的文本时为 true。</param>
+        /// <param name="sqlCommandRow">SQL 命令在 SQL 页中的起始行号，从 1 开始。整段都是注释时为第一处正文行。</param>
+        public RefreshTaskDefinition(
+            string id,
+            string targetSheetName,
+            string queryText,
+            int sourceColumn,
+            string optionsText,
+            string startCell,
+            int startRow,
+            int startColumn,
+            bool clearExtraColumns,
+            string optionsError,
+            string summary,
+            bool optionsNormalized,
+            int sqlCommandRow = 0)
         {
             Id = id ?? Guid.NewGuid().ToString("N");
             TargetSheetName = targetSheetName ?? string.Empty;
             QueryText = queryText ?? string.Empty;
             SourceColumn = sourceColumn;
+            OptionsText = optionsText ?? string.Empty;
+            StartCell = string.IsNullOrWhiteSpace(startCell) ? "A1" : startCell;
+            StartRow = startRow < 1 ? 1 : startRow;
+            StartColumnIndex = startColumn < 1 ? 1 : startColumn;
+            ClearExtraColumns = clearExtraColumns;
+            OptionsError = optionsError ?? string.Empty;
+            Summary = summary ?? string.Empty;
+            OptionsNormalized = optionsNormalized;
+            SqlCommandRow = sqlCommandRow < 1 ? 0 : sqlCommandRow;
         }
 
         /// <summary>获取任务标识。</summary>
@@ -117,5 +158,23 @@ namespace DB2Sheet.Models
         public string QueryText { get; }
         /// <summary>获取任务所在的源列号。</summary>
         public int SourceColumn { get; }
+        /// <summary>获取首行 <c>//</c> 后面的特殊参数文本。没有参数时为空。</summary>
+        public string OptionsText { get; }
+        /// <summary>获取结果表左上角单元格。</summary>
+        public string StartCell { get; }
+        /// <summary>获取起始单元格行号，从 1 开始。</summary>
+        public int StartRow { get; }
+        /// <summary>获取起始单元格列号，从 1 开始。</summary>
+        public int StartColumnIndex { get; }
+        /// <summary>获取是否清空结果没有覆盖到的原数据列。</summary>
+        public bool ClearExtraColumns { get; }
+        /// <summary>获取已知特殊参数的解析错误。没有错误时为空。</summary>
+        public string OptionsError { get; }
+        /// <summary>获取 SQL 命令前的注释摘要。</summary>
+        public string Summary { get; }
+        /// <summary>获取特殊参数是否在解析时被规范，需要写回 SQL 页。</summary>
+        public bool OptionsNormalized { get; }
+        /// <summary>获取 SQL 命令在 SQL 页中的起始行号。从 1 开始；没有正文时为 0。</summary>
+        public int SqlCommandRow { get; }
     }
 }

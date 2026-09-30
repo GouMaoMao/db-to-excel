@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
@@ -28,7 +27,7 @@ namespace DB2Sheet.UI
         private readonly ISettingsStore _settings;
         private readonly Action _openJdbcEnvironment;
         private readonly ExcelInterop.Workbook _workbook;
-        private readonly TreeView _connectionsTree;
+        private readonly DatabaseConnectionTree _connectionTree;
         private readonly ListBox _queryProfiles;
         private readonly SqlEditorControl _sql;
         private readonly DataGridView _preview;
@@ -36,21 +35,13 @@ namespace DB2Sheet.UI
         private readonly Label _sqlQueryNameLabel;
         private readonly ToolStripStatusLabel _status;
         private readonly SplitContainer _resultsSplit;
-        private readonly ImageList _treeImages;
         private readonly List<Image> _actionIcons = new List<Image>();
         private readonly Image _queryScriptIcon;
-        private readonly ContextMenuStrip _connectionNodeMenu;
-        private readonly ContextMenuStrip _connectionBlankMenu;
-        private readonly ContextMenuStrip _treeNodeCopyMenu;
         private readonly ContextMenuStrip _queryProfileMenu;
         private readonly Font _previewHeaderTypeFont;
-        private Font _treeCommentFont;
-        private Font _treeActiveNameFont;
         private readonly ToolStripMenuItem _editConnectionMenuItem;
         private readonly ToolStripMenuItem _deleteConnectionMenuItem;
         private readonly ToolStripMenuItem _setCurrentConnectionMenuItem;
-        private ConnectionProfileSnapshot _activeConnection;
-        private string _activeDatabase;
         private string _currentQueryId;
         private string _currentQueryName;
         private string _currentTargetSheet = "查询结果";
@@ -59,48 +50,6 @@ namespace DB2Sheet.UI
         private bool _hasPreview;
         private bool _applyingWorkspaceSplit;
         private bool _userDraggingWorkspaceSplit;
-        private CancellationTokenSource _metadataCancellation;
-
-        private Task OnUiAsync(Action action)
-        {
-            if (action == null) throw new ArgumentNullException(nameof(action));
-            if (IsDisposed) return Task.CompletedTask;
-
-            if (!InvokeRequired)
-            {
-                action();
-                return Task.CompletedTask;
-            }
-
-            TaskCompletionSource<object> completion = new TaskCompletionSource<object>();
-            BeginInvoke(new Action(() =>
-            {
-                try
-                {
-                    if (!IsDisposed) action();
-                    completion.SetResult(null);
-                }
-                catch (Exception exception)
-                {
-                    completion.SetException(exception);
-                }
-            }));
-            return completion.Task;
-        }
-
-        private void OnUi(Action action)
-        {
-            if (action == null) throw new ArgumentNullException(nameof(action));
-            if (IsDisposed) return;
-
-            if (!InvokeRequired)
-            {
-                action();
-                return;
-            }
-
-            BeginInvoke(action);
-        }
 
         /// <summary>创建 SQL 查询编辑窗体。</summary>
         /// <param name="queries">查询方案仓储。</param>
@@ -144,15 +93,8 @@ namespace DB2Sheet.UI
             StartPosition = FormStartPosition.Manual;
             FormSizeMemory.Attach(this, _settings, "QueryEditor");
 
-            _treeImages = DatabaseTreeImageCatalog.CreateImageList();
-            _connectionsTree = new TreeView
-            {
-                Dock = DockStyle.Fill,
-                DrawMode = TreeViewDrawMode.OwnerDrawText,
-                HideSelection = false,
-                ImageList = _treeImages,
-                ShowNodeToolTips = true
-            };
+            _connectionTree = new DatabaseConnectionTree(
+                _connections, _providers, _executionService, _operationRunner, _settings, _openJdbcEnvironment);
             _queryScriptIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_script.png");
             int queryLineHeight = TextRenderer.MeasureText("方案", Font).Height;
             _queryProfiles = new ListBox
@@ -206,16 +148,13 @@ namespace DB2Sheet.UI
                 Text = "当前方案：未保存"
             };
             _status = new ToolStripStatusLabel { Text = "就绪。", ForeColor = SystemColors.GrayText, Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            _connectionNodeMenu = BuildConnectionNodeMenu();
-            _connectionBlankMenu = BuildConnectionBlankMenu();
-            _treeNodeCopyMenu = BuildTreeNodeCopyMenu();
             _queryProfileMenu = BuildQueryProfileMenu();
 
-            _setCurrentConnectionMenuItem = new ToolStripMenuItem("设置为当前连接", null, (sender, args) => SetSelectedConnectionAsCurrent());
-            _editConnectionMenuItem = new ToolStripMenuItem("编辑连接", null, (sender, args) => EditSelectedConnection());
-            _deleteConnectionMenuItem = new ToolStripMenuItem("删除连接", null, (sender, args) => DeleteSelectedConnection());
-            ToolStripMenuItem newConnectionMenuItem = new ToolStripMenuItem("新建连接", null, (sender, args) => CreateConnection());
-            ToolStripMenuItem refreshConnectionMenuItem = new ToolStripMenuItem("刷新", null, (sender, args) => RefreshSelectedConnection());
+            _setCurrentConnectionMenuItem = new ToolStripMenuItem("设置为当前连接", null, (sender, args) => _connectionTree.SetSelectedAsCurrent());
+            _editConnectionMenuItem = new ToolStripMenuItem("编辑连接", null, (sender, args) => _connectionTree.EditSelectedConnection());
+            _deleteConnectionMenuItem = new ToolStripMenuItem("删除连接", null, (sender, args) => _connectionTree.DeleteSelectedConnection());
+            ToolStripMenuItem newConnectionMenuItem = new ToolStripMenuItem("新建连接", null, (sender, args) => _connectionTree.CreateConnection());
+            ToolStripMenuItem refreshConnectionMenuItem = new ToolStripMenuItem("刷新", null, (sender, args) => _connectionTree.RefreshSelected());
             ToolStripMenuItem connectionMenu = new ToolStripMenuItem("连接");
             connectionMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
@@ -298,7 +237,7 @@ namespace DB2Sheet.UI
                 Dock = DockStyle.Fill,
                 Orientation = Orientation.Horizontal
             };
-            leftSplit.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionsTree));
+            leftSplit.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionTree));
             leftSplit.Panel2.Controls.Add(SectionPanel("查询方案", BuildQueryProfilesPanel()));
 
             SplitContainer workspace = new SplitContainer
@@ -326,13 +265,13 @@ namespace DB2Sheet.UI
             _queryProfiles.DrawItem += QueryProfilesDrawItem;
             _preview.RowPostPaint += PreviewRowPostPaint;
             _preview.CellPainting += PreviewCellPainting;
-            _connectionsTree.DrawNode += ConnectionsTreeDrawNode;
-            _connectionsTree.NodeMouseClick += ConnectionsTreeNodeMouseClick;
-            _connectionsTree.MouseUp += ConnectionsTreeMouseUp;
-            _connectionsTree.NodeMouseDoubleClick += ConnectionsTreeNodeMouseDoubleClick;
-            _connectionsTree.BeforeExpand += ConnectionsTreeBeforeExpand;
-            _connectionsTree.AfterSelect += ConnectionsTreeAfterSelect;
-            _connections.Changed += ConnectionsChanged;
+            _connectionTree.NoticeChanged += (sender, args) =>
+            {
+                _status.Text = _connectionTree.Notice;
+                UpdateQueryInfo();
+            };
+            _connectionTree.SelectionChanged += (sender, args) => UpdateConnectionMenuState();
+            _connectionTree.ActiveConnectionChanged += (sender, args) => UpdateQueryInfo();
             FormClosed += QueryEditorFormFormClosed;
             workspace.SizeChanged += (sender, args) =>
             {
@@ -368,8 +307,6 @@ namespace DB2Sheet.UI
                 }));
             };
 
-            RestoreActiveConnection();
-            ReloadConnectionsTree();
             ReloadQueries(null, false);
             NewQuery();
             UpdateQueryInfo();
@@ -536,8 +473,8 @@ namespace DB2Sheet.UI
                 }
             }
 
-            if (connectionName == "未选择" && !string.IsNullOrWhiteSpace(_activeConnection?.Name))
-                connectionName = _activeConnection.Name;
+            if (connectionName == "未选择" && !string.IsNullOrWhiteSpace(_connectionTree.ActiveConnection?.Name))
+                connectionName = _connectionTree.ActiveConnection.Name;
 
             string savedTime = _currentSavedUtc.HasValue
                 ? _currentSavedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
@@ -820,30 +757,10 @@ namespace DB2Sheet.UI
             }
         }
 
-        private void RestoreActiveConnection()
-        {
-            string id = _settings.Get(CoreSettings.ActiveConnectionId);
-            if (string.IsNullOrWhiteSpace(id))
-                return;
-
-            ConnectionProfileSnapshot connection = _connections.GetById(id);
-            if (connection == null)
-            {
-                RememberActiveConnection(null);
-                return;
-            }
-
-            _activeConnection = connection;
-        }
-
-        private void RememberActiveConnection(ConnectionProfileSnapshot connection)
-        {
-            _settings.Set(CoreSettings.ActiveConnectionId, connection?.Id ?? string.Empty);
-        }
 
         private bool ValidateInputs(bool requireTarget, out ConnectionProfileSnapshot connection, string sqlText = null)
         {
-            connection = ResolveExecutionConnection();
+            connection = _connectionTree.ExecutionConnection();
             string sql = sqlText ?? _sql.SqlText;
             string message = null;
             if (connection == null) message = "请选择连接方案。";
@@ -861,84 +778,6 @@ namespace DB2Sheet.UI
             return dataType == null ? string.Empty : dataType.Name;
         }
 
-        private ContextMenuStrip BuildConnectionNodeMenu()
-        {
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("设置为当前连接", null, (sender, args) => SetSelectedConnectionAsCurrent());
-            menu.Items.Add("编辑连接", null, (sender, args) => EditSelectedConnection());
-            menu.Items.Add("新建连接", null, (sender, args) => CreateConnection());
-            menu.Items.Add("删除连接", null, (sender, args) => DeleteSelectedConnection());
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("复制名称", null, (sender, args) => CopySelectedNodeName());
-            menu.Items.Add("刷新", null, (sender, args) => RefreshSelectedConnection());
-            return menu;
-        }
-
-        private ContextMenuStrip BuildConnectionBlankMenu()
-        {
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("新建连接", null, (sender, args) => CreateConnection());
-            menu.Items.Add("刷新连接列表", null, (sender, args) => ReloadConnectionsTree());
-            return menu;
-        }
-
-        /// <summary>库、表、视图等非连接根节点的右键菜单。</summary>
-        private ContextMenuStrip BuildTreeNodeCopyMenu()
-        {
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("复制名称", null, (sender, args) => CopySelectedNodeName());
-            return menu;
-        }
-
-        /// <summary>把当前选中树节点的名称复制到剪贴板。</summary>
-        private void CopySelectedNodeName()
-        {
-            TreeNode node = _connectionsTree.SelectedNode;
-            if (node == null) return;
-            string name = ResolveNodeCopyName(node);
-            if (string.IsNullOrEmpty(name)) return;
-            try
-            {
-                Clipboard.SetText(name);
-            }
-            catch (Exception)
-            {
-                // 剪贴板偶发占用；复制失败不打断操作。
-            }
-        }
-
-        /// <summary>表或视图节点显示编码，有注释时在后面空两格带上注释。</summary>
-        /// <param name="item">数据库对象。</param>
-        /// <returns>树节点标题。没有注释时只有编码。</returns>
-        private static string FormatObjectCaption(DatabaseObjectMetadata item)
-        {
-            if (item == null) return string.Empty;
-            if (string.IsNullOrWhiteSpace(item.Comment)) return item.Name ?? string.Empty;
-            return (item.Name ?? string.Empty) + "  " + item.Comment.Trim();
-        }
-
-        /// <summary>按节点类型取可复制的干净名称（连接不含「 [当前]」后缀）。</summary>
-        private static string ResolveNodeCopyName(TreeNode node)
-        {
-            if (node == null) return string.Empty;
-            if (node.Tag is ConnectionProfileSnapshot connection)
-            {
-                return connection.Name ?? string.Empty;
-            }
-
-            if (node.Tag is DatabaseNodeTag databaseTag)
-            {
-                return databaseTag.DatabaseName ?? string.Empty;
-            }
-
-            if (node.Tag is DatabaseObjectMetadata objectMetadata)
-            {
-                return objectMetadata.Name ?? string.Empty;
-            }
-
-            return node.Text ?? string.Empty;
-        }
-
         private ContextMenuStrip BuildQueryProfileMenu()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
@@ -948,157 +787,18 @@ namespace DB2Sheet.UI
             return menu;
         }
 
-        private void ConnectionsChanged(object sender, ConnectionProfilesChangedEventArgs e)
-        {
-            if (IsDisposed) return;
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action(() => ReloadConnectionsTree(e?.ProfileId)));
-                return;
-            }
-            ReloadConnectionsTree(e?.ProfileId);
-        }
-
         private void QueryEditorFormFormClosed(object sender, FormClosedEventArgs e)
         {
-            _metadataCancellation?.Cancel();
-            _metadataCancellation?.Dispose();
-            _metadataCancellation = null;
-            _connections.Changed -= ConnectionsChanged;
-            _connectionsTree.DrawNode -= ConnectionsTreeDrawNode;
-            _connectionsTree.NodeMouseClick -= ConnectionsTreeNodeMouseClick;
-            _connectionsTree.MouseUp -= ConnectionsTreeMouseUp;
-            _connectionsTree.NodeMouseDoubleClick -= ConnectionsTreeNodeMouseDoubleClick;
-            _connectionsTree.BeforeExpand -= ConnectionsTreeBeforeExpand;
-            _connectionsTree.AfterSelect -= ConnectionsTreeAfterSelect;
             _queryProfiles.MouseUp -= QueryProfilesMouseUp;
             _queryProfiles.DrawItem -= QueryProfilesDrawItem;
             _preview.RowPostPaint -= PreviewRowPostPaint;
             _preview.CellPainting -= PreviewCellPainting;
-            _connectionNodeMenu.Dispose();
-            _connectionBlankMenu.Dispose();
             _queryProfileMenu.Dispose();
-            _treeImages.Dispose();
             foreach (Image icon in _actionIcons)
                 icon.Dispose();
             _actionIcons.Clear();
             _queryScriptIcon.Dispose();
             _previewHeaderTypeFont.Dispose();
-            if (_treeCommentFont != null)
-            {
-                _treeCommentFont.Dispose();
-                _treeCommentFont = null;
-            }
-            if (_treeActiveNameFont != null)
-            {
-                _treeActiveNameFont.Dispose();
-                _treeActiveNameFont = null;
-            }
-        }
-
-        /// <summary>自绘两类节点：当前连接根节点，以及带注释的表和视图。</summary>
-        /// <remarks>
-        /// 当前连接的名称加粗，后缀「 [当前]」用正文字重；未选中时铺浅色底。
-        /// 表和视图有注释时，编码用正文字体，注释用灰色斜体，避免和编码混在一起。
-        /// </remarks>
-        private void ConnectionsTreeDrawNode(object sender, DrawTreeNodeEventArgs e)
-        {
-            if (e.Node != null && DrawActiveConnectionNode(e))
-                return;
-
-            DatabaseObjectMetadata item = e.Node == null ? null : e.Node.Tag as DatabaseObjectMetadata;
-            if (item == null || string.IsNullOrWhiteSpace(item.Comment))
-            {
-                e.DrawDefault = true;
-                return;
-            }
-
-            bool selected = (e.State & TreeNodeStates.Selected) != 0;
-            Color backColor = selected ? SystemColors.Highlight : _connectionsTree.BackColor;
-            Color nameColor = selected ? SystemColors.HighlightText : _connectionsTree.ForeColor;
-            Color commentColor = selected ? SystemColors.HighlightText : SystemColors.GrayText;
-            Font nameFont = _connectionsTree.Font;
-            Font commentFont = TreeCommentFont(nameFont);
-            string name = item.Name ?? string.Empty;
-            string comment = "  " + item.Comment.Trim();
-            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
-            using (SolidBrush brush = new SolidBrush(backColor))
-            {
-                e.Graphics.FillRectangle(brush, e.Bounds);
-            }
-            TextRenderer.DrawText(e.Graphics, name, nameFont, e.Bounds, nameColor, backColor, flags | TextFormatFlags.EndEllipsis);
-            int nameWidth = TextRenderer.MeasureText(e.Graphics, name, nameFont, new Size(int.MaxValue, e.Bounds.Height), flags).Width;
-            Rectangle commentBounds = new Rectangle(e.Bounds.X + nameWidth, e.Bounds.Y, Math.Max(0, e.Bounds.Width - nameWidth), e.Bounds.Height);
-            TextRenderer.DrawText(e.Graphics, comment, commentFont, commentBounds, commentColor, backColor, flags | TextFormatFlags.EndEllipsis);
-        }
-
-        /// <summary>绘制当前连接根节点：名称加粗，「 [当前]」用另一套字重和颜色。</summary>
-        /// <param name="e">树节点绘制参数。文字区从标签起点延伸到树的右边缘，不覆盖图标。</param>
-        /// <returns>该节点是当前连接并已绘制时返回 true；否则返回 false，由调用方继续默认绘制。</returns>
-        private bool DrawActiveConnectionNode(DrawTreeNodeEventArgs e)
-        {
-            ConnectionProfileSnapshot connection = e.Node.Tag as ConnectionProfileSnapshot;
-            if (connection == null) return false;
-            if (!string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            bool selected = (e.State & TreeNodeStates.Selected) != 0;
-            Color backColor = selected ? SystemColors.Highlight : Color.FromArgb(255, 243, 205);
-            Color nameColor = selected ? SystemColors.HighlightText : _connectionsTree.ForeColor;
-            Color markColor = selected ? SystemColors.HighlightText : SystemColors.GrayText;
-            Font nameFont = TreeActiveNameFont(_connectionsTree.Font);
-            Font markFont = _connectionsTree.Font;
-            string name = connection.Name ?? string.Empty;
-            const string mark = " [当前]";
-            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
-            Rectangle row = new Rectangle(
-                e.Bounds.X,
-                e.Bounds.Y,
-                Math.Max(0, _connectionsTree.ClientSize.Width - e.Bounds.X),
-                e.Bounds.Height);
-            using (SolidBrush brush = new SolidBrush(backColor))
-            {
-                e.Graphics.FillRectangle(brush, row);
-            }
-
-            int markWidth = TextRenderer.MeasureText(e.Graphics, mark, markFont, new Size(int.MaxValue, row.Height), flags).Width;
-            int measuredName = TextRenderer.MeasureText(e.Graphics, name, nameFont, new Size(int.MaxValue, row.Height), flags).Width;
-            int nameWidth = Math.Min(measuredName, Math.Max(0, row.Width - markWidth));
-            Rectangle nameBounds = new Rectangle(row.X, row.Y, nameWidth, row.Height);
-            Rectangle markBounds = new Rectangle(row.X + nameWidth, row.Y, Math.Max(0, row.Width - nameWidth), row.Height);
-            TextRenderer.DrawText(e.Graphics, name, nameFont, nameBounds, nameColor, backColor, flags | TextFormatFlags.EndEllipsis);
-            TextRenderer.DrawText(e.Graphics, mark, markFont, markBounds, markColor, backColor, flags | TextFormatFlags.EndEllipsis);
-            return true;
-        }
-
-        /// <summary>按连接树当前字体准备当前连接名称用的粗体。字体变化时替换旧实例。</summary>
-        private Font TreeActiveNameFont(Font treeFont)
-        {
-            if (_treeActiveNameFont != null
-                && _treeActiveNameFont.FontFamily.Name == treeFont.FontFamily.Name
-                && Math.Abs(_treeActiveNameFont.Size - treeFont.Size) < 0.1f)
-            {
-                return _treeActiveNameFont;
-            }
-
-            if (_treeActiveNameFont != null) _treeActiveNameFont.Dispose();
-            _treeActiveNameFont = new Font(treeFont, FontStyle.Bold);
-            return _treeActiveNameFont;
-        }
-
-        /// <summary>按连接树当前字体准备注释用的斜体。字体变化时替换旧实例。</summary>
-        private Font TreeCommentFont(Font treeFont)
-        {
-            if (_treeCommentFont != null
-                && _treeCommentFont.FontFamily.Name == treeFont.FontFamily.Name
-                && Math.Abs(_treeCommentFont.Size - treeFont.Size) < 0.1f)
-            {
-                return _treeCommentFont;
-            }
-
-            if (_treeCommentFont != null) _treeCommentFont.Dispose();
-            _treeCommentFont = new Font(treeFont, FontStyle.Italic);
-            return _treeCommentFont;
         }
 
         private void PreviewCellPainting(object sender, DataGridViewCellPaintingEventArgs e)
@@ -1183,523 +883,6 @@ namespace DB2Sheet.UI
             _queryProfileMenu.Show(_queryProfiles, e.Location);
         }
 
-        private void ConnectionsTreeNodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
-        {
-            _connectionsTree.SelectedNode = e.Node;
-            if (e.Button != MouseButtons.Right || e.Node == null) return;
-            if (e.Node.Parent == null && e.Node.Tag is ConnectionProfileSnapshot)
-            {
-                _connectionNodeMenu.Show(_connectionsTree, e.Location);
-                return;
-            }
-
-            _treeNodeCopyMenu.Show(_connectionsTree, e.Location);
-        }
-
-        private void ConnectionsTreeMouseUp(object sender, MouseEventArgs e)
-        {
-            if (e.Button != MouseButtons.Right) return;
-            TreeNode node = _connectionsTree.GetNodeAt(e.Location);
-            if (node != null) return;
-            _connectionBlankMenu.Show(_connectionsTree, e.Location);
-        }
-
-        private void ConnectionsTreeNodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
-        {
-            if (e.Button != MouseButtons.Left) return;
-            if (e.Node?.Parent != null) return;
-            if (!(e.Node?.Tag is ConnectionProfileSnapshot)) return;
-            _connectionsTree.SelectedNode = e.Node;
-            SetSelectedConnectionAsCurrent();
-        }
-
-        private ConnectionProfileSnapshot SelectedConnectionNode
-        {
-            get
-            {
-                TreeNode node = _connectionsTree.SelectedNode;
-                return node != null && node.Parent == null
-                    ? node.Tag as ConnectionProfileSnapshot
-                    : null;
-            }
-        }
-
-        private void ReloadConnectionsTree(string selectedConnectionId = null)
-        {
-            string selectedId = selectedConnectionId ?? SelectedConnectionNode?.Id ?? _activeConnection?.Id;
-            List<ConnectionProfileSnapshot> connections = _connections.GetAll().OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-            _connectionsTree.BeginUpdate();
-            try
-            {
-                _connectionsTree.Nodes.Clear();
-                foreach (ConnectionProfileSnapshot connection in connections)
-                {
-                    bool active = string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase);
-                    TreeNode node = new TreeNode(connection.Name)
-                    {
-                        Tag = connection,
-                        ToolTipText = string.IsNullOrWhiteSpace(connection.ProviderId) ? connection.Name : connection.Name + "（" + connection.ProviderId + "）",
-                        ImageKey = DatabaseTreeImageCatalog.Provider(connection.ProviderId, active),
-                        SelectedImageKey = DatabaseTreeImageCatalog.Provider(connection.ProviderId, active)
-                    };
-                    EnsureDatabasePlaceholder(node);
-                    _connectionsTree.Nodes.Add(node);
-                    if (string.Equals(connection.Id, selectedId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _connectionsTree.SelectedNode = node;
-                    }
-                }
-            }
-            finally
-            {
-                _connectionsTree.EndUpdate();
-            }
-            ApplyTreeVisualState();
-            UpdateConnectionMenuState();
-        }
-
-        private void CreateConnection()
-        {
-            using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(_providers, _executionService, _operationRunner, _connections, null, _openJdbcEnvironment))
-            {
-                if (editor.ShowDialog(this) != DialogResult.OK || editor.Profile == null) return;
-                _connections.Save(editor.Profile);
-                ReloadConnectionsTree(editor.Profile.Id);
-                _status.Text = "连接方案已创建。";
-            }
-        }
-
-        private void EditSelectedConnection()
-        {
-            ConnectionProfileSnapshot selected = SelectedConnectionNode;
-            if (selected == null) return;
-            bool wasActive = string.Equals(_activeConnection?.Id, selected.Id, StringComparison.OrdinalIgnoreCase);
-            using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(_providers, _executionService, _operationRunner, _connections, selected, _openJdbcEnvironment))
-            {
-                if (editor.ShowDialog(this) != DialogResult.OK || editor.Profile == null) return;
-                _connections.Save(editor.Profile);
-                ReloadConnectionsTree(editor.Profile.Id);
-                ConnectionProfileSnapshot updated = _connections.GetById(editor.Profile.Id);
-                if (wasActive && updated != null)
-                {
-                    ActivateConnection(updated, true);
-                }
-                else
-                {
-                    _status.Text = "连接方案已更新。";
-                }
-            }
-        }
-
-        private void DeleteSelectedConnection()
-        {
-            ConnectionProfileSnapshot selected = SelectedConnectionNode;
-            if (selected == null) return;
-            DialogResult result = MessageBox.Show(
-                this,
-                "确定删除连接方案“" + selected.Name + "”吗？",
-                "删除连接方案",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2);
-            if (result != DialogResult.Yes) return;
-            _connections.Delete(selected.Id);
-            if (string.Equals(_activeConnection?.Id, selected.Id, StringComparison.OrdinalIgnoreCase))
-            {
-                _activeConnection = null;
-                _activeDatabase = null;
-                RememberActiveConnection(null);
-            }
-            ReloadConnectionsTree();
-            _status.Text = "连接方案已删除。";
-        }
-
-        private void SetSelectedConnectionAsCurrent()
-        {
-            ConnectionProfileSnapshot selected = SelectedConnectionNode;
-            if (selected == null) return;
-            ActivateConnection(selected, true);
-        }
-
-        private void RefreshSelectedConnection()
-        {
-            ConnectionProfileSnapshot selected = SelectedConnectionNode;
-            if (selected == null)
-            {
-                ReloadConnectionsTree();
-                return;
-            }
-            ActivateConnection(selected, false);
-        }
-
-        private async void ActivateConnection(ConnectionProfileSnapshot connection, bool expandNode)
-        {
-            if (connection == null) return;
-            ResetActiveConnectionVisualState();
-            try
-            {
-                ConnectionTestResult result = await _operationRunner.RunAsync(
-                    this,
-                    "测试连接",
-                    true,
-                    (progress, cancellationToken) => _executionService.TestConnectionAsync(
-                        connection,
-                        Guid.NewGuid().ToString("N"),
-                        progress,
-                        cancellationToken));
-
-                if (!result.Succeeded)
-                {
-                    _status.Text = result.Message + "（" + result.Elapsed.TotalSeconds.ToString("0.0") + " 秒）";
-                    ExceptionDetailForm.Show(this, "连接测试失败", result.Message);
-                    return;
-                }
-
-                _activeConnection = connection;
-                _activeDatabase = null;
-                RememberActiveConnection(connection);
-                ReloadConnectionsTree(connection.Id);
-                TreeNode node = _connectionsTree.Nodes.Cast<TreeNode>().FirstOrDefault(item =>
-                    string.Equals((item.Tag as ConnectionProfileSnapshot)?.Id, connection.Id, StringComparison.OrdinalIgnoreCase));
-                if (node != null)
-                {
-                    _connectionsTree.SelectedNode = node;
-                    EnsureDatabasePlaceholder(node);
-                    if (expandNode) node.Expand();
-                }
-
-                _status.Text = "当前连接已激活：" + connection.Name;
-                ApplyTreeVisualState();
-            }
-            catch (OperationCanceledException)
-            {
-                _status.Text = "连接测试已取消。";
-            }
-            catch (Exception exception)
-            {
-                ShowError(exception);
-            }
-        }
-
-        private void ResetActiveConnectionVisualState()
-        {
-            _activeConnection = null;
-            _activeDatabase = null;
-            foreach (TreeNode node in _connectionsTree.Nodes)
-            {
-                ConnectionProfileSnapshot connection = node.Tag as ConnectionProfileSnapshot;
-                if (connection == null) continue;
-                node.Collapse();
-                node.ImageKey = DatabaseTreeImageCatalog.Provider(connection.ProviderId, false);
-                node.SelectedImageKey = node.ImageKey;
-            }
-            ApplyTreeVisualState();
-        }
-
-        private void ConnectionsTreeAfterSelect(object sender, TreeViewEventArgs e)
-        {
-            try
-            {
-                DatabaseNodeTag databaseTag = e.Node?.Tag as DatabaseNodeTag;
-                if (databaseTag != null)
-                {
-                    if (!string.Equals(_activeConnection?.Id, databaseTag.ConnectionId, StringComparison.OrdinalIgnoreCase))
-                        return;
-                    _activeDatabase = databaseTag.DatabaseName;
-                    ApplyTreeVisualState();
-                    _status.Text = "当前数据库：" + _activeDatabase;
-                    return;
-                }
-
-                ConnectionProfileSnapshot connection = e.Node?.Tag as ConnectionProfileSnapshot;
-                if (connection != null && string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase))
-                {
-                    _activeDatabase = null;
-                    ApplyTreeVisualState();
-                    _status.Text = "当前连接已激活：" + connection.Name;
-                }
-            }
-            finally
-            {
-                UpdateConnectionMenuState();
-            }
-        }
-
-        private async void ConnectionsTreeBeforeExpand(object sender, TreeViewCancelEventArgs e)
-        {
-            ConnectionProfileSnapshot connection = e.Node?.Tag as ConnectionProfileSnapshot;
-            if (connection != null)
-            {
-                if (!string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase))
-                {
-                    e.Cancel = true;
-                    await OnUiAsync(() => _status.Text = "请先将该连接设置为当前连接。");
-                    return;
-                }
-
-                if (HasPlaceholder(e.Node, PlaceholderKinds.Databases))
-                {
-                    await LoadDatabasesAsync(e.Node, connection);
-                }
-                return;
-            }
-
-            DatabaseNodeTag databaseTag = e.Node?.Tag as DatabaseNodeTag;
-            if (databaseTag != null && HasPlaceholder(e.Node, PlaceholderKinds.Objects))
-            {
-                await LoadDatabaseObjectsAsync(e.Node, databaseTag);
-            }
-        }
-
-        private async Task LoadDatabasesAsync(TreeNode connectionNode, ConnectionProfileSnapshot connection)
-        {
-            IDatabaseMetadataProvider provider = _providers.GetById(connection.ProviderId) as IDatabaseMetadataProvider;
-            if (provider == null)
-            {
-                await OnUiAsync(() => SetNodeMessage(connectionNode, "当前连接不支持数据库浏览。", PlaceholderKinds.Message));
-                return;
-            }
-
-            await OnUiAsync(() => SetNodeMessage(connectionNode, "正在加载数据库…", PlaceholderKinds.Loading));
-            CancellationToken token = RenewMetadataCancellationToken();
-            try
-            {
-                IReadOnlyList<DatabaseMetadata> databases = await provider.GetDatabasesAsync(connection, token).ConfigureAwait(true);
-                await OnUiAsync(() =>
-                {
-                    connectionNode.Nodes.Clear();
-                    foreach (DatabaseMetadata database in databases.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-                    {
-                        TreeNode databaseNode = new TreeNode(database.Name)
-                        {
-                            Tag = new DatabaseNodeTag(connection.Id, database.Name),
-                            ImageKey = DatabaseTreeImageCatalog.Database(false),
-                            SelectedImageKey = DatabaseTreeImageCatalog.Database(false)
-                        };
-                        databaseNode.Nodes.Add(new TreeNode("展开以加载对象") { Tag = new PlaceholderTag(PlaceholderKinds.Objects) });
-                        connectionNode.Nodes.Add(databaseNode);
-                    }
-
-                    if (connectionNode.Nodes.Count == 0)
-                    {
-                        SetNodeMessage(connectionNode, "未发现可见数据库。", PlaceholderKinds.Message);
-                    }
-                    ApplyTreeVisualState();
-                    _status.Text = "数据库列表已更新：" + connection.Name;
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                await OnUiAsync(() => SetNodeMessage(connectionNode, "数据库加载已取消。", PlaceholderKinds.Message));
-            }
-            catch (Exception exception)
-            {
-                await OnUiAsync(() => SetNodeMessage(connectionNode, "数据库加载失败：" + exception.Message, PlaceholderKinds.Message));
-            }
-        }
-
-        private async Task LoadDatabaseObjectsAsync(TreeNode databaseNode, DatabaseNodeTag databaseTag)
-        {
-            ConnectionProfileSnapshot connection = _connections.GetById(databaseTag.ConnectionId);
-            if (connection == null)
-            {
-                await OnUiAsync(() => SetNodeMessage(databaseNode, "连接方案不存在。", PlaceholderKinds.Message));
-                return;
-            }
-
-            IDatabaseMetadataProvider provider = _providers.GetById(connection.ProviderId) as IDatabaseMetadataProvider;
-            if (provider == null)
-            {
-                await OnUiAsync(() => SetNodeMessage(databaseNode, "当前连接不支持对象浏览。", PlaceholderKinds.Message));
-                return;
-            }
-
-            await OnUiAsync(() => SetNodeMessage(databaseNode, "正在加载对象…", PlaceholderKinds.Loading));
-            CancellationToken token = RenewMetadataCancellationToken();
-            try
-            {
-                IReadOnlyList<DatabaseObjectMetadata> objects = await provider.GetDatabaseObjectsAsync(connection, databaseTag.DatabaseName, token).ConfigureAwait(true);
-                await OnUiAsync(() =>
-                {
-                    databaseNode.Nodes.Clear();
-                    foreach (IGrouping<string, DatabaseObjectMetadata> schemaGroup in objects
-                        .OrderBy(item => item.SchemaName, StringComparer.CurrentCultureIgnoreCase)
-                        .ThenBy(item => item.Kind)
-                        .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
-                        .GroupBy(item => string.IsNullOrWhiteSpace(item.SchemaName) ? "default" : item.SchemaName, StringComparer.OrdinalIgnoreCase))
-                    {
-                        TreeNode schemaNode = new TreeNode(schemaGroup.Key)
-                        {
-                            ImageKey = DatabaseTreeImageCatalog.Database(false),
-                            SelectedImageKey = DatabaseTreeImageCatalog.Database(false)
-                        };
-
-                        TreeNode tablesGroup = new TreeNode("表")
-                        {
-                            ImageKey = DatabaseTreeImageCatalog.Table(false),
-                            SelectedImageKey = DatabaseTreeImageCatalog.Table(false)
-                        };
-                        TreeNode viewsGroup = new TreeNode("视图")
-                        {
-                            ImageKey = DatabaseTreeImageCatalog.View(false),
-                            SelectedImageKey = DatabaseTreeImageCatalog.View(false)
-                        };
-
-                        foreach (DatabaseObjectMetadata item in schemaGroup)
-                        {
-                            bool isView = item.Kind == DatabaseObjectKind.View;
-                            string caption = FormatObjectCaption(item);
-                            string nodeText = string.IsNullOrWhiteSpace(item.Comment) ? caption : caption + "  ";
-                            TreeNode objectNode = new TreeNode(nodeText)
-                            {
-                                Tag = item,
-                                ToolTipText = caption,
-                                ImageKey = isView ? DatabaseTreeImageCatalog.View(false) : DatabaseTreeImageCatalog.Table(false),
-                                SelectedImageKey = isView ? DatabaseTreeImageCatalog.View(false) : DatabaseTreeImageCatalog.Table(false)
-                            };
-                            if (isView) viewsGroup.Nodes.Add(objectNode);
-                            else tablesGroup.Nodes.Add(objectNode);
-                        }
-
-                        if (tablesGroup.Nodes.Count > 0) schemaNode.Nodes.Add(tablesGroup);
-                        if (viewsGroup.Nodes.Count > 0) schemaNode.Nodes.Add(viewsGroup);
-                        if (schemaNode.Nodes.Count > 0) databaseNode.Nodes.Add(schemaNode);
-                    }
-
-                    if (databaseNode.Nodes.Count == 0)
-                    {
-                        SetNodeMessage(databaseNode, "该数据库无可见对象。", PlaceholderKinds.Message);
-                    }
-                    ApplyTreeVisualState();
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                await OnUiAsync(() => SetNodeMessage(databaseNode, "对象加载已取消。", PlaceholderKinds.Message));
-            }
-            catch (Exception exception)
-            {
-                await OnUiAsync(() => SetNodeMessage(databaseNode, "对象加载失败：" + exception.Message, PlaceholderKinds.Message));
-            }
-        }
-
-        private void EnsureDatabasePlaceholder(TreeNode connectionNode)
-        {
-            if (connectionNode == null) return;
-            if (connectionNode.Nodes.Count > 0) return;
-            connectionNode.Nodes.Add(new TreeNode("展开以加载数据库") { Tag = new PlaceholderTag(PlaceholderKinds.Databases) });
-        }
-
-        private static bool HasPlaceholder(TreeNode node, string kind)
-        {
-            return node != null && node.Nodes.Count == 1 && (node.Nodes[0].Tag as PlaceholderTag)?.Kind == kind;
-        }
-
-        private static void SetNodeMessage(TreeNode node, string message, string kind)
-        {
-            if (node == null) return;
-            node.Nodes.Clear();
-            node.Nodes.Add(new TreeNode(message) { Tag = new PlaceholderTag(kind) });
-        }
-
-        private CancellationToken RenewMetadataCancellationToken()
-        {
-            _metadataCancellation?.Cancel();
-            _metadataCancellation?.Dispose();
-            _metadataCancellation = new CancellationTokenSource();
-            return _metadataCancellation.Token;
-        }
-
-        private ConnectionProfileSnapshot ResolveExecutionConnection()
-        {
-            if (_activeConnection == null) return null;
-            if (string.IsNullOrWhiteSpace(_activeDatabase)) return _activeConnection;
-            IDatabaseMetadataProvider provider = _providers.GetById(_activeConnection.ProviderId) as IDatabaseMetadataProvider;
-            if (provider == null) return _activeConnection;
-            try
-            {
-                return provider.CreateDatabaseSnapshot(_activeConnection, _activeDatabase);
-            }
-            catch
-            {
-                return _activeConnection;
-            }
-        }
-
-        private void ApplyTreeVisualState()
-        {
-            if (InvokeRequired)
-            {
-                OnUi(ApplyTreeVisualState);
-                return;
-            }
-
-            foreach (TreeNode root in _connectionsTree.Nodes)
-            {
-                ConnectionProfileSnapshot connection = root.Tag as ConnectionProfileSnapshot;
-                if (connection == null) continue;
-                bool connectionActive = string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase);
-                string providerKey = DatabaseTreeImageCatalog.Provider(connection.ProviderId, connectionActive);
-                root.Text = connectionActive ? connection.Name + " [当前]" : connection.Name;
-                root.ImageKey = providerKey;
-                root.SelectedImageKey = providerKey;
-                ApplyChildrenState(root, connectionActive);
-            }
-        }
-
-        private void ApplyChildrenState(TreeNode node, bool connectionActive)
-        {
-            foreach (TreeNode child in node.Nodes)
-            {
-                DatabaseNodeTag databaseTag = child.Tag as DatabaseNodeTag;
-                if (databaseTag != null)
-                {
-                    bool databaseActive = connectionActive && string.Equals(_activeDatabase, databaseTag.DatabaseName, StringComparison.OrdinalIgnoreCase);
-                    string key = DatabaseTreeImageCatalog.Database(databaseActive);
-                    child.ImageKey = key;
-                    child.SelectedImageKey = key;
-                    ApplyNestedObjectState(child, databaseActive);
-                    continue;
-                }
-
-                if (child.Tag is DatabaseObjectMetadata objectTag)
-                {
-                    string objectKey = objectTag.Kind == DatabaseObjectKind.View
-                        ? DatabaseTreeImageCatalog.View(false)
-                        : DatabaseTreeImageCatalog.Table(false);
-                    child.ImageKey = objectKey;
-                    child.SelectedImageKey = objectKey;
-                }
-
-                ApplyChildrenState(child, connectionActive);
-            }
-        }
-
-        private void ApplyNestedObjectState(TreeNode databaseNode, bool databaseActive)
-        {
-            foreach (TreeNode schemaNode in databaseNode.Nodes)
-            {
-                schemaNode.ImageKey = DatabaseTreeImageCatalog.Database(databaseActive);
-                schemaNode.SelectedImageKey = schemaNode.ImageKey;
-                foreach (TreeNode groupNode in schemaNode.Nodes)
-                {
-                    bool viewGroup = string.Equals(groupNode.Text, "视图", StringComparison.Ordinal);
-                    groupNode.ImageKey = viewGroup
-                        ? DatabaseTreeImageCatalog.View(databaseActive)
-                        : DatabaseTreeImageCatalog.Table(databaseActive);
-                    groupNode.SelectedImageKey = groupNode.ImageKey;
-                    foreach (TreeNode objectNode in groupNode.Nodes)
-                    {
-                        bool isView = viewGroup || (objectNode.Tag as DatabaseObjectMetadata)?.Kind == DatabaseObjectKind.View;
-                        objectNode.ImageKey = isView
-                            ? DatabaseTreeImageCatalog.View(databaseActive)
-                            : DatabaseTreeImageCatalog.Table(databaseActive);
-                        objectNode.SelectedImageKey = objectNode.ImageKey;
-                    }
-                }
-            }
-        }
-
         private void ShowError(Exception exception)
         {
             _status.Text = exception.Message;
@@ -1708,7 +891,7 @@ namespace DB2Sheet.UI
 
         private void UpdateConnectionMenuState()
         {
-            bool hasSelection = SelectedConnectionNode != null;
+            bool hasSelection = _connectionTree.HasSelectedConnection;
             _editConnectionMenuItem.Enabled = hasSelection;
             _deleteConnectionMenuItem.Enabled = hasSelection;
             _setCurrentConnectionMenuItem.Enabled = hasSelection;
@@ -1792,34 +975,5 @@ namespace DB2Sheet.UI
             public string DisplayName => Profile.Name;
         }
 
-        private sealed class DatabaseNodeTag
-        {
-            public DatabaseNodeTag(string connectionId, string databaseName)
-            {
-                ConnectionId = connectionId;
-                DatabaseName = databaseName;
-            }
-
-            public string ConnectionId { get; }
-            public string DatabaseName { get; }
-        }
-
-        private sealed class PlaceholderTag
-        {
-            public PlaceholderTag(string kind)
-            {
-                Kind = kind;
-            }
-
-            public string Kind { get; }
-        }
-
-        private static class PlaceholderKinds
-        {
-            public const string Databases = "databases";
-            public const string Objects = "objects";
-            public const string Loading = "loading";
-            public const string Message = "message";
-        }
     }
 }

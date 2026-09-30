@@ -120,9 +120,18 @@ namespace DB2Sheet
                 ExcelInterop.Workbook workbook = RequireActiveWorkbook();
                 if (_sheetRefreshForm == null || _sheetRefreshForm.IsDisposed)
                 {
+                    if (!_taskReader.Exists(workbook))
+                    {
+                        MessageBox.Show(
+                            "当前工作簿没有名为 SQL 的工作表。",
+                            AppPresentation.WindowTitle("Sheet 批量刷新"),
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
                     _sheetRefreshForm = new SheetRefreshForm(
                         _connections, _providers, _executionService, _operationRunner, _settings,
-                        _taskReader, _batchRefresh, workbook);
+                        _taskReader, _batchRefresh, workbook, OpenJdbcEnvironment);
                     _sheetRefreshForm.FormClosed += (sender, args) => _sheetRefreshForm = null;
                     _sheetRefreshForm.Show();
                 }

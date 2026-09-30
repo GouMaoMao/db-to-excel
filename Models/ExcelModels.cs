@@ -87,4 +87,48 @@ namespace DB2Sheet.Models
         /// <summary>获取各任务执行结果。</summary>
         public IReadOnlyList<RefreshTaskResult> Tasks { get; }
     }
+
+    /// <summary>描述一次查询结果写入工作表时的锚点和清空范围。</summary>
+    /// <remarks>
+    /// 交互式写入使用整表已用区域清空，并从 A1 开始。
+    /// 批量刷新按起始单元格锚定，只清结果所占列；是否再清右侧原数据列由任务参数决定。
+    /// </remarks>
+    public sealed class SheetWriteOptions
+    {
+        private SheetWriteOptions(int anchorRow, int anchorColumn, bool clearEntireUsedRange, bool clearExtraColumns)
+        {
+            AnchorRow = anchorRow;
+            AnchorColumn = anchorColumn;
+            ClearEntireUsedRange = clearEntireUsedRange;
+            ClearExtraColumns = clearExtraColumns;
+        }
+
+        /// <summary>创建从 A1 写入并清空整个已用区域的选项。</summary>
+        /// <returns>交互式写入使用的选项。</returns>
+        public static SheetWriteOptions EntireUsedRange()
+        {
+            return new SheetWriteOptions(1, 1, true, true);
+        }
+
+        /// <summary>创建按锚点写入的选项。</summary>
+        /// <param name="anchorRow">结果表左上角行号，从 1 开始。</param>
+        /// <param name="anchorColumn">结果表左上角列号，从 1 开始。</param>
+        /// <param name="clearExtraColumns">是否清空锚点右侧、原数据区域内结果没有覆盖的列。</param>
+        /// <returns>批量刷新使用的写入选项。</returns>
+        public static SheetWriteOptions Anchored(int anchorRow, int anchorColumn, bool clearExtraColumns)
+        {
+            if (anchorRow < 1) throw new ArgumentOutOfRangeException(nameof(anchorRow));
+            if (anchorColumn < 1) throw new ArgumentOutOfRangeException(nameof(anchorColumn));
+            return new SheetWriteOptions(anchorRow, anchorColumn, false, clearExtraColumns);
+        }
+
+        /// <summary>获取结果表左上角行号。</summary>
+        public int AnchorRow { get; }
+        /// <summary>获取结果表左上角列号。</summary>
+        public int AnchorColumn { get; }
+        /// <summary>获取是否在写入前清空目标表整个已用区域。</summary>
+        public bool ClearEntireUsedRange { get; }
+        /// <summary>获取是否清空结果列右侧的原数据列。整表清空时忽略此项。</summary>
+        public bool ClearExtraColumns { get; }
+    }
 }

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DB2Sheet.Contracts;
+using DB2Sheet.Excel;
 using DB2Sheet.Models;
 using ExcelInterop = Microsoft.Office.Interop.Excel;
 
@@ -13,7 +14,7 @@ namespace DB2Sheet.Services
     /// <summary>编排 SQL Sheet 批量任务的查询缓冲、错误隔离和 Excel 写入。</summary>
     /// <remarks>
     /// 并行模式只并发执行数据库查询；所有 Excel COM 写入都会回到启动调用的 UI 同步上下文并按任务顺序执行。
-    /// 目标 Sheet 名重复的后续任务会被跳过，单个任务失败不会终止其他任务，用户取消会终止整个批次。
+    /// 目标表名重复时直接失败，不写入任何表。单个任务失败不会终止其他任务，用户取消会终止整个批次。
     /// </remarks>
     public sealed class BatchRefreshService : IBatchRefreshService
     {
@@ -52,15 +53,21 @@ namespace DB2Sheet.Services
 
             SynchronizationContext excelContext = SynchronizationContext.Current ??
                 throw new InvalidOperationException("批量刷新必须从 Excel UI 线程启动。");
-            List<RefreshTaskDefinition> executable = RemoveDuplicateTargets(tasks, out List<RefreshTaskResult> skipped);
+            string duplicateMessage = SqlSheetHeader.DescribeDuplicateTargets(tasks);
+            if (!string.IsNullOrEmpty(duplicateMessage))
+            {
+                throw new InvalidOperationException(duplicateMessage);
+            }
+
             Stopwatch stopwatch = Stopwatch.StartNew();
-            List<RefreshTaskResult> results = new List<RefreshTaskResult>(skipped);
+            List<RefreshTaskResult> results = new List<RefreshTaskResult>();
+            List<RefreshTaskDefinition> executable = new List<RefreshTaskDefinition>(tasks);
 
             if (mode == BatchExecutionMode.Parallel && executable.Count > 1)
             {
                 IReadOnlyList<BufferedTask> buffered = await BufferParallelAsync(
                     connection, executable, Math.Max(1, maximumParallelism), rowLimit, blockSize,
-                    timeoutSeconds, operationId, progress, skipped.Count, tasks.Count, stopwatch,
+                    timeoutSeconds, operationId, progress, 0, tasks.Count, stopwatch,
                     cancellationToken).ConfigureAwait(false);
                 foreach (BufferedTask item in buffered.OrderBy(value => value.Index))
                 {
@@ -234,7 +241,13 @@ namespace DB2Sheet.Services
                         progress?.Report(value);
                     });
                     long rows = _writer.WriteResult(
-                        workbook, task.TargetSheetName, buffered, writeProgress, cancellationToken, operationId + "-" + task.Id);
+                        workbook,
+                        task.TargetSheetName,
+                        buffered,
+                        SheetWriteOptions.Anchored(task.StartRow, task.StartColumnIndex, task.ClearExtraColumns),
+                        writeProgress,
+                        cancellationToken,
+                        operationId + "-" + task.Id);
                     result = new RefreshTaskResult(
                         task, true, false, rows, buffered.IsTruncated,
                         buffered.IsTruncated ? "刷新成功，结果已截断。" : "刷新成功。");
@@ -286,21 +299,6 @@ namespace DB2Sheet.Services
                 ["rowsWritten"] = results.Sum(item => item.RowsWritten).ToString(),
                 ["elapsedMs"] = ((long)elapsed.TotalMilliseconds).ToString()
             };
-        }
-
-        private static List<RefreshTaskDefinition> RemoveDuplicateTargets(
-            IReadOnlyList<RefreshTaskDefinition> tasks,
-            out List<RefreshTaskResult> skipped)
-        {
-            HashSet<string> targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            List<RefreshTaskDefinition> executable = new List<RefreshTaskDefinition>();
-            skipped = new List<RefreshTaskResult>();
-            foreach (RefreshTaskDefinition task in tasks)
-            {
-                if (targets.Add(task.TargetSheetName)) executable.Add(task);
-                else skipped.Add(new RefreshTaskResult(task, false, true, 0, false, "目标 Sheet 重复，已跳过。"));
-            }
-            return executable;
         }
 
         private static RefreshTaskResult Failed(RefreshTaskDefinition task, Exception exception)

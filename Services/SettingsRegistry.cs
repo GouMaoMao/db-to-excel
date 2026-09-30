@@ -61,6 +61,7 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.LogLevel);
             registry.Register(CoreSettings.ActiveConnectionId);
             registry.Register(CoreSettings.WorkspaceSplitRatio);
+            registry.Register(CoreSettings.RefreshSplitRatio);
             registry.Register(CoreSettings.FormBounds);
             return registry;
         }
@@ -110,6 +111,9 @@ namespace DB2Sheet.Services
 
         public static readonly SettingDefinition<int> WorkspaceSplitRatio = Integer(
             "session.workspaceSplitRatio", "左右分栏比例", "会话", 0, 0, 999);
+
+        public static readonly SettingDefinition<int> RefreshSplitRatio = Integer(
+            "session.refreshSplitRatio", "批量刷新分栏比例", "会话", 0, 0, 999);
 
         public static readonly SettingDefinition<string> FormBounds =
             new SettingDefinition<string>(

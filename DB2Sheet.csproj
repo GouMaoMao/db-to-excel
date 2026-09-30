@@ -248,7 +248,7 @@
     <Compile Include="UI\ConnectionProfileEditForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="UI\ConnectionProfileSelector.cs">
+    <Compile Include="UI\DatabaseConnectionTree.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="UI\ConnectionProfilesForm.cs">
@@ -290,6 +290,8 @@
     <EmbeddedResource Include="Resources\icon_writeexcel.png" />
     <EmbeddedResource Include="Resources\icon_save.png" />
     <EmbeddedResource Include="Resources\icon_script.png" />
+    <EmbeddedResource Include="Resources\icon_refreshall.png" />
+    <EmbeddedResource Include="Resources\icon_selectall.png" />
     <Content Include=".github\copilot-instructions.md" />
     <Content Include=".gitignore" />
     <Content Include="docs\ARCHITECTURE.md" />

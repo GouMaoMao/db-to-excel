@@ -17,6 +17,89 @@ namespace DB2Sheet.Excel
         private readonly SqlSheetTaskParser _parser = new SqlSheetTaskParser();
 
         /// <inheritdoc/>
+        public bool Exists(ExcelInterop.Workbook workbook)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            ExcelInterop.Worksheet worksheet = FindWorksheet(workbook, SqlSheetName);
+            if (worksheet == null) return false;
+            Marshal.FinalReleaseComObject(worksheet);
+            return true;
+        }
+
+        /// <inheritdoc/>
+        public void WriteColumnHeader(ExcelInterop.Workbook workbook, int sourceColumn, string headerText)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            if (sourceColumn < 1) throw new ArgumentOutOfRangeException(nameof(sourceColumn));
+
+            ExcelInterop.Worksheet worksheet = FindWorksheet(workbook, SqlSheetName);
+            if (worksheet == null)
+            {
+                throw new InvalidOperationException("当前工作簿中不存在名为“SQL”的工作表。");
+            }
+
+            ExcelInterop.Range cell = null;
+            try
+            {
+                cell = worksheet.Cells[1, sourceColumn] as ExcelInterop.Range;
+                if (cell == null) throw new InvalidOperationException("无法写入 SQL 页第 1 行。");
+                cell.Value2 = headerText ?? string.Empty;
+            }
+            finally
+            {
+                if (cell != null) Marshal.FinalReleaseComObject(cell);
+                Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        /// <inheritdoc/>
+        public void ActivateSqlCell(ExcelInterop.Workbook workbook, int sourceColumn, int row)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            if (sourceColumn < 1) throw new ArgumentOutOfRangeException(nameof(sourceColumn));
+            if (row < 1) throw new ArgumentOutOfRangeException(nameof(row));
+
+            ExcelInterop.Worksheet worksheet = FindWorksheet(workbook, SqlSheetName);
+            if (worksheet == null)
+            {
+                throw new InvalidOperationException("当前工作簿中不存在名为“SQL”的工作表。");
+            }
+
+            ExcelInterop.Range cell = null;
+            try
+            {
+                worksheet.Activate();
+                cell = worksheet.Cells[row, sourceColumn] as ExcelInterop.Range;
+                if (cell == null) throw new InvalidOperationException("无法定位 SQL 页单元格。");
+                cell.Select();
+            }
+            finally
+            {
+                if (cell != null) Marshal.FinalReleaseComObject(cell);
+                Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        /// <inheritdoc/>
+        public bool TryActivateWorksheet(ExcelInterop.Workbook workbook, string sheetName)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            if (string.IsNullOrWhiteSpace(sheetName)) return false;
+
+            ExcelInterop.Worksheet worksheet = FindWorksheet(workbook, sheetName.Trim());
+            if (worksheet == null) return false;
+            try
+            {
+                worksheet.Activate();
+                return true;
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        /// <inheritdoc/>
         public IReadOnlyList<RefreshTaskDefinition> ReadTasks(ExcelInterop.Workbook workbook)
         {
             if (workbook == null) throw new ArgumentNullException(nameof(workbook));

@@ -12,8 +12,9 @@ namespace DB2Sheet.Excel
 {
     /// <summary>使用 Excel COM Interop 将缓冲查询结果批量写入指定工作表。</summary>
     /// <remarks>
-    /// 写入前会清空目标工作表已用区域的内容和格式；目标工作表不存在时会创建。
-    /// 标题只占一行字段编码，编码行加粗并使用灰色底。数据从第 2 行开始。
+    /// 交互式写入会清空目标工作表已用区域的内容和格式，并从 A1 开始。
+    /// 批量刷新按起始单元格锚定：结果所占列从锚点清到原数据末行，右侧多余列仅在参数要求时清空。
+    /// 标题只占一行字段编码，编码行加粗并使用灰色底。数据从标题的下一行开始。
     /// 标题和数据组成的表格使用灰色细网格线。
     /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
     /// 文件日志只在写入完成或失败时各记一条汇总。
@@ -40,40 +41,58 @@ namespace DB2Sheet.Excel
             CancellationToken cancellationToken,
             string operationId)
         {
+            return WriteResult(
+                workbook,
+                targetSheetName,
+                result,
+                SheetWriteOptions.EntireUsedRange(),
+                progress,
+                cancellationToken,
+                operationId);
+        }
+
+        /// <inheritdoc/>
+        public long WriteResult(
+            ExcelInterop.Workbook workbook,
+            string targetSheetName,
+            BufferedQueryResult result,
+            SheetWriteOptions options,
+            IProgress<OperationProgress> progress,
+            CancellationToken cancellationToken,
+            string operationId)
+        {
             if (workbook == null) throw new ArgumentNullException(nameof(workbook));
             if (string.IsNullOrWhiteSpace(targetSheetName)) throw new ArgumentException("目标 Sheet 名称不能为空。", nameof(targetSheetName));
             if (result == null) throw new ArgumentNullException(nameof(result));
+            if (options == null) throw new ArgumentNullException(nameof(options));
             ValidateSheetName(targetSheetName);
 
             string workbookName = workbook.Name;
             ExcelInterop.Worksheet worksheet = GetOrCreateWorksheet(workbook, targetSheetName);
-            ExcelInterop.Range usedRange = null;
             Stopwatch writeWatch = Stopwatch.StartNew();
             long rowsWritten = 0;
             int totalBlocks = result.Blocks.Count;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                usedRange = worksheet.UsedRange;
-                usedRange.Clear();
-                Release(ref usedRange);
-
                 int columnCount = result.Columns.Count;
+                ClearBeforeWrite(worksheet, options, columnCount);
+
                 if (columnCount == 0)
                 {
                     LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                     return 0;
                 }
-                WriteHeaders(worksheet, result);
+                WriteHeaders(worksheet, result, options.AnchorRow, options.AnchorColumn);
 
-                int targetRow = HeaderRowCount + 1;
+                int targetRow = options.AnchorRow + HeaderRowCount;
                 int writtenBlocks = 0;
                 foreach (object[,] block in result.Blocks)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     int rowCount = block.GetLength(0);
                     if (rowCount == 0) continue;
-                    WriteBlock(worksheet, targetRow, columnCount, block, rowCount);
+                    WriteBlock(worksheet, targetRow, options.AnchorColumn, columnCount, block, rowCount);
                     targetRow += rowCount;
                     rowsWritten += rowCount;
                     writtenBlocks++;
@@ -94,7 +113,7 @@ namespace DB2Sheet.Excel
                     });
                 }
 
-                ApplyTableBorder(worksheet, targetRow - 1, columnCount);
+                ApplyTableBorder(worksheet, options.AnchorRow, options.AnchorColumn, targetRow - 1, columnCount);
                 LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                 return rowsWritten;
             }
@@ -114,7 +133,6 @@ namespace DB2Sheet.Excel
             }
             finally
             {
-                Release(ref usedRange);
                 Marshal.FinalReleaseComObject(worksheet);
             }
         }
@@ -180,8 +198,85 @@ namespace DB2Sheet.Excel
             return created;
         }
 
+        /// <summary>按选项清空写入区域。整表模式清已用区域；锚定模式只清锚点向下的结果列，并按参数决定是否清右侧原数据列。</summary>
+        private static void ClearBeforeWrite(ExcelInterop.Worksheet worksheet, SheetWriteOptions options, int columnCount)
+        {
+            ExcelInterop.Range usedRange = null;
+            try
+            {
+                usedRange = worksheet.UsedRange;
+                if (options.ClearEntireUsedRange)
+                {
+                    usedRange.Clear();
+                    return;
+                }
+
+                int usedRow = usedRange.Row;
+                int usedColumn = usedRange.Column;
+                ExcelInterop.Range usedRows = null;
+                ExcelInterop.Range usedColumns = null;
+                int usedLastRow = 0;
+                int usedLastColumn = 0;
+                try
+                {
+                    usedRows = usedRange.Rows;
+                    usedColumns = usedRange.Columns;
+                    usedLastRow = usedRow + usedRows.Count - 1;
+                    usedLastColumn = usedColumn + usedColumns.Count - 1;
+                }
+                finally
+                {
+                    Release(ref usedColumns);
+                    Release(ref usedRows);
+                }
+                if (usedLastRow < options.AnchorRow) return;
+
+                if (columnCount > 0)
+                {
+                    ClearRectangle(
+                        worksheet,
+                        options.AnchorRow,
+                        options.AnchorColumn,
+                        usedLastRow,
+                        options.AnchorColumn + columnCount - 1);
+                }
+
+                int extraStart = options.AnchorColumn + Math.Max(columnCount, 0);
+                if (options.ClearExtraColumns && usedLastColumn >= extraStart)
+                {
+                    ClearRectangle(worksheet, options.AnchorRow, extraStart, usedLastRow, usedLastColumn);
+                }
+            }
+            finally
+            {
+                Release(ref usedRange);
+            }
+        }
+
+        /// <summary>清空一个矩形的内容和格式。不触及矩形以外的单元格。</summary>
+        private static void ClearRectangle(ExcelInterop.Worksheet worksheet, int startRow, int startColumn, int endRow, int endColumn)
+        {
+            if (endRow < startRow || endColumn < startColumn) return;
+            ExcelInterop.Range start = null;
+            ExcelInterop.Range end = null;
+            ExcelInterop.Range range = null;
+            try
+            {
+                start = worksheet.Cells[startRow, startColumn] as ExcelInterop.Range;
+                end = worksheet.Cells[endRow, endColumn] as ExcelInterop.Range;
+                range = worksheet.Range[start, end];
+                range.Clear();
+            }
+            finally
+            {
+                Release(ref range);
+                Release(ref end);
+                Release(ref start);
+            }
+        }
+
         /// <summary>写入一行字段编码标题。编码加粗，底色为灰色。数据从下一行开始。</summary>
-        private static void WriteHeaders(ExcelInterop.Worksheet worksheet, BufferedQueryResult result)
+        private static void WriteHeaders(ExcelInterop.Worksheet worksheet, BufferedQueryResult result, int anchorRow, int anchorColumn)
         {
             int columnCount = result.Columns.Count;
             object[,] headers = new object[HeaderRowCount, columnCount];
@@ -198,8 +293,8 @@ namespace DB2Sheet.Excel
             ExcelInterop.Interior interior = null;
             try
             {
-                start = worksheet.Cells[1, 1] as ExcelInterop.Range;
-                end = worksheet.Cells[HeaderRowCount, columnCount] as ExcelInterop.Range;
+                start = worksheet.Cells[anchorRow, anchorColumn] as ExcelInterop.Range;
+                end = worksheet.Cells[anchorRow + HeaderRowCount - 1, anchorColumn + columnCount - 1] as ExcelInterop.Range;
                 range = worksheet.Range[start, end];
                 range.Value2 = headers;
                 interior = range.Interior;
@@ -218,17 +313,17 @@ namespace DB2Sheet.Excel
         }
 
         /// <summary>给标题和数据区域加上灰色细网格线。没有数据时只框住标题行。</summary>
-        private static void ApplyTableBorder(ExcelInterop.Worksheet worksheet, int lastRow, int columnCount)
+        private static void ApplyTableBorder(ExcelInterop.Worksheet worksheet, int anchorRow, int anchorColumn, int lastRow, int columnCount)
         {
-            if (lastRow < HeaderRowCount || columnCount <= 0) return;
+            if (lastRow < anchorRow || columnCount <= 0) return;
             ExcelInterop.Range start = null;
             ExcelInterop.Range end = null;
             ExcelInterop.Range range = null;
             ExcelInterop.Borders borders = null;
             try
             {
-                start = worksheet.Cells[1, 1] as ExcelInterop.Range;
-                end = worksheet.Cells[lastRow, columnCount] as ExcelInterop.Range;
+                start = worksheet.Cells[anchorRow, anchorColumn] as ExcelInterop.Range;
+                end = worksheet.Cells[lastRow, anchorColumn + columnCount - 1] as ExcelInterop.Range;
                 range = worksheet.Range[start, end];
                 borders = range.Borders;
                 borders.LineStyle = ExcelInterop.XlLineStyle.xlContinuous;
@@ -244,15 +339,15 @@ namespace DB2Sheet.Excel
             }
         }
 
-        private static void WriteBlock(ExcelInterop.Worksheet worksheet, int startRow, int columnCount, object[,] values, int rowCount)
+        private static void WriteBlock(ExcelInterop.Worksheet worksheet, int startRow, int startColumn, int columnCount, object[,] values, int rowCount)
         {
             ExcelInterop.Range start = null;
             ExcelInterop.Range end = null;
             ExcelInterop.Range range = null;
             try
             {
-                start = worksheet.Cells[startRow, 1] as ExcelInterop.Range;
-                end = worksheet.Cells[startRow + rowCount - 1, columnCount] as ExcelInterop.Range;
+                start = worksheet.Cells[startRow, startColumn] as ExcelInterop.Range;
+                end = worksheet.Cells[startRow + rowCount - 1, startColumn + columnCount - 1] as ExcelInterop.Range;
                 range = worksheet.Range[start, end];
                 range.Value2 = values;
             }
