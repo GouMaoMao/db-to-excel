@@ -93,11 +93,15 @@ namespace DB2Sheet.Services
         public static readonly SettingDefinition<int> ResultBlockSize = Integer(
             "query.resultBlockSize", "结果分块行数", "查询", 2000, 100, 20000);
 
-        public static readonly SettingDefinition<string> LogLevel =
-            new SettingDefinition<string>(
-                "logging.level", "日志级别", "日志", "Information",
-                value => Tuple.Create(!string.IsNullOrWhiteSpace(value), value),
-                value => value == "Debug" || value == "Information" || value == "Warning" || value == "Error");
+        /// <summary>
+        /// 进度窗口日志列表的最低显示级别，取值与 <see cref="LogSeverity"/> 一致。
+        /// 文件日志不读取此项，仍写入全部级别。持久化键名仍为 logging.level。
+        /// </summary>
+        public static readonly SettingDefinition<LogSeverity> LogLevel =
+            new SettingDefinition<LogSeverity>(
+                "logging.level", "进度日志级别", "日志",
+                LogSeverity.Information,
+                value => Tuple.Create(Enum.TryParse(value, true, out LogSeverity parsed), parsed));
 
         public static readonly SettingDefinition<string> ActiveConnectionId =
             new SettingDefinition<string>(

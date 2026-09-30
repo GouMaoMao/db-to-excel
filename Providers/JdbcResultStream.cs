@@ -10,6 +10,7 @@ namespace DB2Sheet.Providers
     /// <summary>从 JDBC 转接进程按块读取查询结果，并在达到行数上限后取消语句。</summary>
     /// <remarks>
     /// 本对象拥有对应的查询请求。调用 <see cref="Dispose"/> 会通知 Java 关闭该查询。
+    /// 每读完一块报告已读行数。总行数在读完前未知，因此不报告完成百分比。
     /// 同一实例不能并发读取。行数上限在读取端执行，不改写 SQL。
     /// </remarks>
     internal sealed class JdbcResultStream : IDataResultStream
@@ -160,10 +161,11 @@ namespace DB2Sheet.Providers
                         "已读取 {0:N0} 行，达到上限 {1:N0} 行，结果已截断。可在设置中修改上限行数。",
                         RowsRead,
                         _rowLimit)
-                    : "正在读取结果…",
+                    : string.Format("正在读取 {0:N0} 行", RowsRead),
                 RowsRead = RowsRead,
                 IsIndeterminate = true,
-                IsTruncated = IsTruncated
+                IsTruncated = IsTruncated,
+                Severity = IsTruncated ? LogSeverity.Warning : LogSeverity.Information
             });
             return new ResultBlock(result, rowCount, IsCompleted);
         }

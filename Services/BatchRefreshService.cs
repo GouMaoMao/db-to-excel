@@ -24,7 +24,7 @@ namespace DB2Sheet.Services
         /// <summary>创建批量刷新服务。</summary>
         /// <param name="queryBuffer">负责执行并缓冲查询结果的服务。</param>
         /// <param name="writer">负责写入 Excel 的服务。</param>
-        /// <param name="logger">错误日志记录器。</param>
+        /// <param name="logger">任务失败和批次汇总的文件日志。不按进度日志级别过滤。</param>
         public BatchRefreshService(IQueryBufferService queryBuffer, IExcelResultWriter writer, ILogger logger)
         {
             _queryBuffer = queryBuffer ?? throw new ArgumentNullException(nameof(queryBuffer));
@@ -72,7 +72,7 @@ namespace DB2Sheet.Services
                     }
                     results.Add(WriteOnContext(
                         excelContext, workbook, item.Task, item.Result, progress,
-                        results, tasks.Count, stopwatch, cancellationToken));
+                        results, tasks.Count, stopwatch, operationId, cancellationToken));
                 }
             }
             else
@@ -88,7 +88,7 @@ namespace DB2Sheet.Services
                             progress, results.Count + 1, tasks.Count, stopwatch, cancellationToken).ConfigureAwait(false);
                         results.Add(WriteOnContext(
                             excelContext, workbook, task, buffered, progress,
-                            results, tasks.Count, stopwatch, cancellationToken));
+                            results, tasks.Count, stopwatch, operationId, cancellationToken));
                     }
                     catch (OperationCanceledException)
                     {
@@ -96,7 +96,7 @@ namespace DB2Sheet.Services
                     }
                     catch (Exception exception)
                     {
-                        _logger.Write(LogSeverity.Error, "批量刷新任务失败。", operationId, exception);
+                        _logger.Write(LogSeverity.Error, "批量刷新任务失败。", operationId, exception, SheetProperty(task));
                         results.Add(Failed(task, exception));
                     }
                 }
@@ -110,6 +110,11 @@ namespace DB2Sheet.Services
                 tasks.Count,
                 results,
                 stopwatch.Elapsed));
+            _logger.Write(
+                LogSeverity.Information,
+                "批量刷新完成。",
+                operationId,
+                properties: BatchSummary(mode, maximumParallelism, rowLimit, blockSize, timeoutSeconds, tasks.Count, results, stopwatch.Elapsed));
             return new BatchRefreshResult(OrderResults(tasks, results));
         }
 
@@ -150,7 +155,7 @@ namespace DB2Sheet.Services
                     catch (Exception exception)
                     {
                         Interlocked.Increment(ref completed);
-                        _logger.Write(LogSeverity.Error, "并行读取任务失败。", operationId, exception);
+                        _logger.Write(LogSeverity.Error, "并行读取任务失败。", operationId, exception, SheetProperty(task));
                         return new BufferedTask(index, task, null, exception);
                     }
                     finally
@@ -207,6 +212,7 @@ namespace DB2Sheet.Services
             IReadOnlyList<RefreshTaskResult> completed,
             int totalTasks,
             Stopwatch stopwatch,
+            string operationId,
             CancellationToken cancellationToken)
         {
             RefreshTaskResult result = null;
@@ -227,7 +233,8 @@ namespace DB2Sheet.Services
                         value.Elapsed = stopwatch.Elapsed;
                         progress?.Report(value);
                     });
-                    long rows = _writer.WriteResult(workbook, task.TargetSheetName, buffered, writeProgress, cancellationToken);
+                    long rows = _writer.WriteResult(
+                        workbook, task.TargetSheetName, buffered, writeProgress, cancellationToken, operationId + "-" + task.Id);
                     result = new RefreshTaskResult(
                         task, true, false, rows, buffered.IsTruncated,
                         buffered.IsTruncated ? "刷新成功，结果已截断。" : "刷新成功。");
@@ -239,10 +246,46 @@ namespace DB2Sheet.Services
             }, null);
             if (error != null)
             {
-                _logger.Write(LogSeverity.Error, "写入 Excel 失败。", null, error);
+                _logger.Write(LogSeverity.Error, "写入 Excel 失败。", operationId + "-" + task.Id, error, SheetProperty(task));
                 return Failed(task, error);
             }
             return result;
+        }
+
+        /// <summary>取出失败任务的目标表名，供文件日志关联。</summary>
+        private static Dictionary<string, string> SheetProperty(RefreshTaskDefinition task)
+        {
+            return new Dictionary<string, string>
+            {
+                ["sheet"] = task.TargetSheetName ?? string.Empty
+            };
+        }
+
+        /// <summary>组装批量刷新结束时的计数和当时使用的执行限制。</summary>
+        private static Dictionary<string, string> BatchSummary(
+            BatchExecutionMode mode,
+            int maximumParallelism,
+            int rowLimit,
+            int blockSize,
+            int timeoutSeconds,
+            int totalTasks,
+            IReadOnlyList<RefreshTaskResult> results,
+            TimeSpan elapsed)
+        {
+            return new Dictionary<string, string>
+            {
+                ["mode"] = mode.ToString(),
+                ["maxParallelism"] = maximumParallelism.ToString(),
+                ["rowLimit"] = rowLimit.ToString(),
+                ["blockSize"] = blockSize.ToString(),
+                ["timeoutSeconds"] = timeoutSeconds.ToString(),
+                ["totalTasks"] = totalTasks.ToString(),
+                ["succeeded"] = results.Count(item => item.Succeeded).ToString(),
+                ["failed"] = results.Count(item => !item.Succeeded && !item.Skipped).ToString(),
+                ["skipped"] = results.Count(item => item.Skipped).ToString(),
+                ["rowsWritten"] = results.Sum(item => item.RowsWritten).ToString(),
+                ["elapsedMs"] = ((long)elapsed.TotalMilliseconds).ToString()
+            };
         }
 
         private static List<RefreshTaskDefinition> RemoveDuplicateTargets(

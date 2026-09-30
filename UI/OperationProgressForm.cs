@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using DB2Sheet.Contracts;
 using DB2Sheet.Models;
 
 namespace DB2Sheet.UI
@@ -9,6 +10,7 @@ namespace DB2Sheet.UI
     /// <remarks>
     /// 窗体保持置顶。成功或取消时自动关闭；发生错误时保留，供用户查看日志后手动关闭。
     /// 更新方法可从后台线程调用，内部会自动切换到 UI 线程。
+    /// 日志列表按构造时传入的最低级别过滤；阶段标题、详情和进度条始终反映最新快照。
     /// </remarks>
     public sealed class OperationProgressForm : AppForm
     {
@@ -18,13 +20,16 @@ namespace DB2Sheet.UI
         private readonly RichTextBox _logBox;
         private readonly Button _cancelButton;
         private readonly Button _closeButton;
+        private readonly LogSeverity _minimumSeverity;
         private bool _running = true;
 
         /// <summary>创建操作进度窗体。</summary>
         /// <param name="title">具体操作名称，会与产品名组合成窗口标题。</param>
         /// <param name="canCancel">是否允许用户请求取消。</param>
-        public OperationProgressForm(string title, bool canCancel)
+        /// <param name="minimumSeverity">日志列表的最低显示级别。阶段标题、详情和进度条不受此限制。</param>
+        public OperationProgressForm(string title, bool canCancel, LogSeverity minimumSeverity)
         {
+            _minimumSeverity = minimumSeverity;
             Text = AppPresentation.WindowTitle(title);
             Width = 680;
             Height = 400;
@@ -136,7 +141,7 @@ namespace DB2Sheet.UI
             if (error != null)
             {
                 _detailLabel.Text = error.Message;
-                AppendLog("失败", null, error.Message);
+                AppendLog(LogSeverity.Error, "失败", null, error.Message);
             }
             _cancelButton.Enabled = false;
 
@@ -168,11 +173,18 @@ namespace DB2Sheet.UI
             string scope = !string.IsNullOrWhiteSpace(progress.TargetSheetName)
                 ? progress.TargetSheetName
                 : progress.ConnectionName;
-            AppendLog(StageText(progress.Stage), scope, progress.Message);
+            AppendLog(progress.Severity, StageText(progress.Stage), scope, progress.Message);
         }
 
-        private void AppendLog(string stage, string scope, string message)
+        /// <summary>把一条进度写入日志列表。</summary>
+        /// <param name="severity">该行级别。低于窗口最低级别时不追加，阶段标题和进度条仍由调用方更新。</param>
+        /// <param name="stage">已转换为用户可见文字的阶段。</param>
+        /// <param name="scope">工作表或连接名称，可为空。</param>
+        /// <param name="message">状态消息，可为空。</param>
+        /// <remarks><see cref="LogSeverity"/> 的声明顺序就是严重程度，因此用数值比较。</remarks>
+        private void AppendLog(LogSeverity severity, string stage, string scope, string message)
         {
+            if ((int)severity < (int)_minimumSeverity) return;
             string scopeText = string.IsNullOrWhiteSpace(scope) ? string.Empty : " [" + NormalizeLogText(scope) + "]";
             string messageText = string.IsNullOrWhiteSpace(message) ? string.Empty : "  " + NormalizeLogText(message);
             _logBox.AppendText(string.Format(

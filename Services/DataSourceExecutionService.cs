@@ -9,7 +9,10 @@ using DB2Sheet.Models;
 namespace DB2Sheet.Services
 {
     /// <summary>按连接中的提供程序标识解析数据源，并统一记录查询和连接测试日志。</summary>
-    /// <remarks>日志只记录查询哈希，不记录 SQL 正文，以减少敏感信息泄露。</remarks>
+    /// <remarks>
+    /// 查询启动日志写入 SQL 正文和查询哈希，供同一次操作的后续汇总对照。
+    /// 不写入连接密码、JDBC URL 或完整连接参数。
+    /// </remarks>
     public sealed class DataSourceExecutionService : IDataSourceExecutionService
     {
         private readonly IProviderRegistry _providers;
@@ -83,7 +86,11 @@ namespace DB2Sheet.Services
                 ["provider"] = request.Connection.ProviderId,
                 ["profile"] = request.Connection.Name,
                 ["purpose"] = request.Purpose.ToString(),
+                ["sql"] = request.QueryText ?? string.Empty,
                 ["queryHash"] = ComputeStableHash(request.QueryText),
+                ["rowLimit"] = request.RowLimit.ToString(),
+                ["blockSize"] = request.BlockSize.ToString(),
+                ["timeoutSeconds"] = request.TimeoutSeconds.ToString(),
                 ["elapsedMs"] = ((long)elapsed.TotalMilliseconds).ToString()
             };
         }

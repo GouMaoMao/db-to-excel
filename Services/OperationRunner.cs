@@ -15,12 +15,15 @@ namespace DB2Sheet.Services
     public sealed class OperationRunner : IOperationRunner
     {
         private readonly ILogger _logger;
+        private readonly ISettingsStore _settings;
 
         /// <summary>创建操作运行器。</summary>
-        /// <param name="logger">用于记录未处理任务异常的日志记录器。</param>
-        public OperationRunner(ILogger logger)
+        /// <param name="logger">用于记录未处理任务异常的日志记录器。文件日志不按级别过滤。</param>
+        /// <param name="settings">读取进度日志最低显示级别。该值只影响进度窗口的日志列表。</param>
+        public OperationRunner(ILogger logger, ISettingsStore settings)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }
 
         /// <inheritdoc/>
@@ -33,8 +36,9 @@ namespace DB2Sheet.Services
             if (operation == null) throw new ArgumentNullException(nameof(operation));
 
             string operationId = Guid.NewGuid().ToString("N");
+            LogSeverity minimumSeverity = _settings.Get(CoreSettings.LogLevel);
             using (CancellationTokenSource cancellation = new CancellationTokenSource())
-            using (OperationProgressForm form = new OperationProgressForm(title, canCancel))
+            using (OperationProgressForm form = new OperationProgressForm(title, canCancel, minimumSeverity))
             {
                 TaskCompletionSource<T> completion = new TaskCompletionSource<T>();
 

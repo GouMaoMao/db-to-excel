@@ -26,14 +26,16 @@ namespace DB2Sheet.Contracts
         /// <param name="result">已在内存中缓冲的查询结果。</param>
         /// <param name="progress">可选的进度接收器。</param>
         /// <param name="cancellationToken">取消令牌。</param>
+        /// <param name="operationId">与同一次查询读取日志关联的操作标识。</param>
         /// <returns>实际写入的数据行数，不包含标题行。</returns>
-        /// <remarks>该方法会修改工作簿内容，应在 Excel UI 线程调用。</remarks>
+        /// <remarks>该方法会修改工作簿内容，应在 Excel UI 线程调用。完成或失败时写入一条文件汇总，不记录单元格内容。</remarks>
         long WriteResult(
             ExcelInterop.Workbook workbook,
             string targetSheetName,
             BufferedQueryResult result,
             IProgress<OperationProgress> progress,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken,
+            string operationId);
     }
 
     /// <summary>执行流式查询并将全部结果转换为内存块。</summary>

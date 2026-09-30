@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using DB2Sheet.Contracts;
@@ -10,25 +12,41 @@ namespace DB2Sheet.Excel
     /// <summary>使用 Excel COM Interop 将缓冲查询结果批量写入指定工作表。</summary>
     /// <remarks>
     /// 写入前会清空目标工作表的现有内容；目标工作表不存在时会创建。
+    /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
+    /// 文件日志只在写入完成或失败时各记一条汇总。
     /// 应在 Excel UI 线程调用，并避免在方法外继续使用本类释放的 COM Range 和 Worksheet 引用。
     /// </remarks>
     public sealed class ExcelResultWriter : IExcelResultWriter
     {
+        private readonly ILogger _logger;
+
+        /// <summary>创建 Excel 结果写入器。</summary>
+        /// <param name="logger">写入阶段的文件日志。不按进度日志级别过滤。</param>
+        public ExcelResultWriter(ILogger logger)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
         /// <inheritdoc/>
         public long WriteResult(
             ExcelInterop.Workbook workbook,
             string targetSheetName,
             BufferedQueryResult result,
             IProgress<OperationProgress> progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string operationId)
         {
             if (workbook == null) throw new ArgumentNullException(nameof(workbook));
             if (string.IsNullOrWhiteSpace(targetSheetName)) throw new ArgumentException("目标 Sheet 名称不能为空。", nameof(targetSheetName));
             if (result == null) throw new ArgumentNullException(nameof(result));
             ValidateSheetName(targetSheetName);
 
+            string workbookName = workbook.Name;
             ExcelInterop.Worksheet worksheet = GetOrCreateWorksheet(workbook, targetSheetName);
             ExcelInterop.Range usedRange = null;
+            Stopwatch writeWatch = Stopwatch.StartNew();
+            long rowsWritten = 0;
+            int totalBlocks = result.Blocks.Count;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -37,11 +55,15 @@ namespace DB2Sheet.Excel
                 Release(ref usedRange);
 
                 int columnCount = result.Columns.Count;
-                if (columnCount == 0) return 0;
+                if (columnCount == 0)
+                {
+                    LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
+                    return 0;
+                }
                 WriteHeaders(worksheet, result);
 
-                long rowsWritten = 0;
                 int targetRow = 2;
+                int writtenBlocks = 0;
                 foreach (object[,] block in result.Blocks)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -50,25 +72,92 @@ namespace DB2Sheet.Excel
                     WriteBlock(worksheet, targetRow, columnCount, block, rowCount);
                     targetRow += rowCount;
                     rowsWritten += rowCount;
+                    writtenBlocks++;
                     progress?.Report(new OperationProgress
                     {
                         Stage = OperationStage.Writing,
                         TargetSheetName = targetSheetName,
-                        Message = "正在写入工作表…",
+                        Message = string.Format(
+                            "正在写入 {0:N0} 行（{1}/{2}）",
+                            rowsWritten,
+                            writtenBlocks,
+                            totalBlocks),
                         RowsRead = result.RowCount,
                         RowsWritten = rowsWritten,
+                        Percent = totalBlocks == 0 ? 0 : (int)(writtenBlocks * 100L / totalBlocks),
                         IsTruncated = result.IsTruncated,
-                        IsIndeterminate = true
+                        IsIndeterminate = false
                     });
                 }
 
+                LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                 return rowsWritten;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.Write(
+                    LogSeverity.Error,
+                    "工作表写入失败。",
+                    operationId,
+                    exception,
+                    WriteProperties(workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed, includeRate: false));
+                throw;
             }
             finally
             {
                 Release(ref usedRange);
                 Marshal.FinalReleaseComObject(worksheet);
             }
+        }
+
+        /// <summary>把一次成功的工作表写入记入文件日志。</summary>
+        private void LogWriteCompleted(
+            string operationId,
+            string workbookName,
+            string targetSheetName,
+            BufferedQueryResult result,
+            long rowsWritten,
+            int blockCount,
+            TimeSpan elapsed)
+        {
+            _logger.Write(
+                LogSeverity.Information,
+                "工作表写入完成。",
+                operationId,
+                properties: WriteProperties(workbookName, targetSheetName, result, rowsWritten, blockCount, elapsed, includeRate: true));
+        }
+
+        /// <summary>组装写入汇总的结构化属性。耗时不大于 0 时不写行每秒。</summary>
+        private static Dictionary<string, string> WriteProperties(
+            string workbookName,
+            string targetSheetName,
+            BufferedQueryResult result,
+            long rowsWritten,
+            int blockCount,
+            TimeSpan elapsed,
+            bool includeRate)
+        {
+            long elapsedMs = (long)elapsed.TotalMilliseconds;
+            Dictionary<string, string> properties = new Dictionary<string, string>
+            {
+                ["workbook"] = workbookName ?? string.Empty,
+                ["sheet"] = targetSheetName ?? string.Empty,
+                ["rowsWritten"] = rowsWritten.ToString(),
+                ["blockCount"] = blockCount.ToString(),
+                ["columnCount"] = (result.Columns == null ? 0 : result.Columns.Count).ToString(),
+                ["truncated"] = result.IsTruncated ? "true" : "false",
+                ["elapsedMs"] = elapsedMs.ToString()
+            };
+            if (includeRate && elapsedMs > 0)
+            {
+                properties["rowsPerSecond"] = (rowsWritten * 1000L / elapsedMs).ToString();
+            }
+
+            return properties;
         }
 
         private static ExcelInterop.Worksheet GetOrCreateWorksheet(ExcelInterop.Workbook workbook, string name)

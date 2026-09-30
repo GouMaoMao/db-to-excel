@@ -14,6 +14,7 @@ namespace DB2Sheet.Providers
     /// </summary>
     /// <remarks>
     /// 此类型拥有传入的连接、命令和读取器。调用 <see cref="Dispose"/> 会按读取器、命令、连接的顺序释放资源。
+    /// 每读完一块报告已读行数。总行数在读完前未知，因此不报告完成百分比。
     /// 实例不是线程安全的，同一时间只能进行一次读取。
     /// </remarks>
     internal sealed class DatabaseResultStream : IDataResultStream
@@ -112,10 +113,11 @@ namespace DB2Sheet.Providers
                         "已读取 {0:N0} 行，达到上限 {1:N0} 行，结果已截断。可在设置中修改上限行数。",
                         RowsRead,
                         _rowLimit)
-                    : "正在读取结果…",
+                    : string.Format("正在读取 {0:N0} 行", RowsRead),
                 RowsRead = RowsRead,
                 IsIndeterminate = true,
-                IsTruncated = IsTruncated
+                IsTruncated = IsTruncated,
+                Severity = IsTruncated ? LogSeverity.Warning : LogSeverity.Information
             });
             return new ResultBlock(result, rowCount, IsCompleted);
         }

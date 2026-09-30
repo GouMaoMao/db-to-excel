@@ -658,9 +658,10 @@ namespace DB2Sheet.UI
                 string target = _currentTargetSheet;
                 long rows = _operationRunner.Run(this, "写入 Excel", true, async (progress, token) =>
                 {
+                    string operationId = Guid.NewGuid().ToString("N");
                     BufferedQueryResult result = await _queryBuffer.ExecuteAsync(
-                        request, Guid.NewGuid().ToString("N"), progress, token);
-                    return _writer.WriteResult(_workbook, target, result, progress, token);
+                        request, operationId, progress, token);
+                    return _writer.WriteResult(_workbook, target, result, progress, token, operationId);
                 });
                 _status.Text = string.Format("已向“{0}”写入 {1:N0} 行。", target, rows);
             }
