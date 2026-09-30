@@ -9,7 +9,7 @@ using System.Windows.Forms;
 
 namespace DB2Sheet.UI
 {
-    /// <summary>加载数据库树彩色图标，并为非活动节点生成同尺寸灰度缓存。</summary>
+    /// <summary>加载数据库树彩色图标，并为非活动节点生成同尺寸灰度缓存。同一套嵌入图片也可缩放到 16 像素供按钮使用。</summary>
     /// <remarks>返回的 <see cref="ImageList"/> 及其中图像由调用方随所属控件一起释放。</remarks>
     internal static class DatabaseTreeImageCatalog
     {
@@ -23,7 +23,8 @@ namespace DB2Sheet.UI
                 ["sqlserver"] = "DB_sqlserver.png",
                 ["mysql"] = "DB_Mysql.png",
                 ["postgresql"] = "DB_PostgreSQL.png",
-                ["sqlite"] = "DB_sqlite.png"
+                ["sqlite"] = "DB_sqlite.png",
+                ["jdbc"] = "DB_JDBC.png"
             };
 
         /// <summary>创建包含全部彩色和灰度图标的 16 像素图像列表。</summary>
@@ -70,6 +71,16 @@ namespace DB2Sheet.UI
         /// <summary>获取视图节点的图像键。</summary>
         public static string View(bool active) => Key(ViewKey, active);
 
+        /// <summary>读取嵌入图标并缩放到 16 像素，供按钮显示在文字左侧。</summary>
+        /// <param name="fileName">Resources 目录下的文件名，例如 icon_execute.png。</param>
+        /// <returns>调用方负责释放的 16 像素位图。</returns>
+        /// <exception cref="InvalidOperationException">嵌入图片缺失或无法读取。</exception>
+        public static Image LoadActionIcon(string fileName)
+        {
+            using (Image source = Load(fileName))
+                return Resize(source);
+        }
+
         private static string Key(string baseKey, bool active) => baseKey + (active ? "-color" : "-gray");
 
         private static void AddPair(ImageList images, string key, string fileName)
@@ -90,7 +101,7 @@ namespace DB2Sheet.UI
             using (Stream stream = assembly.GetManifestResourceStream(resourceName))
             {
                 if (stream == null)
-                    throw new InvalidOperationException("找不到数据库树嵌入图标资源：Resources/" + fileName);
+                    throw new InvalidOperationException("找不到嵌入图标资源：Resources/" + fileName);
                 using (Image image = Image.FromStream(stream))
                     return (Image)image.Clone();
             }

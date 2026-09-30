@@ -37,12 +37,15 @@ namespace DB2Sheet.UI
         private readonly ToolStripStatusLabel _status;
         private readonly SplitContainer _resultsSplit;
         private readonly ImageList _treeImages;
+        private readonly List<Image> _actionIcons = new List<Image>();
+        private readonly Image _queryScriptIcon;
         private readonly ContextMenuStrip _connectionNodeMenu;
         private readonly ContextMenuStrip _connectionBlankMenu;
         private readonly ContextMenuStrip _treeNodeCopyMenu;
         private readonly ContextMenuStrip _queryProfileMenu;
         private readonly Font _previewHeaderTypeFont;
         private Font _treeCommentFont;
+        private Font _treeActiveNameFont;
         private readonly ToolStripMenuItem _editConnectionMenuItem;
         private readonly ToolStripMenuItem _deleteConnectionMenuItem;
         private readonly ToolStripMenuItem _setCurrentConnectionMenuItem;
@@ -150,9 +153,13 @@ namespace DB2Sheet.UI
                 ImageList = _treeImages,
                 ShowNodeToolTips = true
             };
+            _queryScriptIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_script.png");
+            int queryLineHeight = TextRenderer.MeasureText("方案", Font).Height;
             _queryProfiles = new ListBox
             {
                 Dock = DockStyle.Fill,
+                DrawMode = DrawMode.OwnerDrawFixed,
+                ItemHeight = Math.Max(20, queryLineHeight + 4),
                 DisplayMember = nameof(QueryItem.DisplayName),
                 IntegralHeight = false
             };
@@ -250,9 +257,9 @@ namespace DB2Sheet.UI
             menu.Items.Add(editMenu);
             MainMenuStrip = menu;
 
-            Button previewButton = ButtonOf("预览");
-            Button exportButton = ButtonOf("写入 Sheet");
-            Button saveButton = ButtonOf("保存方案");
+            Button previewButton = ButtonOf("预览", "icon_execute.png");
+            Button exportButton = ButtonOf("写入 Sheet", "icon_writeexcel.png");
+            Button saveButton = ButtonOf("保存方案", "icon_save.png");
             FlowLayoutPanel sqlActions = new FlowLayoutPanel
             {
                 AutoSize = true,
@@ -316,6 +323,7 @@ namespace DB2Sheet.UI
             _sql.ExecuteSelectionRequested += (sender, args) => PreviewSelectedQuery();
             _queryProfiles.SelectedIndexChanged += QueryProfilesSelectedIndexChanged;
             _queryProfiles.MouseUp += QueryProfilesMouseUp;
+            _queryProfiles.DrawItem += QueryProfilesDrawItem;
             _preview.RowPostPaint += PreviewRowPostPaint;
             _preview.CellPainting += PreviewCellPainting;
             _connectionsTree.DrawNode += ConnectionsTreeDrawNode;
@@ -964,23 +972,40 @@ namespace DB2Sheet.UI
             _connectionsTree.BeforeExpand -= ConnectionsTreeBeforeExpand;
             _connectionsTree.AfterSelect -= ConnectionsTreeAfterSelect;
             _queryProfiles.MouseUp -= QueryProfilesMouseUp;
+            _queryProfiles.DrawItem -= QueryProfilesDrawItem;
             _preview.RowPostPaint -= PreviewRowPostPaint;
             _preview.CellPainting -= PreviewCellPainting;
             _connectionNodeMenu.Dispose();
             _connectionBlankMenu.Dispose();
             _queryProfileMenu.Dispose();
             _treeImages.Dispose();
+            foreach (Image icon in _actionIcons)
+                icon.Dispose();
+            _actionIcons.Clear();
+            _queryScriptIcon.Dispose();
             _previewHeaderTypeFont.Dispose();
             if (_treeCommentFont != null)
             {
                 _treeCommentFont.Dispose();
                 _treeCommentFont = null;
             }
+            if (_treeActiveNameFont != null)
+            {
+                _treeActiveNameFont.Dispose();
+                _treeActiveNameFont = null;
+            }
         }
 
-        /// <summary>表和视图有注释时，编码用正文字体，注释用灰色斜体，避免和编码混在一起。</summary>
+        /// <summary>自绘两类节点：当前连接根节点，以及带注释的表和视图。</summary>
+        /// <remarks>
+        /// 当前连接的名称加粗，后缀「 [当前]」用正文字重；未选中时铺浅色底。
+        /// 表和视图有注释时，编码用正文字体，注释用灰色斜体，避免和编码混在一起。
+        /// </remarks>
         private void ConnectionsTreeDrawNode(object sender, DrawTreeNodeEventArgs e)
         {
+            if (e.Node != null && DrawActiveConnectionNode(e))
+                return;
+
             DatabaseObjectMetadata item = e.Node == null ? null : e.Node.Tag as DatabaseObjectMetadata;
             if (item == null || string.IsNullOrWhiteSpace(item.Comment))
             {
@@ -1005,6 +1030,60 @@ namespace DB2Sheet.UI
             int nameWidth = TextRenderer.MeasureText(e.Graphics, name, nameFont, new Size(int.MaxValue, e.Bounds.Height), flags).Width;
             Rectangle commentBounds = new Rectangle(e.Bounds.X + nameWidth, e.Bounds.Y, Math.Max(0, e.Bounds.Width - nameWidth), e.Bounds.Height);
             TextRenderer.DrawText(e.Graphics, comment, commentFont, commentBounds, commentColor, backColor, flags | TextFormatFlags.EndEllipsis);
+        }
+
+        /// <summary>绘制当前连接根节点：名称加粗，「 [当前]」用另一套字重和颜色。</summary>
+        /// <param name="e">树节点绘制参数。文字区从标签起点延伸到树的右边缘，不覆盖图标。</param>
+        /// <returns>该节点是当前连接并已绘制时返回 true；否则返回 false，由调用方继续默认绘制。</returns>
+        private bool DrawActiveConnectionNode(DrawTreeNodeEventArgs e)
+        {
+            ConnectionProfileSnapshot connection = e.Node.Tag as ConnectionProfileSnapshot;
+            if (connection == null) return false;
+            if (!string.Equals(_activeConnection?.Id, connection.Id, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            bool selected = (e.State & TreeNodeStates.Selected) != 0;
+            Color backColor = selected ? SystemColors.Highlight : Color.FromArgb(255, 243, 205);
+            Color nameColor = selected ? SystemColors.HighlightText : _connectionsTree.ForeColor;
+            Color markColor = selected ? SystemColors.HighlightText : SystemColors.GrayText;
+            Font nameFont = TreeActiveNameFont(_connectionsTree.Font);
+            Font markFont = _connectionsTree.Font;
+            string name = connection.Name ?? string.Empty;
+            const string mark = " [当前]";
+            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+            Rectangle row = new Rectangle(
+                e.Bounds.X,
+                e.Bounds.Y,
+                Math.Max(0, _connectionsTree.ClientSize.Width - e.Bounds.X),
+                e.Bounds.Height);
+            using (SolidBrush brush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(brush, row);
+            }
+
+            int markWidth = TextRenderer.MeasureText(e.Graphics, mark, markFont, new Size(int.MaxValue, row.Height), flags).Width;
+            int measuredName = TextRenderer.MeasureText(e.Graphics, name, nameFont, new Size(int.MaxValue, row.Height), flags).Width;
+            int nameWidth = Math.Min(measuredName, Math.Max(0, row.Width - markWidth));
+            Rectangle nameBounds = new Rectangle(row.X, row.Y, nameWidth, row.Height);
+            Rectangle markBounds = new Rectangle(row.X + nameWidth, row.Y, Math.Max(0, row.Width - nameWidth), row.Height);
+            TextRenderer.DrawText(e.Graphics, name, nameFont, nameBounds, nameColor, backColor, flags | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(e.Graphics, mark, markFont, markBounds, markColor, backColor, flags | TextFormatFlags.EndEllipsis);
+            return true;
+        }
+
+        /// <summary>按连接树当前字体准备当前连接名称用的粗体。字体变化时替换旧实例。</summary>
+        private Font TreeActiveNameFont(Font treeFont)
+        {
+            if (_treeActiveNameFont != null
+                && _treeActiveNameFont.FontFamily.Name == treeFont.FontFamily.Name
+                && Math.Abs(_treeActiveNameFont.Size - treeFont.Size) < 0.1f)
+            {
+                return _treeActiveNameFont;
+            }
+
+            if (_treeActiveNameFont != null) _treeActiveNameFont.Dispose();
+            _treeActiveNameFont = new Font(treeFont, FontStyle.Bold);
+            return _treeActiveNameFont;
         }
 
         /// <summary>按连接树当前字体准备注释用的斜体。字体变化时替换旧实例。</summary>
@@ -1060,6 +1139,35 @@ namespace DB2Sheet.UI
                 bounds,
                 _preview.RowHeadersDefaultCellStyle.ForeColor,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+        }
+
+        /// <summary>在查询方案名称左侧绘制脚本图标。列表仍按名称绑定，自绘只负责图标和省略过长名称。</summary>
+        private void QueryProfilesDrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+
+            e.DrawBackground();
+            QueryItem item = _queryProfiles.Items[e.Index] as QueryItem;
+            string name = item != null ? item.DisplayName : Convert.ToString(_queryProfiles.Items[e.Index]);
+            const int iconSize = 16;
+            const int gap = 4;
+            int iconX = e.Bounds.X + gap;
+            int iconY = e.Bounds.Y + Math.Max(0, (e.Bounds.Height - iconSize) / 2);
+            e.Graphics.DrawImage(_queryScriptIcon, iconX, iconY, iconSize, iconSize);
+
+            Rectangle textBounds = new Rectangle(
+                iconX + iconSize + gap,
+                e.Bounds.Y,
+                Math.Max(0, e.Bounds.Right - iconX - iconSize - gap),
+                e.Bounds.Height);
+            TextRenderer.DrawText(
+                e.Graphics,
+                name ?? string.Empty,
+                e.Font,
+                textBounds,
+                e.ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            e.DrawFocusRectangle();
         }
 
         private void QueryProfilesMouseUp(object sender, MouseEventArgs e)
@@ -1606,7 +1714,54 @@ namespace DB2Sheet.UI
             _setCurrentConnectionMenuItem.Enabled = hasSelection;
         }
 
-        private static Button ButtonOf(string text) => new Button { Text = text, AutoSize = true };
+        /// <summary>创建标题栏操作按钮，图标在文字左侧，高度留在 30 像素标题栏内。</summary>
+        /// <param name="text">按钮文字。</param>
+        /// <param name="iconFileName">Resources 目录下的图标文件名。返回按钮持有的图像在窗体关闭时释放。</param>
+        /// <returns>已设置图标和紧凑边距的按钮。</returns>
+        private Button ButtonOf(string text, string iconFileName)
+        {
+            Image icon = CreateActionIcon(iconFileName);
+            _actionIcons.Add(icon);
+            return new Button
+            {
+                Text = text,
+                Image = icon,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(2, 0, 2, 0),
+                Margin = new Padding(0, 0, 3, 0),
+                UseVisualStyleBackColor = true
+            };
+        }
+
+        /// <summary>加载 16 像素操作图标，并在右侧留出 4 像素透明间隔，使文字不贴住图标。</summary>
+        /// <param name="iconFileName">Resources 目录下的图标文件名。</param>
+        /// <returns>调用方负责释放的位图。宽度为 20 像素。</returns>
+        private static Image CreateActionIcon(string iconFileName)
+        {
+            using (Image source = DatabaseTreeImageCatalog.LoadActionIcon(iconFileName))
+            {
+                Bitmap spaced = new Bitmap(source.Width + 4, source.Height);
+                try
+                {
+                    using (Graphics graphics = Graphics.FromImage(spaced))
+                    {
+                        graphics.Clear(Color.Transparent);
+                        graphics.DrawImage(source, 0, 0, source.Width, source.Height);
+                    }
+
+                    return spaced;
+                }
+                catch
+                {
+                    spaced.Dispose();
+                    throw;
+                }
+            }
+        }
 
         private static Panel SectionPanel(string title, Control content)
         {
