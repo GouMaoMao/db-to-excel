@@ -19,19 +19,23 @@ namespace DB2Sheet.Providers
     {
         private readonly JdbcBridgeHost _host;
         private readonly IJdbcEnvironmentStore _environment;
+        private readonly ILogger _logger;
         private readonly ISqlReadOnlyValidator _readOnlyValidator;
 
         /// <summary>创建 JDBC 提供程序。构造函数对程序集内部可见，因为宿主类型不对外公开。</summary>
         /// <param name="host">转接进程宿主。调用方拥有其生命周期。</param>
         /// <param name="environment">JDBC 环境存储。</param>
+        /// <param name="logger">注释缺口写入的文件日志。为空时不记录。字段注释由结果流在读到列信息时记录。</param>
         /// <param name="readOnlyValidator">只读 SQL 校验器；为空时使用默认实现。</param>
         internal JdbcProvider(
             JdbcBridgeHost host,
             IJdbcEnvironmentStore environment,
+            ILogger logger = null,
             ISqlReadOnlyValidator readOnlyValidator = null)
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
             _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+            _logger = logger;
             _readOnlyValidator = readOnlyValidator ?? new SqlReadOnlyValidator();
         }
 
@@ -192,9 +196,16 @@ namespace DB2Sheet.Providers
                 DatabaseObjectKind kind = string.Equals(item.Kind, "view", StringComparison.OrdinalIgnoreCase)
                     ? DatabaseObjectKind.View
                     : DatabaseObjectKind.Table;
-                objects.Add(new DatabaseObjectMetadata(item.Schema, item.Name, kind));
+                objects.Add(new DatabaseObjectMetadata(item.Schema, item.Name, kind, CommentDiagnostics.Normalize(item.Comment)));
             }
 
+            CommentDiagnostics.Write(
+                _logger,
+                ProviderId,
+                CommentDiagnostics.TableStage,
+                reply.CommentNote,
+                objects.Count,
+                reply.CommentFailed);
             return objects.AsReadOnly();
         }
 

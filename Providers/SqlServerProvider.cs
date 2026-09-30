@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.SqlClient;
 using System.Threading;
 using System.Threading.Tasks;
+using DB2Sheet.Contracts;
 using DB2Sheet.Models;
 
 namespace DB2Sheet.Providers
@@ -22,6 +24,12 @@ namespace DB2Sheet.Providers
             new ParameterDefinition(DatabaseParameterKeys.Encrypt, "加密连接", ParameterValueType.Boolean, false, "true"),
             new ParameterDefinition(DatabaseParameterKeys.TrustServerCertificate, "信任服务器证书", ParameterValueType.Boolean, false, "false")
         }.AsReadOnly();
+
+        /// <summary>创建 SQL Server 提供程序。</summary>
+        /// <param name="logger">注释缺口写入的文件日志。为空时不记录。</param>
+        public SqlServerProvider(ILogger logger = null) : base(logger)
+        {
+        }
 
         /// <inheritdoc/>
         public override string ProviderId => "sqlserver";
@@ -82,26 +90,54 @@ namespace DB2Sheet.Providers
             string databaseName,
             CancellationToken cancellationToken)
         {
-            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
             using (DbConnection connection = CreateConnection(CreateDatabaseSnapshot(profile, databaseName)))
             {
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-                using (DbCommand command = connection.CreateCommand())
+                try
                 {
-                    command.CommandText = "SELECT s.[name], o.[name], o.[type] FROM sys.objects o INNER JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE o.[type] IN ('U', 'V') AND o.is_ms_shipped = 0 ORDER BY s.[name], o.[type], o.[name]";
-                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    List<DatabaseObjectMetadata> objects = await ReadSqlServerObjectsAsync(connection, true, cancellationToken).ConfigureAwait(false);
+                    LogIfTableCommentsEmpty(objects);
+                    return objects.AsReadOnly();
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    LogComment(CommentDiagnostics.TableStage, exception.Message, 0, true, exception);
+                    List<DatabaseObjectMetadata> objects = await ReadSqlServerObjectsAsync(connection, false, cancellationToken).ConfigureAwait(false);
+                    return objects.AsReadOnly();
+                }
+            }
+        }
+
+        private async Task<List<DatabaseObjectMetadata>> ReadSqlServerObjectsAsync(
+            DbConnection connection,
+            bool includeComment,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = includeComment
+                    ? "SELECT s.[name], o.[name], o.[type], CAST(ep.[value] AS nvarchar(4000)) FROM sys.objects o INNER JOIN sys.schemas s ON s.schema_id = o.schema_id LEFT JOIN sys.extended_properties ep ON ep.major_id = o.object_id AND ep.minor_id = 0 AND ep.[name] = N'MS_Description' WHERE o.[type] IN ('U', 'V') AND o.is_ms_shipped = 0 ORDER BY s.[name], o.[type], o.[name]"
+                    : "SELECT s.[name], o.[name], o.[type] FROM sys.objects o INNER JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE o.[type] IN ('U', 'V') AND o.is_ms_shipped = 0 ORDER BY s.[name], o.[type], o.[name]";
+                using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                     {
-                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                        {
-                            objects.Add(new DatabaseObjectMetadata(
-                                reader.GetString(0),
-                                reader.GetString(1),
-                                reader.GetString(2) == "V" ? DatabaseObjectKind.View : DatabaseObjectKind.Table));
-                        }
+                        string comment = includeComment ? CommentDiagnostics.Normalize(ReadText(reader, 3)) : string.Empty;
+                        objects.Add(new DatabaseObjectMetadata(
+                            ReadText(reader, 0),
+                            ReadText(reader, 1),
+                            ReadText(reader, 2) == "V" ? DatabaseObjectKind.View : DatabaseObjectKind.Table,
+                            comment));
                     }
                 }
             }
-            return objects.AsReadOnly();
+
+            return objects;
         }
 
         /// <inheritdoc/>

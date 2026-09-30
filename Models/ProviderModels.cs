@@ -86,17 +86,19 @@ namespace DB2Sheet.Models
         public string VisibleWhenValue { get; }
     }
 
-    /// <summary>描述查询结果中的一列及其 CLR 数据类型。</summary>
-    /// <remarks>类型以程序集限定名称序列化；无法解析时回退为 <see cref="object"/>。</remarks>
+    /// <summary>描述查询结果中的一列、其注释和 CLR 数据类型。</summary>
+    /// <remarks>类型以程序集限定名称序列化；无法解析时回退为 <see cref="object"/>。注释来自数据库目录，查不到时为空。</remarks>
     [DataContract]
     public sealed class ResultColumn
     {
         /// <summary>创建结果列定义。</summary>
-        /// <param name="name">列名称。</param>
+        /// <param name="name">列名称，即结果中的字段编码，包含查询别名。</param>
         /// <param name="dataType">列的 CLR 类型。</param>
-        public ResultColumn(string name, Type dataType)
+        /// <param name="comment">基列在数据库中的注释。没有注释时使用空字符串。</param>
+        public ResultColumn(string name, Type dataType, string comment = null)
         {
             Name = name ?? string.Empty;
+            Comment = comment ?? string.Empty;
             DataTypeName = (dataType ?? typeof(object)).AssemblyQualifiedName;
         }
 
@@ -107,6 +109,10 @@ namespace DB2Sheet.Models
         [DataMember(Order = 2)]
         /// <summary>获取序列化后的程序集限定类型名。</summary>
         public string DataTypeName { get; private set; }
+
+        [DataMember(Order = 3)]
+        /// <summary>获取字段注释。目录中没有注释时为空字符串。</summary>
+        public string Comment { get; private set; }
 
         /// <summary>解析并返回列的 CLR 类型。</summary>
         /// <returns>解析出的类型；失败时返回 <see cref="object"/>。</returns>

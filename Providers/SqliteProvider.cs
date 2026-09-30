@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Data.SQLite;
 using System.IO;
+using DB2Sheet.Contracts;
 using DB2Sheet.Models;
 
 namespace DB2Sheet.Providers
@@ -16,6 +17,12 @@ namespace DB2Sheet.Providers
         {
             new ParameterDefinition(DatabaseParameterKeys.FilePath, "数据库文件", ParameterValueType.FilePath, true)
         }.AsReadOnly();
+
+        /// <summary>创建 SQLite 提供程序。</summary>
+        /// <param name="logger">注释缺口写入的文件日志。为空时不记录。</param>
+        public SqliteProvider(ILogger logger = null) : base(logger)
+        {
+        }
 
         /// <inheritdoc/>
         public override string ProviderId => "sqlite";
@@ -77,7 +84,9 @@ namespace DB2Sheet.Providers
                     }
                 }
             }
-            return objects.AsReadOnly();
+            IReadOnlyList<DatabaseObjectMetadata> listed = objects.AsReadOnly();
+            LogIfTableCommentsEmpty(listed, "SQLite 不提供表注释。");
+            return listed;
         }
 
         /// <inheritdoc/>

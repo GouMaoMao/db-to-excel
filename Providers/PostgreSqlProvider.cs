@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
+using DB2Sheet.Contracts;
 using DB2Sheet.Models;
 using Npgsql;
 
@@ -19,6 +21,12 @@ namespace DB2Sheet.Providers
             new ParameterDefinition(DatabaseParameterKeys.UserName, "用户名", ParameterValueType.Text, true),
             new ParameterDefinition(DatabaseParameterKeys.Password, "密码", ParameterValueType.Password, false, null, true)
         }.AsReadOnly();
+
+        /// <summary>创建 PostgreSQL 提供程序。</summary>
+        /// <param name="logger">注释缺口写入的文件日志。为空时不记录。</param>
+        public PostgreSqlProvider(ILogger logger = null) : base(logger)
+        {
+        }
 
         /// <inheritdoc/>
         public override string ProviderId => "postgresql";
@@ -72,28 +80,55 @@ namespace DB2Sheet.Providers
             string databaseName,
             CancellationToken cancellationToken)
         {
-            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
             using (DbConnection connection = CreateConnection(CreateDatabaseSnapshot(profile, databaseName)))
             {
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-                using (DbCommand command = connection.CreateCommand())
+                try
                 {
-                    command.CommandText = "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database() ORDER BY table_schema, table_type, table_name";
-                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    List<DatabaseObjectMetadata> objects = await ReadPostgreSqlObjectsAsync(connection, true, cancellationToken).ConfigureAwait(false);
+                    LogIfTableCommentsEmpty(objects);
+                    return objects.AsReadOnly();
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    LogComment(CommentDiagnostics.TableStage, exception.Message, 0, true, exception);
+                    List<DatabaseObjectMetadata> objects = await ReadPostgreSqlObjectsAsync(connection, false, cancellationToken).ConfigureAwait(false);
+                    return objects.AsReadOnly();
+                }
+            }
+        }
+
+        private async Task<List<DatabaseObjectMetadata>> ReadPostgreSqlObjectsAsync(
+            DbConnection connection,
+            bool includeComment,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = includeComment
+                    ? "SELECT n.nspname, c.relname, CASE WHEN c.relkind IN ('v', 'm') THEN 'VIEW' ELSE 'BASE TABLE' END, obj_description(c.oid, 'pg_class') FROM pg_catalog.pg_class c INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname <> 'pg_catalog' AND n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname, c.relkind, c.relname"
+                    : "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema <> 'pg_catalog' AND table_schema <> 'information_schema' ORDER BY table_schema, table_type, table_name";
+                using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                     {
-                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                        {
-                            objects.Add(new DatabaseObjectMetadata(
-                                reader.GetString(0),
-                                reader.GetString(1),
-                                reader.GetString(2).Equals("VIEW", System.StringComparison.OrdinalIgnoreCase)
-                                    ? DatabaseObjectKind.View
-                                    : DatabaseObjectKind.Table));
-                        }
+                        string comment = includeComment ? CommentDiagnostics.Normalize(ReadText(reader, 3)) : string.Empty;
+                        string kind = ReadText(reader, 2);
+                        objects.Add(new DatabaseObjectMetadata(
+                            ReadText(reader, 0),
+                            ReadText(reader, 1),
+                            kind.Equals("VIEW", StringComparison.OrdinalIgnoreCase) ? DatabaseObjectKind.View : DatabaseObjectKind.Table,
+                            comment));
                     }
                 }
             }
-            return objects.AsReadOnly();
+
+            return objects;
         }
 
         /// <inheritdoc/>

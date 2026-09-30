@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,12 +22,15 @@ namespace DB2Sheet.Providers
     /// </remarks>
     public abstract class DatabaseProviderBase : IDatabaseQueryProvider
     {
+        private readonly ILogger _logger;
         private readonly ISqlReadOnlyValidator _readOnlyValidator;
 
-        /// <summary>初始化数据库提供程序并注入只读 SQL 校验器。</summary>
+        /// <summary>初始化数据库提供程序并注入日志和只读 SQL 校验器。</summary>
+        /// <param name="logger">注释缺口写入的文件日志。为空时不记录。</param>
         /// <param name="readOnlyValidator">校验器；为空时创建默认实现。</param>
-        protected DatabaseProviderBase(ISqlReadOnlyValidator readOnlyValidator = null)
+        protected DatabaseProviderBase(ILogger logger = null, ISqlReadOnlyValidator readOnlyValidator = null)
         {
+            _logger = logger;
             _readOnlyValidator = readOnlyValidator ?? new SqlReadOnlyValidator();
         }
 
@@ -213,6 +217,7 @@ namespace DB2Sheet.Providers
 
             DbConnection connection = null;
             DbCommand command = null;
+            DbDataReader reader = null;
             try
             {
                 progress?.Report(new OperationProgress
@@ -239,23 +244,80 @@ namespace DB2Sheet.Providers
                     IsIndeterminate = true
                 });
                 command = CreateCommand(connection, request.QueryText, request.TimeoutSeconds);
-                DbDataReader reader = await command.ExecuteReaderAsync(
-                    CommandBehavior.SequentialAccess,
-                    cancellationToken).ConfigureAwait(false);
+                reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
                 return new DatabaseResultStream(
                     connection,
                     command,
                     reader,
+                    null,
                     request.RowLimit,
                     progress,
                     cancellationToken);
             }
             catch
             {
+                if (reader != null)
+                {
+                    try
+                    {
+                        reader.Dispose();
+                    }
+                    catch (Exception)
+                    {
+                        // 失败路径上读取器可能已随命令关闭。
+                    }
+                }
+
                 command?.Dispose();
                 connection?.Dispose();
                 throw;
             }
+        }
+
+        /// <summary>把表注释整批为空记入日志。列表为空或已有任一注释时不记。</summary>
+        /// <param name="objects">刚刚读到的表和视图。</param>
+        /// <param name="reason">为空时使用「表注释均为空」。</param>
+        protected void LogIfTableCommentsEmpty(IReadOnlyList<DatabaseObjectMetadata> objects, string reason = null)
+        {
+            if (objects == null || objects.Count == 0) return;
+            for (int index = 0; index < objects.Count; index++)
+            {
+                if (!string.IsNullOrEmpty(objects[index].Comment)) return;
+            }
+
+            LogComment(CommentDiagnostics.TableStage, string.IsNullOrWhiteSpace(reason) ? "表注释均为空。" : reason, objects.Count, false);
+        }
+
+        /// <summary>记录表注释没有取到。不改变对象列表。</summary>
+        /// <param name="stage">表注释。</param>
+        /// <param name="reason">排查用原因。</param>
+        /// <param name="count">涉及的对象或列数量。</param>
+        /// <param name="failed">目录调用失败时为 true。</param>
+        /// <param name="exception">目录异常。仅失败时写入日志。</param>
+        protected void LogComment(string stage, string reason, int count, bool failed, Exception exception = null)
+        {
+            CommentDiagnostics.Write(_logger, ProviderId, stage, reason, count, failed, exception);
+        }
+
+        /// <summary>向命令添加一个字符串参数。</summary>
+        /// <param name="command">目标命令。</param>
+        /// <param name="name">参数名，含提供程序要求的前缀。</param>
+        /// <param name="value">参数值。</param>
+        protected static void AddParameter(DbCommand command, string name, string value)
+        {
+            DbParameter parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value ?? string.Empty;
+            command.Parameters.Add(parameter);
+        }
+
+        /// <summary>读取可能为空的字符串列。</summary>
+        /// <param name="reader">已定位到当前行的读取器。</param>
+        /// <param name="ordinal">列序号。</param>
+        /// <returns>列文本；数据库空值返回空字符串。</returns>
+        protected static string ReadText(DbDataReader reader, int ordinal)
+        {
+            return reader.IsDBNull(ordinal) ? string.Empty : Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? string.Empty;
         }
 
         /// <summary>从连接参数读取布尔值，格式无效时使用默认值。</summary>

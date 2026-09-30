@@ -42,6 +42,7 @@ namespace DB2Sheet.UI
         private readonly ContextMenuStrip _treeNodeCopyMenu;
         private readonly ContextMenuStrip _queryProfileMenu;
         private readonly Font _previewHeaderTypeFont;
+        private Font _treeCommentFont;
         private readonly ToolStripMenuItem _editConnectionMenuItem;
         private readonly ToolStripMenuItem _deleteConnectionMenuItem;
         private readonly ToolStripMenuItem _setCurrentConnectionMenuItem;
@@ -144,6 +145,7 @@ namespace DB2Sheet.UI
             _connectionsTree = new TreeView
             {
                 Dock = DockStyle.Fill,
+                DrawMode = TreeViewDrawMode.OwnerDrawText,
                 HideSelection = false,
                 ImageList = _treeImages,
                 ShowNodeToolTips = true
@@ -316,6 +318,7 @@ namespace DB2Sheet.UI
             _queryProfiles.MouseUp += QueryProfilesMouseUp;
             _preview.RowPostPaint += PreviewRowPostPaint;
             _preview.CellPainting += PreviewCellPainting;
+            _connectionsTree.DrawNode += ConnectionsTreeDrawNode;
             _connectionsTree.NodeMouseClick += ConnectionsTreeNodeMouseClick;
             _connectionsTree.MouseUp += ConnectionsTreeMouseUp;
             _connectionsTree.NodeMouseDoubleClick += ConnectionsTreeNodeMouseDoubleClick;
@@ -896,6 +899,16 @@ namespace DB2Sheet.UI
             }
         }
 
+        /// <summary>表或视图节点显示编码，有注释时在后面空两格带上注释。</summary>
+        /// <param name="item">数据库对象。</param>
+        /// <returns>树节点标题。没有注释时只有编码。</returns>
+        private static string FormatObjectCaption(DatabaseObjectMetadata item)
+        {
+            if (item == null) return string.Empty;
+            if (string.IsNullOrWhiteSpace(item.Comment)) return item.Name ?? string.Empty;
+            return (item.Name ?? string.Empty) + "  " + item.Comment.Trim();
+        }
+
         /// <summary>按节点类型取可复制的干净名称（连接不含「 [当前]」后缀）。</summary>
         private static string ResolveNodeCopyName(TreeNode node)
         {
@@ -944,6 +957,7 @@ namespace DB2Sheet.UI
             _metadataCancellation?.Dispose();
             _metadataCancellation = null;
             _connections.Changed -= ConnectionsChanged;
+            _connectionsTree.DrawNode -= ConnectionsTreeDrawNode;
             _connectionsTree.NodeMouseClick -= ConnectionsTreeNodeMouseClick;
             _connectionsTree.MouseUp -= ConnectionsTreeMouseUp;
             _connectionsTree.NodeMouseDoubleClick -= ConnectionsTreeNodeMouseDoubleClick;
@@ -957,6 +971,55 @@ namespace DB2Sheet.UI
             _queryProfileMenu.Dispose();
             _treeImages.Dispose();
             _previewHeaderTypeFont.Dispose();
+            if (_treeCommentFont != null)
+            {
+                _treeCommentFont.Dispose();
+                _treeCommentFont = null;
+            }
+        }
+
+        /// <summary>表和视图有注释时，编码用正文字体，注释用灰色斜体，避免和编码混在一起。</summary>
+        private void ConnectionsTreeDrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            DatabaseObjectMetadata item = e.Node == null ? null : e.Node.Tag as DatabaseObjectMetadata;
+            if (item == null || string.IsNullOrWhiteSpace(item.Comment))
+            {
+                e.DrawDefault = true;
+                return;
+            }
+
+            bool selected = (e.State & TreeNodeStates.Selected) != 0;
+            Color backColor = selected ? SystemColors.Highlight : _connectionsTree.BackColor;
+            Color nameColor = selected ? SystemColors.HighlightText : _connectionsTree.ForeColor;
+            Color commentColor = selected ? SystemColors.HighlightText : SystemColors.GrayText;
+            Font nameFont = _connectionsTree.Font;
+            Font commentFont = TreeCommentFont(nameFont);
+            string name = item.Name ?? string.Empty;
+            string comment = "  " + item.Comment.Trim();
+            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+            using (SolidBrush brush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(brush, e.Bounds);
+            }
+            TextRenderer.DrawText(e.Graphics, name, nameFont, e.Bounds, nameColor, backColor, flags | TextFormatFlags.EndEllipsis);
+            int nameWidth = TextRenderer.MeasureText(e.Graphics, name, nameFont, new Size(int.MaxValue, e.Bounds.Height), flags).Width;
+            Rectangle commentBounds = new Rectangle(e.Bounds.X + nameWidth, e.Bounds.Y, Math.Max(0, e.Bounds.Width - nameWidth), e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, comment, commentFont, commentBounds, commentColor, backColor, flags | TextFormatFlags.EndEllipsis);
+        }
+
+        /// <summary>按连接树当前字体准备注释用的斜体。字体变化时替换旧实例。</summary>
+        private Font TreeCommentFont(Font treeFont)
+        {
+            if (_treeCommentFont != null
+                && _treeCommentFont.FontFamily.Name == treeFont.FontFamily.Name
+                && Math.Abs(_treeCommentFont.Size - treeFont.Size) < 0.1f)
+            {
+                return _treeCommentFont;
+            }
+
+            if (_treeCommentFont != null) _treeCommentFont.Dispose();
+            _treeCommentFont = new Font(treeFont, FontStyle.Italic);
+            return _treeCommentFont;
         }
 
         private void PreviewCellPainting(object sender, DataGridViewCellPaintingEventArgs e)
@@ -972,22 +1035,11 @@ namespace DB2Sheet.UI
             int nameHeight = Math.Max(14, bounds.Height / 2);
             Rectangle nameBounds = new Rectangle(bounds.X, bounds.Y, bounds.Width, nameHeight);
             Rectangle typeBounds = new Rectangle(bounds.X, bounds.Y + nameHeight - 1, bounds.Width, bounds.Height - nameHeight + 1);
-            TextRenderer.DrawText(
-                e.Graphics,
-                name,
-                e.CellStyle.Font,
-                nameBounds,
-                e.CellStyle.ForeColor,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
+            TextRenderer.DrawText(e.Graphics, name, e.CellStyle.Font, nameBounds, e.CellStyle.ForeColor, flags);
             if (!string.IsNullOrWhiteSpace(typeName))
             {
-                TextRenderer.DrawText(
-                    e.Graphics,
-                    typeName,
-                    _previewHeaderTypeFont,
-                    typeBounds,
-                    SystemColors.GrayText,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(e.Graphics, typeName, _previewHeaderTypeFont, typeBounds, SystemColors.GrayText, flags);
             }
 
             e.Handled = true;
@@ -1388,9 +1440,12 @@ namespace DB2Sheet.UI
                         foreach (DatabaseObjectMetadata item in schemaGroup)
                         {
                             bool isView = item.Kind == DatabaseObjectKind.View;
-                            TreeNode objectNode = new TreeNode(item.Name)
+                            string caption = FormatObjectCaption(item);
+                            string nodeText = string.IsNullOrWhiteSpace(item.Comment) ? caption : caption + "  ";
+                            TreeNode objectNode = new TreeNode(nodeText)
                             {
                                 Tag = item,
+                                ToolTipText = caption,
                                 ImageKey = isView ? DatabaseTreeImageCatalog.View(false) : DatabaseTreeImageCatalog.Table(false),
                                 SelectedImageKey = isView ? DatabaseTreeImageCatalog.View(false) : DatabaseTreeImageCatalog.Table(false)
                             };

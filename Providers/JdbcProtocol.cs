@@ -66,6 +66,12 @@ namespace DB2Sheet.Providers
 
         /// <summary>获取或设置表和视图。</summary>
         public List<JdbcObjectInfo> Objects { get; set; }
+
+        /// <summary>获取或设置注释没有取到时的原因。为空表示不需要记日志。</summary>
+        public string CommentNote { get; set; }
+
+        /// <summary>获取或设置注释目录调用是否失败。失败记 Warning，仅是空注释记 Information。</summary>
+        public bool CommentFailed { get; set; }
     }
 
     /// <summary>描述 JDBC 结果中的一列及其约定的 CLR 类型短名。</summary>
@@ -76,6 +82,9 @@ namespace DB2Sheet.Providers
 
         /// <summary>获取或设置类型短名，例如 string、long、decimal。</summary>
         public string Type { get; set; }
+
+        /// <summary>获取或设置字段注释。</summary>
+        public string Comment { get; set; }
     }
 
     /// <summary>描述 JDBC 目录中的一个表或视图。</summary>
@@ -89,6 +98,9 @@ namespace DB2Sheet.Providers
 
         /// <summary>获取或设置对象种类，table 或 view。</summary>
         public string Kind { get; set; }
+
+        /// <summary>获取或设置对象注释。</summary>
+        public string Comment { get; set; }
     }
 
     /// <summary>把 JDBC 转接请求和响应编码为单行 JSON。</summary>
@@ -138,7 +150,9 @@ namespace DB2Sheet.Providers
                 Columns = ReadColumns(payload),
                 Rows = ReadRows(payload),
                 Names = ReadNames(payload),
-                Objects = ReadObjects(payload)
+                Objects = ReadObjects(payload),
+                CommentNote = Text(payload, "commentNote"),
+                CommentFailed = Flag(payload, "commentFailed")
             };
             return reply;
         }
@@ -224,7 +238,8 @@ namespace DB2Sheet.Providers
                 columns.Add(new JdbcColumnInfo
                 {
                     Name = Text(column, "name"),
-                    Type = Text(column, "type")
+                    Type = Text(column, "type"),
+                    Comment = Text(column, "comment")
                 });
             }
 
@@ -272,7 +287,8 @@ namespace DB2Sheet.Providers
                 {
                     Schema = Text(row, "schema"),
                     Name = Text(row, "name"),
-                    Kind = Text(row, "kind")
+                    Kind = Text(row, "kind"),
+                    Comment = Text(row, "comment")
                 });
             }
 
@@ -283,6 +299,13 @@ namespace DB2Sheet.Providers
         {
             if (!payload.TryGetValue(key, out object value) || value == null) return string.Empty;
             return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+
+        private static bool Flag(Dictionary<string, object> payload, string key)
+        {
+            if (!payload.TryGetValue(key, out object value) || value == null) return false;
+            if (value is bool flag) return flag;
+            return string.Equals(Convert.ToString(value, CultureInfo.InvariantCulture), "true", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

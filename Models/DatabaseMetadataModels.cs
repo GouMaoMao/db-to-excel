@@ -33,12 +33,14 @@ namespace DB2Sheet.Models
         /// <param name="schemaName">对象所属架构；数据库不支持架构时使用空字符串。</param>
         /// <param name="name">对象名称。</param>
         /// <param name="kind">对象类型。</param>
-        public DatabaseObjectMetadata(string schemaName, string name, DatabaseObjectKind kind)
+        /// <param name="comment">数据库中的对象注释。没有注释时使用空字符串。</param>
+        public DatabaseObjectMetadata(string schemaName, string name, DatabaseObjectKind kind, string comment = null)
         {
             if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("数据库对象名称不能为空。", nameof(name));
             SchemaName = schemaName ?? string.Empty;
             Name = name;
             Kind = kind;
+            Comment = comment ?? string.Empty;
         }
 
         /// <summary>获取对象所属架构。</summary>
@@ -47,5 +49,7 @@ namespace DB2Sheet.Models
         public string Name { get; }
         /// <summary>获取对象类型。</summary>
         public DatabaseObjectKind Kind { get; }
+        /// <summary>获取数据库对象注释。没有注释时为空字符串。</summary>
+        public string Comment { get; }
     }
 }

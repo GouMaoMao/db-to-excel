@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
+using DB2Sheet.Contracts;
 using DB2Sheet.Models;
 using MySqlConnector;
 
@@ -19,6 +21,12 @@ namespace DB2Sheet.Providers
             new ParameterDefinition(DatabaseParameterKeys.UserName, "用户名", ParameterValueType.Text, true),
             new ParameterDefinition(DatabaseParameterKeys.Password, "密码", ParameterValueType.Password, false, null, true)
         }.AsReadOnly();
+
+        /// <summary>创建 MySQL 提供程序。</summary>
+        /// <param name="logger">注释缺口写入的文件日志。为空时不记录。</param>
+        public MySqlProvider(ILogger logger = null) : base(logger)
+        {
+        }
 
         /// <inheritdoc/>
         public override string ProviderId => "mysql";
@@ -72,32 +80,57 @@ namespace DB2Sheet.Providers
             string databaseName,
             CancellationToken cancellationToken)
         {
-            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
             using (DbConnection connection = CreateConnection(profile))
             {
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-                using (DbCommand command = connection.CreateCommand())
+                try
                 {
-                    command.CommandText = "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @database ORDER BY TABLE_TYPE, TABLE_NAME";
-                    DbParameter parameter = command.CreateParameter();
-                    parameter.ParameterName = "@database";
-                    parameter.Value = databaseName;
-                    command.Parameters.Add(parameter);
-                    using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                    List<DatabaseObjectMetadata> objects = await ReadMySqlObjectsAsync(connection, databaseName, true, cancellationToken).ConfigureAwait(false);
+                    LogIfTableCommentsEmpty(objects);
+                    return objects.AsReadOnly();
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    // 带注释的目录失败时退回不含注释的列表，树仍然能展开。
+                    LogComment(CommentDiagnostics.TableStage, exception.Message, 0, true, exception);
+                    List<DatabaseObjectMetadata> objects = await ReadMySqlObjectsAsync(connection, databaseName, false, cancellationToken).ConfigureAwait(false);
+                    return objects.AsReadOnly();
+                }
+            }
+        }
+
+        private async Task<List<DatabaseObjectMetadata>> ReadMySqlObjectsAsync(
+            DbConnection connection,
+            string databaseName,
+            bool includeComment,
+            CancellationToken cancellationToken)
+        {
+            List<DatabaseObjectMetadata> objects = new List<DatabaseObjectMetadata>();
+            using (DbCommand command = connection.CreateCommand())
+            {
+                command.CommandText = includeComment
+                    ? "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @database ORDER BY TABLE_TYPE, TABLE_NAME"
+                    : "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @database ORDER BY TABLE_TYPE, TABLE_NAME";
+                AddParameter(command, "@database", databaseName);
+                using (DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                     {
-                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                        {
-                            objects.Add(new DatabaseObjectMetadata(
-                                reader.GetString(0),
-                                reader.GetString(1),
-                                reader.GetString(2).Equals("VIEW", System.StringComparison.OrdinalIgnoreCase)
-                                    ? DatabaseObjectKind.View
-                                    : DatabaseObjectKind.Table));
-                        }
+                        string comment = includeComment ? CommentDiagnostics.Normalize(ReadText(reader, 3)) : string.Empty;
+                        objects.Add(new DatabaseObjectMetadata(
+                            ReadText(reader, 0),
+                            ReadText(reader, 1),
+                            ReadText(reader, 2).Equals("VIEW", StringComparison.OrdinalIgnoreCase) ? DatabaseObjectKind.View : DatabaseObjectKind.Table,
+                            comment));
                     }
                 }
             }
-            return objects.AsReadOnly();
+
+            return objects;
         }
 
         /// <inheritdoc/>

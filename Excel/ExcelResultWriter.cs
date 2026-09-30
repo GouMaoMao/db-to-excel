@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
 using DB2Sheet.Contracts;
@@ -11,13 +12,16 @@ namespace DB2Sheet.Excel
 {
     /// <summary>使用 Excel COM Interop 将缓冲查询结果批量写入指定工作表。</summary>
     /// <remarks>
-    /// 写入前会清空目标工作表的现有内容；目标工作表不存在时会创建。
+    /// 写入前会清空目标工作表已用区域的内容和格式；目标工作表不存在时会创建。
+    /// 标题占两行：字段编码、数据类型。编码行加粗，两行都是灰色底。数据从第 3 行开始。
+    /// 标题和数据组成的表格使用灰色细网格线。
     /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
     /// 文件日志只在写入完成或失败时各记一条汇总。
     /// 应在 Excel UI 线程调用，并避免在方法外继续使用本类释放的 COM Range 和 Worksheet 引用。
     /// </remarks>
     public sealed class ExcelResultWriter : IExcelResultWriter
     {
+        private const int HeaderRowCount = 2;
         private readonly ILogger _logger;
 
         /// <summary>创建 Excel 结果写入器。</summary>
@@ -51,7 +55,7 @@ namespace DB2Sheet.Excel
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 usedRange = worksheet.UsedRange;
-                usedRange.ClearContents();
+                usedRange.Clear();
                 Release(ref usedRange);
 
                 int columnCount = result.Columns.Count;
@@ -62,7 +66,7 @@ namespace DB2Sheet.Excel
                 }
                 WriteHeaders(worksheet, result);
 
-                int targetRow = 2;
+                int targetRow = HeaderRowCount + 1;
                 int writtenBlocks = 0;
                 foreach (object[,] block in result.Blocks)
                 {
@@ -90,6 +94,7 @@ namespace DB2Sheet.Excel
                     });
                 }
 
+                ApplyTableBorder(worksheet, targetRow - 1, columnCount);
                 LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                 return rowsWritten;
             }
@@ -178,25 +183,70 @@ namespace DB2Sheet.Excel
         private static void WriteHeaders(ExcelInterop.Worksheet worksheet, BufferedQueryResult result)
         {
             int columnCount = result.Columns.Count;
-            object[,] headers = new object[1, columnCount];
+            object[,] headers = new object[HeaderRowCount, columnCount];
             for (int column = 0; column < columnCount; column++)
             {
-                headers[0, column] = FormatHeaderText(result.Columns[column]);
+                ResultColumn item = result.Columns[column];
+                headers[0, column] = item == null ? string.Empty : item.Name;
+                headers[1, column] = FormatTypeName(item);
             }
 
             ExcelInterop.Range start = null;
             ExcelInterop.Range end = null;
             ExcelInterop.Range range = null;
+            ExcelInterop.Range nameStart = null;
+            ExcelInterop.Range nameEnd = null;
+            ExcelInterop.Range nameRange = null;
+            ExcelInterop.Font font = null;
+            ExcelInterop.Interior interior = null;
             try
             {
                 start = worksheet.Cells[1, 1] as ExcelInterop.Range;
-                end = worksheet.Cells[1, columnCount] as ExcelInterop.Range;
+                end = worksheet.Cells[HeaderRowCount, columnCount] as ExcelInterop.Range;
                 range = worksheet.Range[start, end];
                 range.Value2 = headers;
-                range.Font.Bold = true;
+                interior = range.Interior;
+                interior.Color = ColorTranslator.ToOle(Color.FromArgb(217, 217, 217));
+                nameStart = worksheet.Cells[1, 1] as ExcelInterop.Range;
+                nameEnd = worksheet.Cells[1, columnCount] as ExcelInterop.Range;
+                nameRange = worksheet.Range[nameStart, nameEnd];
+                font = nameRange.Font;
+                font.Bold = true;
             }
             finally
             {
+                Release(ref font);
+                Release(ref nameRange);
+                Release(ref nameEnd);
+                Release(ref nameStart);
+                Release(ref interior);
+                Release(ref range);
+                Release(ref end);
+                Release(ref start);
+            }
+        }
+
+        /// <summary>给标题和数据区域加上灰色细网格线。没有数据时只框住两行标题。</summary>
+        private static void ApplyTableBorder(ExcelInterop.Worksheet worksheet, int lastRow, int columnCount)
+        {
+            if (lastRow < HeaderRowCount || columnCount <= 0) return;
+            ExcelInterop.Range start = null;
+            ExcelInterop.Range end = null;
+            ExcelInterop.Range range = null;
+            ExcelInterop.Borders borders = null;
+            try
+            {
+                start = worksheet.Cells[1, 1] as ExcelInterop.Range;
+                end = worksheet.Cells[lastRow, columnCount] as ExcelInterop.Range;
+                range = worksheet.Range[start, end];
+                borders = range.Borders;
+                borders.LineStyle = ExcelInterop.XlLineStyle.xlContinuous;
+                borders.Weight = ExcelInterop.XlBorderWeight.xlThin;
+                borders.Color = ColorTranslator.ToOle(Color.FromArgb(128, 128, 128));
+            }
+            finally
+            {
+                Release(ref borders);
                 Release(ref range);
                 Release(ref end);
                 Release(ref start);
@@ -223,13 +273,11 @@ namespace DB2Sheet.Excel
             }
         }
 
-        private static string FormatHeaderText(ResultColumn column)
+        private static string FormatTypeName(ResultColumn column)
         {
             if (column == null) return string.Empty;
             Type dataType = column.GetDataType();
-            string typeName = dataType == null ? string.Empty : dataType.Name;
-            if (string.IsNullOrWhiteSpace(typeName)) return column.Name;
-            return string.Format("{0}{1}{2}", column.Name, Environment.NewLine, typeName);
+            return dataType == null ? string.Empty : dataType.Name;
         }
 
         private static void ValidateSheetName(string name)

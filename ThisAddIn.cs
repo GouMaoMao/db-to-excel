@@ -70,13 +70,13 @@ namespace DB2Sheet
             _paths = new ApplicationPaths();
             _logger = new FileLogger(_paths);
             ProviderRegistry providers = new ProviderRegistry();
-            providers.Register(new SqlServerProvider());
-            providers.Register(new MySqlProvider());
-            providers.Register(new PostgreSqlProvider());
-            providers.Register(new SqliteProvider());
+            providers.Register(new SqlServerProvider(_logger));
+            providers.Register(new MySqlProvider(_logger));
+            providers.Register(new PostgreSqlProvider(_logger));
+            providers.Register(new SqliteProvider(_logger));
             _jdbcEnvironment = new JdbcEnvironmentStore(_paths);
             _jdbcBridge = new JdbcBridgeHost(_logger, _paths.RootDirectory);
-            providers.Register(new JdbcProvider(_jdbcBridge, _jdbcEnvironment));
+            providers.Register(new JdbcProvider(_jdbcBridge, _jdbcEnvironment, _logger));
             _providers = providers;
 
             _settingsRegistry = SettingsRegistry.CreateDefault();

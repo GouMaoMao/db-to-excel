@@ -163,6 +163,9 @@ public final class Bridge {
                     ? meta.getTables(name, null, "%", TableTypes)
                     : meta.getTables(null, name, "%", TableTypes);
             List<Map<String, Object>> objects = new ArrayList<Map<String, Object>>();
+            int withComment = 0;
+            String note = "";
+            boolean failed = false;
             try {
                 while (rows.next()) {
                     String tableName = rows.getString("TABLE_NAME");
@@ -171,17 +174,35 @@ public final class Bridge {
                     }
                     String schema = rows.getString("TABLE_SCHEM");
                     String tableType = rows.getString("TABLE_TYPE");
+                    String comment = "";
+                    try {
+                        comment = normalizeComment(rows.getString("REMARKS"));
+                    } catch (SQLException exception) {
+                        failed = true;
+                        if (note.length() == 0) {
+                            note = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+                        }
+                    }
+                    if (comment.length() > 0) {
+                        withComment++;
+                    }
                     Map<String, Object> item = new LinkedHashMap<String, Object>();
                     item.put("schema", schema == null ? "" : schema);
                     item.put("name", tableName);
                     item.put("kind", tableType != null && tableType.toUpperCase().contains("VIEW") ? "view" : "table");
+                    item.put("comment", comment);
                     objects.add(item);
                 }
             } finally {
                 rows.close();
             }
+            if (!failed && !objects.isEmpty() && withComment == 0) {
+                note = "表注释均为空。";
+            }
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("objects", objects);
+            payload.put("commentNote", note);
+            payload.put("commentFailed", Boolean.valueOf(failed));
             reply(id, "tables", payload);
         } finally {
             connection.close();
@@ -264,6 +285,17 @@ public final class Bridge {
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("columns", columns);
         reply(id, "columns", payload);
+    }
+
+    private static String normalizeComment(String comment) {
+        if (comment == null) {
+            return "";
+        }
+        String trimmed = comment.trim();
+        if (trimmed.equalsIgnoreCase("VIEW")) {
+            return "";
+        }
+        return trimmed;
     }
 
     private void writeRows(String id, ResultSet rows, AtomicBoolean cancelled) throws Exception {

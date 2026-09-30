@@ -32,6 +32,7 @@ namespace DB2Sheet.Providers
         /// <param name="connection">已打开的连接。</param>
         /// <param name="command">正在执行的命令。</param>
         /// <param name="reader">命令返回的数据读取器。</param>
+        /// <param name="columns">已经附上字段注释的结果列。为空时只使用读取器里的列名和类型。</param>
         /// <param name="rowLimit">最大读取行数；小于等于零表示不限制。</param>
         /// <param name="progress">可选进度接收器。</param>
         /// <param name="cancellationToken">取消时会调用数据库命令的取消方法。</param>
@@ -39,6 +40,7 @@ namespace DB2Sheet.Providers
             DbConnection connection,
             DbCommand command,
             DbDataReader reader,
+            IReadOnlyList<ResultColumn> columns,
             int rowLimit,
             IProgress<OperationProgress> progress,
             CancellationToken cancellationToken)
@@ -48,7 +50,7 @@ namespace DB2Sheet.Providers
             _reader = reader ?? throw new ArgumentNullException(nameof(reader));
             _rowLimit = rowLimit;
             _progress = progress;
-            Columns = Enumerable.Range(0, reader.FieldCount)
+            Columns = columns ?? Enumerable.Range(0, reader.FieldCount)
                 .Select(index => new ResultColumn(reader.GetName(index), reader.GetFieldType(index)))
                 .ToList()
                 .AsReadOnly();
