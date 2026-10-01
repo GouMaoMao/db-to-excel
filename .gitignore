@@ -21,6 +21,10 @@ coverage/
 # Local test project (source + outputs stay on disk, not in git)
 DB2Sheet.Tests/
 
+# Local DuckDB samples for manual Excel testing
+samples/*.duckdb
+samples/*.parquet
+
 # NuGet
 packages/
 *.nupkg

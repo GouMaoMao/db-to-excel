@@ -27,11 +27,11 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 
 - 分层目录：`Contracts`、`Models`、`Providers`、`Services`、`Storage`、`Infrastructure`、`Excel`、`UI`。
 - 通用数据源 Provider、动态参数、流式结果和可取消执行契约。
-- SQL Server、MySQL、PostgreSQL、SQLite Provider。
+- SQL Server、MySQL、PostgreSQL、SQLite、DuckDB Provider。DuckDB 为本地只读文件，64 位本机库随插件输出发布。
 - 通用 JDBC Provider。Java 运行时由「JDBC 环境」检测或指定；厂商驱动 jar 写在连接方案中。连接编辑填写完整 JDBC URL。
 - Ribbon XML 动态加载，提供“SQL 查询”“批量刷新”“连接管理”，以及「设置」下拉（「参数设置」「JDBC 环境」）。
 - 通用及 Provider 特定只读 SQL 校验。JDBC 允许查询前的 `SET` 语句。
-- MySQL、PostgreSQL、SQLite 只读会话；SQL Server 使用只读连接意图。
+- MySQL、PostgreSQL、SQLite 只读会话；SQL Server 使用只读连接意图；DuckDB 在打开连接时使用只读访问模式。
 - `DbDataReader` 流式读取、结果分块、行数限制和截断检测。
 - 独立通用进度窗体和统一操作执行协调器。
 - 共享连接方案仓储及 JSON 持久化。

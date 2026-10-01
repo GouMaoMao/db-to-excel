@@ -24,6 +24,7 @@ namespace DB2Sheet.UI
                 ["mysql"] = "DB_Mysql.png",
                 ["postgresql"] = "DB_PostgreSQL.png",
                 ["sqlite"] = "DB_sqlite.png",
+                ["duckdb"] = "DB_DuckDB.png",
                 ["jdbc"] = "DB_JDBC.png"
             };
 

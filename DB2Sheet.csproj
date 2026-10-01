@@ -121,6 +121,10 @@
     <PackageReference Include="MySqlConnector" Version="2.3.7" />
     <PackageReference Include="Npgsql" Version="4.1.14" />
     <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.4.4" />
+    <PackageReference Include="DuckDB.NET.Bindings.Full" Version="1.4.4">
+      <GeneratePathProperty>true</GeneratePathProperty>
+    </PackageReference>
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Microsoft.Office.Tools.v4.0.Framework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
@@ -282,6 +286,7 @@
     <EmbeddedResource Include="Resources\DB_Mysql.png" />
     <EmbeddedResource Include="Resources\DB_PostgreSQL.png" />
     <EmbeddedResource Include="Resources\DB_sqlite.png" />
+    <EmbeddedResource Include="Resources\DB_DuckDB.png" />
     <EmbeddedResource Include="Resources\DB_JDBC.png" />
     <EmbeddedResource Include="Resources\icon_db.png" />
     <EmbeddedResource Include="Resources\icon_table.png" />
@@ -317,6 +322,21 @@
     <ManifestCertificateThumbprint>2CFD0A166375E4FF13D55B7B4A7B9065C5995FA8</ManifestCertificateThumbprint>
   </PropertyGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- 必须在生成 VSTO 清单之前加入，否则 Excel 只复制清单里的文件，运行目录没有 duckdb.dll。 -->
+  <Target Name="IncludeDuckDbNative" BeforeTargets="AssignTargetPaths">
+    <PropertyGroup>
+      <DuckDbNativeDll>$(PkgDuckDB_NET_Bindings_Full)\runtimes\win-x64\native\duckdb.dll</DuckDbNativeDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(DuckDbNativeDll)')" Text="找不到 DuckDB 本机库：$(DuckDbNativeDll)。请还原 NuGet 包 DuckDB.NET.Bindings.Full 1.4.4。" />
+    <ItemGroup>
+      <Content Include="$(DuckDbNativeDll)">
+        <Link>duckdb.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <Visible>false</Visible>
+      </Content>
+    </ItemGroup>
+    <Copy SourceFiles="$(DuckDbNativeDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
   <!-- Include additional build rules for an Office application add-in. -->
   <Import Project="$(VSToolsPath)\OfficeTools\Microsoft.VisualStudio.Tools.Office.targets" Condition="'$(VSToolsPath)' != ''" />
   <!-- This section defines VSTO properties that describe the host-changeable project properties. -->

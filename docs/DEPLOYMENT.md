@@ -31,7 +31,7 @@
 5. 设置加载行为 `LoadBehavior=3`。
 6. 配置受信任发布者和代码签名证书。
 7. 检测并按需安装 .NET Framework 4.7.2 与 VSTO Runtime。
-8. 包含 MySQL、PostgreSQL 和 SQLite 托管/本机依赖。不要包含 JDK，也不要包含 MaxCompute 或其他厂商的 JDBC 驱动。
+8. 包含 MySQL、PostgreSQL、SQLite 和 DuckDB 的托管程序集，以及输出目录中的 `duckdb.dll`。不要包含 JDK，也不要包含 MaxCompute 或其他厂商的 JDBC 驱动。用户不用单独安装 DuckDB。
 9. 不必单独包含 `db2sheet-jdbc-bridge.jar`。它已嵌入 `DB2Sheet.dll`，运行时释放到 `%LocalAppData%\DB2Sheet`。用户可通过「JDBC 环境」检测或指定本机 JDK；厂商 JDBC 驱动 jar 在新建连接时选择，不要打进安装包。
 10. 配置升级代码、产品版本和卸载行为。
 11. 验证安装、修复、升级和卸载后 Excel 状态。
@@ -59,7 +59,7 @@
 - 仅 x64 Office；或
 - 同时提供 x86 和 x64 安装包。
 
-SQLite 等组件可能包含位数相关本机库，必须在目标机器上实际验证。`Any CPU` 编译成功并不代表所有本机数据库依赖都能在两种 Office 位数下工作。
+SQLite 等组件可能包含位数相关本机库，必须在目标机器上实际验证。`Any CPU` 编译成功并不代表所有本机数据库依赖都能在两种 Office 位数下工作。DuckDB 只有 64 位 `duckdb.dll`，32 位 Excel 无法使用该连接。
 
 ## 发布前检查
 
@@ -68,7 +68,7 @@ SQLite 等组件可能包含位数相关本机库，必须在目标机器上实�
 - [ ] VSTO Runtime 缺失机器上的先决条件安装正常。
 - [ ] 普通用户权限可以安装或按设计部署。
 - [ ] Excel 信任中心不会阻止已签名加载项。
-- [ ] SQL Server、MySQL、PostgreSQL、SQLite 依赖加载正常。
+- [ ] SQL Server、MySQL、PostgreSQL、SQLite、DuckDB 依赖加载正常。安装目录中有 `duckdb.dll` 以及 DuckDB 托管程序集。
 - [ ] 未配置 Java 时，JDBC 连接会提示打开「JDBC 环境」，而不是随安装包附带 JDK 或厂商驱动。
 - [ ] 安装后首次启动正常。
 - [ ] 升级后用户配置保留。

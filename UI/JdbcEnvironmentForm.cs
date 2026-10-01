@@ -237,7 +237,7 @@ namespace DB2Sheet.UI
             }
 
             AddGuideSection(guide, 0, "为什么需要 Java？",
-                "只有 JDBC 连接需要本机 Java（JDK 8 或更高）。使用 MySQL、SQL Server、PostgreSQL、SQLite 等内置连接时，不必安装 Java。",
+                "只有 JDBC 连接需要本机 Java（JDK 8 或更高）。使用 MySQL、SQL Server、PostgreSQL、SQLite、DuckDB 等内置连接时，不必安装 Java。",
                 first: true);
             AddGuideSection(guide, 2, "什么时候需要安装？",
                 "连接方式是 JDBC，且本机还没有 Java；或者已有 Java，但版本低于 JDK 8。",

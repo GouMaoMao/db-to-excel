@@ -47,6 +47,7 @@
 - `MySqlProvider`
 - `PostgreSqlProvider`
 - `SqliteProvider`
+- `DuckDbProvider`：本地 DuckDB 文件。打开时 `access_mode=READ_ONLY`。64 位 `duckdb.dll` 在构建时复制到插件旁边，随安装包发布。允许 `SELECT ... FROM read_parquet` 等只读表函数。
 - `JdbcProvider`：通用 JDBC。Java 运行时由用户在「JDBC 环境」中检测或指定；厂商驱动 jar 写在连接方案中。转接程序嵌在插件内，首次使用时释放到本地数据目录，再由 Excel 进程外的 `java.exe` 启动。连接编辑填写完整 JDBC URL、驱动 jar、驱动类和凭据。
 
 未来非数据库数据源应直接实现 `IDataSourceProvider`，不必继承 `DatabaseProviderBase`。JDBC 同样不继承 `DatabaseProviderBase`，因为它不是 ADO.NET 连接。
@@ -102,7 +103,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 `ThisAddIn` 在启动时组装单例服务：
 
 1. `ApplicationPaths` 和 `FileLogger`
-2. SQL Server、MySQL、PostgreSQL、SQLite 和 JDBC 提供程序，以及 `ProviderRegistry`
+2. SQL Server、MySQL、PostgreSQL、SQLite、DuckDB 和 JDBC 提供程序，以及 `ProviderRegistry`
 3. 设置注册表和 JSON 设置存储
 4. 连接与查询仓储
 5. 执行服务、操作协调器和查询缓冲服务

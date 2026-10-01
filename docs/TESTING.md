@@ -97,7 +97,7 @@
 
 ### 连接管理
 
-对 SQL Server、MySQL、PostgreSQL、SQLite 分别执行：
+对 SQL Server、MySQL、PostgreSQL、SQLite、DuckDB 分别执行：
 
 - [ ] 动态参数字段正确显示。
 - [ ] 必填字段校验有效。

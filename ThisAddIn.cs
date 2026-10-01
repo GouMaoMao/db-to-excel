@@ -74,6 +74,7 @@ namespace DB2Sheet
             providers.Register(new MySqlProvider(_logger));
             providers.Register(new PostgreSqlProvider(_logger));
             providers.Register(new SqliteProvider(_logger));
+            providers.Register(new DuckDbProvider(_logger));
             _jdbcEnvironment = new JdbcEnvironmentStore(_paths);
             _jdbcBridge = new JdbcBridgeHost(_logger, _paths.RootDirectory);
             providers.Register(new JdbcProvider(_jdbcBridge, _jdbcEnvironment, _logger));

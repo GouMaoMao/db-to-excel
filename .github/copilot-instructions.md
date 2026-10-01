@@ -6,7 +6,6 @@
 
 - .NET Framework 4.7.2，C# 7.3。不要使用更高版本的语法。
 - 旧式 csproj。新增 UI 等源文件必须在 `DB2Sheet.csproj` 里显式 `Compile Include`。
-- 不要修改 `DB2Sheet1.csproj`。
 - 不使用 VSTO ClickOnce。部署由 Advanced Installer 封装。
 - 用户可见名称、窗口标题、界面字体和代码字体只改 `UI/AppPresentation.cs`。程序集名、命名空间、Ribbon 控件 ID、持久化目录是独立技术标识。
 - JDBC 是通用数据源。连接编辑填写完整 JDBC URL、驱动 jar、驱动类和凭据。不要把 JDK 或厂商驱动打进安装包。
@@ -68,6 +67,7 @@
 - 使用约定式提交。类型用英文小写，摘要用中文，冒号后空一格：`feat: 用一句话说明为什么改`。
 - 类型按改动性质选择：`feat` 新功能，`fix` 缺陷修复，`docs` 文档，`style` 格式，`refactor` 重构，`perf` 性能，`test` 测试，`chore` 构建或杂项。
 - 标题写原因。需要补充影响或限制时，另起一行写正文。
+- 一次改动若覆盖多项需求或功能，能拆就拆成多次提交，每次只含一类改动，方便 review。不要把互不相关的功能、修复和杂项塞进同一个提交。
 
 ## 设置
 
