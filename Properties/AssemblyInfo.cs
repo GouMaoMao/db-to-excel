@@ -24,16 +24,8 @@ using System.Security;
 // 如果此项目向 COM 公开，则下列 GUID 用于类型库的 ID
 [assembly: Guid("b01ba5cc-a1f1-4198-b9ef-5ed80357c178")]
 
-// 程序集的版本信息由下列四个值组成:
-//
-//      主版本
-//      次版本
-//      生成号
-//      修订号
-//
-//可以指定所有这些值，也可以使用“生成号”和“修订号”的默认值，
-// 方法是按如下所示使用“*”: :
-// [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+// 产品版本用三段：主版本.次版本.修订号。Ribbon「关于」读取 AssemblyFileVersion。
+// AssemblyVersion 由 CLR 补成四段，源码不要再写第四段。
+[assembly: AssemblyVersion("1.0.0")]
+[assembly: AssemblyFileVersion("1.0.0")]
 

@@ -19,8 +19,8 @@ namespace DB2Sheet.UI
         public const string CodeFontName = "Microsoft YaHei UI Light";
         public const float CodeFontSize = 9.5F;
 
-        /// <summary>读取当前程序集的文件版本，供 Ribbon 等界面展示。</summary>
-        /// <remarks>优先使用 AssemblyFileVersion，不读取程序集文件路径，避免 VSTO 缓存路径读不到版本。特性缺失时回退程序集版本号。</remarks>
+        /// <summary>读取当前程序集的产品版本，供 Ribbon 等界面展示。</summary>
+        /// <remarks>优先使用三段的 AssemblyFileVersion，不读取程序集文件路径，避免 VSTO 缓存路径读不到版本。特性缺失时回退程序集版本号。</remarks>
         public static string FileVersion
         {
             get
