@@ -4,8 +4,8 @@ using System.Windows.Forms;
 
 namespace DB2Sheet.UI
 {
-    /// <summary>提供单行文本输入的通用弹窗，用于收集方案名或目标 Sheet 名称。</summary>
-    /// <remarks>该窗体仅返回文本，不直接执行业务保存或写入；调用方负责后续校验和副作用处理。</remarks>
+    /// <summary>提供单行文本输入，以及只读多行结果说明。</summary>
+    /// <remarks>输入弹窗只返回文本，不直接执行业务保存或写入。只读说明不收集输入。</remarks>
     internal sealed class TextPromptDialog : AppForm
     {
         private readonly TextBox _valueTextBox;
@@ -73,8 +73,65 @@ namespace DB2Sheet.UI
             };
         }
 
+        /// <summary>创建只读多行说明窗。不收集输入。</summary>
+        /// <remarks>焦点停在「确定」上。文本框失焦后不保留蓝色选区，避免一打开整段被选中。</remarks>
+        /// <param name="title">窗口标题。</param>
+        /// <param name="text">要展示的多行文本。</param>
+        private TextPromptDialog(string title, string text)
+        {
+            Text = title ?? string.Empty;
+            Width = 560;
+            Height = 360;
+            MinimumSize = new Size(420, 240);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MinimizeBox = false;
+
+            _valueTextBox = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                HideSelection = true,
+                ScrollBars = ScrollBars.Vertical,
+                Text = text ?? string.Empty,
+                WordWrap = true
+            };
+            Button okButton = new Button { Text = "确定", AutoSize = true, DialogResult = DialogResult.OK };
+            FlowLayoutPanel actions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                AutoSize = true,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+            actions.Controls.Add(okButton);
+
+            Panel root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12) };
+            root.Controls.Add(_valueTextBox);
+            root.Controls.Add(actions);
+            Controls.Add(root);
+
+            AcceptButton = okButton;
+            CancelButton = okButton;
+            Shown += (sender, args) => okButton.Focus();
+        }
+
         /// <summary>获取用户确认后的输入值。</summary>
         public string Value => _valueTextBox.Text.Trim();
+
+        /// <summary>显示只读多行说明，用户看完后关闭。</summary>
+        /// <param name="owner">所属窗口。</param>
+        /// <param name="title">窗口标题。</param>
+        /// <param name="text">要展示的多行文本。</param>
+        /// <remarks>不收集输入，也不因文本为空而拒绝关闭。</remarks>
+        public static void ShowText(IWin32Window owner, string title, string text)
+        {
+            using (TextPromptDialog dialog = new TextPromptDialog(title, text))
+            {
+                dialog.ShowDialog(owner);
+            }
+        }
 
         /// <summary>显示文本输入弹窗并输出用户确认后的非空值。</summary>
         /// <param name="owner">所属窗口。</param>

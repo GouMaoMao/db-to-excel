@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
+using CheckBoxState = System.Windows.Forms.VisualStyles.CheckBoxState;
 using DB2Sheet.Contracts;
 using DB2Sheet.Excel;
 using DB2Sheet.Models;
@@ -33,9 +36,8 @@ namespace DB2Sheet.UI
         private readonly DatabaseConnectionTree _connectionTree;
         private readonly SplitContainer _workspace;
         private readonly DataGridView _tasks;
-        private readonly Label _mode;
+        private readonly Label _hint;
         private readonly Label _status;
-        private readonly Button _selectButton;
         private readonly Font _linkFont;
         private readonly Font _hintFont;
         private readonly List<Image> _actionIcons = new List<Image>();
@@ -90,12 +92,14 @@ namespace DB2Sheet.UI
 
             _connectionTree = new DatabaseConnectionTree(
                 connections, providers, executionService, _operationRunner, _settings, openJdbcEnvironment);
-            _mode = new Label
+            _linkFont = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Underline);
+            _hintFont = new Font(AppPresentation.DefaultFontName, 8.25f, FontStyle.Regular);
+            _hint = new Label
             {
-                AutoSize = true,
-                Anchor = AnchorStyles.Left,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0, 8, 12, 0)
+                Dock = DockStyle.Fill,
+                ForeColor = SystemColors.GrayText,
+                Font = _hintFont,
+                TextAlign = ContentAlignment.MiddleLeft
             };
             _status = new Label
             {
@@ -105,12 +109,8 @@ namespace DB2Sheet.UI
                 ForeColor = SystemColors.GrayText,
                 Text = _scanSummary
             };
-            _selectButton = ButtonOf("全选", "icon_selectall.png");
-            _selectButton.Margin = new Padding(0, 4, 8, 0);
-            Button refreshButton = ButtonOf("批量刷新", "icon_execute.png");
+            Button refreshButton = ButtonOf("批量刷新", "icon_writeexcel.png");
             refreshButton.Margin = new Padding(0, 4, 0, 0);
-            _linkFont = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Underline);
-            _hintFont = new Font(AppPresentation.DefaultFontName, 8.25f, FontStyle.Regular);
 
             _tasks = new DataGridView
             {
@@ -140,7 +140,12 @@ namespace DB2Sheet.UI
                     SelectionForeColor = SystemColors.HighlightText
                 }
             };
-            _checkColumn = _tasks.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = string.Empty, Width = 36 });
+            _checkColumn = _tasks.Columns.Add(new DataGridViewCheckBoxColumn
+            {
+                HeaderText = string.Empty,
+                Width = 36,
+                ToolTipText = "全选或全不选"
+            });
             _targetColumn = _tasks.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "目标表", Width = 180, ReadOnly = true });
             _summaryColumn = _tasks.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "SQL 摘要", Width = 280, ReadOnly = true });
             _statusColumn = _tasks.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "状态", Width = 48, ReadOnly = true });
@@ -159,16 +164,15 @@ namespace DB2Sheet.UI
                 WrapContents = false,
                 Padding = new Padding(0, 2, 0, 0)
             };
-            actions.Controls.Add(_selectButton);
             actions.Controls.Add(refreshButton);
-            Panel toolbar = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 4, 8, 0) };
-            toolbar.Controls.Add(actions);
-            toolbar.Controls.Add(_mode);
+            Panel hintBar = new Panel { Dock = DockStyle.Top, Height = 72, Padding = new Padding(8, 4, 8, 4) };
+            hintBar.Controls.Add(_hint);
+            hintBar.Controls.Add(actions);
 
             Panel right = new Panel { Dock = DockStyle.Fill };
             right.Controls.Add(_tasks);
             right.Controls.Add(_status);
-            right.Controls.Add(toolbar);
+            right.Controls.Add(hintBar);
 
             _workspace = new SplitContainer
             {
@@ -177,10 +181,9 @@ namespace DB2Sheet.UI
                 SplitterWidth = 6
             };
             _workspace.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionTree));
-            _workspace.Panel2.Controls.Add(TaskSection(right));
+            _workspace.Panel2.Controls.Add(SectionPanel("刷新任务", right));
             Controls.Add(_workspace);
 
-            _selectButton.Click += (sender, args) => ToggleSelection();
             refreshButton.Click += (sender, args) => RefreshTasks();
             _connectionTree.NoticeChanged += (sender, args) => _status.Text = _connectionTree.Notice;
             _tasks.CurrentCellDirtyStateChanged += TasksCurrentCellDirtyStateChanged;
@@ -188,6 +191,7 @@ namespace DB2Sheet.UI
             _tasks.CellEndEdit += TasksCellEndEdit;
             _tasks.CellBeginEdit += TasksCellBeginEdit;
             _tasks.CellPainting += TasksCellPainting;
+            _tasks.ColumnHeaderMouseClick += TasksColumnHeaderMouseClick;
             _tasks.CellClick += TasksCellClick;
             _tasks.CellMouseMove += TasksCellMouseMove;
             _tasks.MouseLeave += (sender, args) => _tasks.Cursor = Cursors.Default;
@@ -236,7 +240,7 @@ namespace DB2Sheet.UI
                 _rows.Clear();
                 foreach (RefreshTaskDefinition task in tasks)
                 {
-                    bool isChecked = !checks.TryGetValue(task.SourceColumn, out bool saved) || saved;
+                    bool isChecked = checks.TryGetValue(task.SourceColumn, out bool saved) && saved;
                     _rows.Add(new TaskRow(task, isChecked));
                 }
                 ApplyRowStates();
@@ -377,7 +381,7 @@ namespace DB2Sheet.UI
             {
                 _binding = false;
             }
-            UpdateSelectButton();
+            InvalidateHeaderCheck();
             _tasks.InvalidateColumn(_statusColumn);
         }
 
@@ -494,6 +498,8 @@ namespace DB2Sheet.UI
                 return;
             }
 
+            if (!ConfirmRefresh(executable.Count, selected.Count - executable.Count)) return;
+
             try
             {
                 BatchRefreshResult result = _operationRunner.Run(
@@ -525,6 +531,32 @@ namespace DB2Sheet.UI
             }
         }
 
+        /// <summary>执行前让用户确认。取消则不开始刷新。</summary>
+        /// <param name="executableCount">参数有效、实际会执行的任务数。</param>
+        /// <param name="skippedCount">已勾选但参数有误、将跳过的任务数。</param>
+        /// <returns>用户选择「是」时为 true。</returns>
+        private bool ConfirmRefresh(int executableCount, int skippedCount)
+        {
+            string message = "确定刷新已勾选的 " + executableCount.ToString() + " 个任务吗？";
+            if (skippedCount > 0)
+                message += Environment.NewLine + "另有 " + skippedCount.ToString() + " 个参数有误，将跳过。";
+
+            _suppressActivate = true;
+            try
+            {
+                return MessageBox.Show(
+                    this,
+                    message,
+                    "批量刷新",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) == DialogResult.Yes;
+            }
+            finally
+            {
+                _suppressActivate = false;
+            }
+        }
+
         private void ApplyResults(BatchRefreshResult result)
         {
             Dictionary<string, RefreshTaskResult> byId = result.Tasks.ToDictionary(item => item.Task.Id, StringComparer.OrdinalIgnoreCase);
@@ -549,9 +581,10 @@ namespace DB2Sheet.UI
                 }
             }
 
-            int succeeded = result.Tasks.Count(item => item.Succeeded);
+            int succeeded = result.Tasks.Count(item => item.Succeeded && !item.IsTruncated);
+            int truncated = result.Tasks.Count(item => item.Succeeded && item.IsTruncated);
             int failed = result.Tasks.Count(item => !item.Succeeded && !item.Skipped);
-            _scanSummary = string.Format("刷新完成：成功 {0}，失败 {1}。", succeeded, failed);
+            _scanSummary = string.Format("刷新完成：成功 {0}，失败 {1}，截断 {2}。", succeeded, failed, truncated);
             _status.Text = _scanSummary;
             foreach (DataGridViewRow gridRow in _tasks.Rows)
             {
@@ -559,36 +592,91 @@ namespace DB2Sheet.UI
                 if (row != null) DecorateRow(gridRow, row);
             }
             _tasks.InvalidateColumn(_statusColumn);
-            TasksSelectionChanged(this, EventArgs.Empty);
+            ShowRefreshSummary(result, succeeded, failed, truncated);
         }
 
+        /// <summary>刷新正常结束后列出失败和截断。取消或异常不走这里。</summary>
+        private void ShowRefreshSummary(BatchRefreshResult result, int succeeded, int failed, int truncated)
+        {
+            StringBuilder text = new StringBuilder();
+            text.AppendFormat("刷新完成：成功 {0}，失败 {1}，截断 {2}。", succeeded, failed, truncated);
+            foreach (RefreshTaskResult item in result.Tasks)
+            {
+                if (item.Succeeded || item.Skipped) continue;
+                text.AppendLine();
+                text.Append("失败  ");
+                text.Append(item.Task.TargetSheetName);
+                text.Append("：");
+                text.Append(item.Message);
+            }
+            foreach (RefreshTaskResult item in result.Tasks)
+            {
+                if (!item.Succeeded || !item.IsTruncated) continue;
+                text.AppendLine();
+                text.Append("截断  ");
+                text.Append(item.Task.TargetSheetName);
+                text.Append("：");
+                text.Append(item.Message);
+            }
+
+            _suppressActivate = true;
+            try
+            {
+                TextPromptDialog.ShowText(this, "批量刷新", text.ToString());
+            }
+            finally
+            {
+                _suppressActivate = false;
+            }
+        }
+
+        /// <summary>表头复选框：未全选时全选，已全选时全不选。没有任务时不改变勾选。</summary>
+        /// <remarks>在绑定期间写入勾选值，并刷新当前单元格，避免它把点击前的未勾写回去。</remarks>
         private void ToggleSelection()
         {
-            bool select = _selectButton.Text == "全选";
-            foreach (TaskRow row in _rows)
+            if (_rows.Count == 0 || _tasks.IsDisposed) return;
+            bool select = !_rows.All(item => item.Checked);
+            _tasks.EndEdit();
+            _binding = true;
+            try
             {
-                row.Checked = select;
-                ApplyCheckState(row);
+                foreach (DataGridViewRow gridRow in _tasks.Rows)
+                {
+                    TaskRow row = gridRow.Tag as TaskRow;
+                    if (row == null) continue;
+                    row.Checked = select;
+                    ApplyCheckState(row);
+                    gridRow.Cells[_checkColumn].Value = select;
+                    DecorateRow(gridRow, row);
+                }
             }
-            BindRows();
+            finally
+            {
+                _binding = false;
+            }
+
+            _tasks.RefreshEdit();
+            InvalidateHeaderCheck();
             _status.Text = _scanSummary;
         }
 
-        private void UpdateSelectButton()
+        /// <summary>行勾选变化后重画表头复选框。</summary>
+        private void InvalidateHeaderCheck()
         {
-            bool allChecked = _rows.Count > 0 && _rows.All(item => item.Checked);
-            _selectButton.Text = allChecked ? "全不选" : "全选";
+            if (_tasks.IsDisposed) return;
+            _tasks.InvalidateCell(_checkColumn, -1);
         }
 
         private void UpdateModeLabel()
         {
             BatchExecutionMode mode = _settings.Get(CoreSettings.BatchMode);
-            if (mode == BatchExecutionMode.Parallel)
-            {
-                _mode.Text = "执行方式：并行，最大并发 " + _settings.Get(CoreSettings.MaxParallelism).ToString();
-                return;
-            }
-            _mode.Text = "执行方式：串行";
+            string execution = mode == BatchExecutionMode.Parallel
+                ? "执行方式：并行，最大并发 " + _settings.Get(CoreSettings.MaxParallelism).ToString() + "（可在设置中修改）。"
+                : "执行方式：串行（可在设置中修改）。";
+            _hint.Text = "按住 Ctrl 或 Shift 可选中多行。"
+                + execution
+                + "最大导出 Excel 行：" + _settings.Get(CoreSettings.MaxExportRows).ToString() + "（可在设置中修改）。"
+                + "查询超时：" + _settings.Get(CoreSettings.QueryTimeoutSeconds).ToString() + " 秒（可在设置中修改）。";
         }
 
         private void TasksCurrentCellDirtyStateChanged(object sender, EventArgs e)
@@ -605,7 +693,7 @@ namespace DB2Sheet.UI
             object checkValue = _tasks.Rows[e.RowIndex].Cells[_checkColumn].Value;
             row.Checked = checkValue is bool && (bool)checkValue;
             ApplyCheckState(row);
-            UpdateSelectButton();
+            InvalidateHeaderCheck();
             DecorateRow(_tasks.Rows[e.RowIndex], row);
             _tasks.InvalidateRow(e.RowIndex);
             TasksSelectionChanged(this, EventArgs.Empty);
@@ -705,9 +793,22 @@ namespace DB2Sheet.UI
             }
         }
 
+        /// <summary>点击勾选列表头时全选或全不选。</summary>
+        /// <remarks>延后到这次点击处理完再改勾选。否则当前行的复选框会在全选之后被拨回去。</remarks>
+        private void TasksColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.ColumnIndex != _checkColumn || e.Button != MouseButtons.Left) return;
+            BeginInvoke(new Action(ToggleSelection));
+        }
+
         private void TasksCellPainting(object sender, DataGridViewCellPaintingEventArgs e)
         {
-            if (e.RowIndex < 0 || e.ColumnIndex != _statusColumn) return;
+            if (e.RowIndex < 0)
+            {
+                if (e.ColumnIndex == _checkColumn) PaintHeaderCheck(e);
+                return;
+            }
+            if (e.ColumnIndex != _statusColumn) return;
             e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
             TaskRow row = _tasks.Rows[e.RowIndex].Tag as TaskRow;
             Color? color = StatusColor(row);
@@ -719,11 +820,54 @@ namespace DB2Sheet.UI
                     e.CellBounds.Y + (e.CellBounds.Height - size) / 2,
                     size,
                     size);
+                SmoothingMode smoothing = e.Graphics.SmoothingMode;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using (SolidBrush brush = new SolidBrush(color.Value))
                 {
-                    e.Graphics.FillRectangle(brush, box);
+                    e.Graphics.FillEllipse(brush, box);
                 }
+                e.Graphics.SmoothingMode = smoothing;
             }
+            e.Handled = true;
+        }
+
+        /// <summary>在勾选列表头绘制全选框。全部勾选为勾选，只勾一部分为半选。</summary>
+        private void PaintHeaderCheck(DataGridViewCellPaintingEventArgs e)
+        {
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+            int checkedCount = 0;
+            foreach (TaskRow row in _rows)
+            {
+                if (row.Checked) checkedCount++;
+            }
+
+            bool all = _rows.Count > 0 && checkedCount == _rows.Count;
+            bool partial = checkedCount > 0 && !all;
+            if (Application.RenderWithVisualStyles)
+            {
+                CheckBoxState state = all
+                    ? CheckBoxState.CheckedNormal
+                    : partial ? CheckBoxState.MixedNormal : CheckBoxState.UncheckedNormal;
+                Size glyph = CheckBoxRenderer.GetGlyphSize(e.Graphics, state);
+                Point origin = new Point(
+                    e.CellBounds.X + (e.CellBounds.Width - glyph.Width) / 2,
+                    e.CellBounds.Y + (e.CellBounds.Height - glyph.Height) / 2);
+                CheckBoxRenderer.DrawCheckBox(e.Graphics, origin, state);
+            }
+            else
+            {
+                ButtonState state = all
+                    ? ButtonState.Checked
+                    : partial ? ButtonState.Checked | ButtonState.Inactive : ButtonState.Normal;
+                const int size = 13;
+                Rectangle box = new Rectangle(
+                    e.CellBounds.X + (e.CellBounds.Width - size) / 2,
+                    e.CellBounds.Y + (e.CellBounds.Height - size) / 2,
+                    size,
+                    size);
+                ControlPaint.DrawCheckBox(e.Graphics, box, state);
+            }
+
             e.Handled = true;
         }
 
@@ -892,8 +1036,8 @@ namespace DB2Sheet.UI
             if (row.State == TaskVisualState.Error) return Color.Firebrick;
             if (!row.Checked) return null;
             if (row.State == TaskVisualState.Pending) return Color.Gray;
-            if (row.State == TaskVisualState.Success) return Color.FromArgb(46, 160, 67);
-            if (row.State == TaskVisualState.Truncated) return Color.DarkOrange;
+            if (row.State == TaskVisualState.Success) return ExcelResultWriter.SuccessColor;
+            if (row.State == TaskVisualState.Truncated) return ExcelResultWriter.TruncatedColor;
             return null;
         }
 
@@ -942,30 +1086,6 @@ namespace DB2Sheet.UI
             Panel panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 30, 0, 0) };
             panel.Controls.Add(content);
             panel.Controls.Add(SectionHeader(title));
-            return panel;
-        }
-
-        private Panel TaskSection(Control content)
-        {
-            Panel panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 48, 0, 0) };
-            panel.Controls.Add(content);
-            Panel header = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = SystemColors.ControlLight };
-            header.Controls.Add(new Label
-            {
-                Text = "刷新任务",
-                AutoSize = true,
-                Font = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Bold),
-                Location = new Point(8, 6)
-            });
-            header.Controls.Add(new Label
-            {
-                Text = "按住 Ctrl 或 Shift 可选中多行",
-                AutoSize = true,
-                ForeColor = SystemColors.GrayText,
-                Font = _hintFont,
-                Location = new Point(8, 26)
-            });
-            panel.Controls.Add(header);
             return panel;
         }
 

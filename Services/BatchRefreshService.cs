@@ -14,6 +14,9 @@ namespace DB2Sheet.Services
     /// <summary>编排 SQL Sheet 批量任务的查询缓冲、错误隔离和 Excel 写入。</summary>
     /// <remarks>
     /// 并行模式只并发执行数据库查询；所有 Excel COM 写入都会回到启动调用的 UI 同步上下文并按任务顺序执行。
+    /// 读取条只在查询结束时按已完成个数前进，进行中的读取没有百分比，写入快照也不改读取条。
+    /// 批次开始只报告读取个数 0 和总数，不带写入百分比；写入百分比只在真正写表时由转发填写。
+    /// 进入阻塞写入之前，在界面线程上同步报告当前读取个数并画出读取条。并行在写第一张表前把个数钉到总数。
     /// 目标表名重复时直接失败，不写入任何表。单个任务失败不会终止其他任务，用户取消会终止整个批次。
     /// </remarks>
     public sealed class BatchRefreshService : IBatchRefreshService
@@ -62,13 +65,26 @@ namespace DB2Sheet.Services
             Stopwatch stopwatch = Stopwatch.StartNew();
             List<RefreshTaskResult> results = new List<RefreshTaskResult>();
             List<RefreshTaskDefinition> executable = new List<RefreshTaskDefinition>(tasks);
+            if (tasks.Count > 1)
+            {
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Reading,
+                    Message = "开始读取查询。",
+                    TotalTasks = tasks.Count,
+                    ReadTaskCount = 0,
+                    Elapsed = stopwatch.Elapsed,
+                    IsIndeterminate = true
+                });
+            }
 
             if (mode == BatchExecutionMode.Parallel && executable.Count > 1)
             {
                 IReadOnlyList<BufferedTask> buffered = await BufferParallelAsync(
                     connection, executable, Math.Max(1, maximumParallelism), rowLimit, blockSize,
-                    timeoutSeconds, operationId, progress, 0, tasks.Count, stopwatch,
+                    timeoutSeconds, operationId, progress, tasks.Count, stopwatch,
                     cancellationToken).ConfigureAwait(false);
+                ReportReadFinishedOnUi(excelContext, progress, null, tasks.Count, tasks.Count, stopwatch);
                 foreach (BufferedTask item in buffered.OrderBy(value => value.Index))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -79,7 +95,7 @@ namespace DB2Sheet.Services
                     }
                     results.Add(WriteOnContext(
                         excelContext, workbook, item.Task, item.Result, progress,
-                        results, tasks.Count, stopwatch, operationId, cancellationToken));
+                        results, tasks.Count, stopwatch, operationId, cancellationToken, false));
                 }
             }
             else
@@ -92,10 +108,10 @@ namespace DB2Sheet.Services
                     {
                         BufferedQueryResult buffered = await BufferTaskAsync(
                             connection, task, rowLimit, blockSize, timeoutSeconds, operationId,
-                            progress, results.Count + 1, tasks.Count, stopwatch, cancellationToken).ConfigureAwait(false);
+                            progress, () => results.Count, tasks.Count, stopwatch,                             cancellationToken).ConfigureAwait(false);
                         results.Add(WriteOnContext(
                             excelContext, workbook, task, buffered, progress,
-                            results, tasks.Count, stopwatch, operationId, cancellationToken));
+                            results, tasks.Count, stopwatch, operationId, cancellationToken, true));
                     }
                     catch (OperationCanceledException)
                     {
@@ -104,6 +120,7 @@ namespace DB2Sheet.Services
                     catch (Exception exception)
                     {
                         _logger.Write(LogSeverity.Error, "批量刷新任务失败。", operationId, exception, SheetProperty(task));
+                        ReportReadFinished(progress, task, results.Count + 1, tasks.Count, stopwatch);
                         results.Add(Failed(task, exception));
                     }
                 }
@@ -134,7 +151,6 @@ namespace DB2Sheet.Services
             int timeoutSeconds,
             string operationId,
             IProgress<OperationProgress> progress,
-            int initialCompleted,
             int totalTasks,
             Stopwatch stopwatch,
             CancellationToken cancellationToken)
@@ -142,7 +158,7 @@ namespace DB2Sheet.Services
             SemaphoreSlim semaphore = new SemaphoreSlim(maximumParallelism, maximumParallelism);
             try
             {
-                int completed = initialCompleted;
+                int completed = 0;
                 Task<BufferedTask>[] operations = tasks.Select((task, index) => Task.Run(async () =>
                 {
                     await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -150,9 +166,10 @@ namespace DB2Sheet.Services
                     {
                         BufferedQueryResult result = await BufferTaskAsync(
                             connection, task, rowLimit, blockSize, timeoutSeconds, operationId,
-                            progress, Volatile.Read(ref completed) + 1, totalTasks, stopwatch,
+                            progress, () => Volatile.Read(ref completed), totalTasks, stopwatch,
                             cancellationToken).ConfigureAwait(false);
-                        Interlocked.Increment(ref completed);
+                        int finished = Interlocked.Increment(ref completed);
+                        ReportReadFinished(progress, task, finished, totalTasks, stopwatch);
                         return new BufferedTask(index, task, result, null);
                     }
                     catch (OperationCanceledException)
@@ -161,7 +178,8 @@ namespace DB2Sheet.Services
                     }
                     catch (Exception exception)
                     {
-                        Interlocked.Increment(ref completed);
+                        int finished = Interlocked.Increment(ref completed);
+                        ReportReadFinished(progress, task, finished, totalTasks, stopwatch);
                         _logger.Write(LogSeverity.Error, "并行读取任务失败。", operationId, exception, SheetProperty(task));
                         return new BufferedTask(index, task, null, exception);
                     }
@@ -186,7 +204,7 @@ namespace DB2Sheet.Services
             int timeoutSeconds,
             string operationId,
             IProgress<OperationProgress> progress,
-            int currentTask,
+            Func<int> finishedReads,
             int totalTasks,
             Stopwatch stopwatch,
             CancellationToken cancellationToken)
@@ -202,7 +220,7 @@ namespace DB2Sheet.Services
             {
                 value.TaskId = task.Id;
                 value.TargetSheetName = task.TargetSheetName;
-                value.CurrentTask = currentTask;
+                value.CurrentTask = finishedReads();
                 value.TotalTasks = totalTasks;
                 value.Elapsed = stopwatch.Elapsed;
                 progress?.Report(value);
@@ -210,6 +228,8 @@ namespace DB2Sheet.Services
             return _queryBuffer.ExecuteAsync(request, operationId + "-" + task.Id, taskProgress, cancellationToken);
         }
 
+        /// <summary>在 Excel UI 线程写入一个已缓冲的任务，并只推进写入进度条。</summary>
+        /// <remarks>不填写读取百分比。串行时同一次 Send 先报告这条查询已结束，画出读取条，再阻塞写表。个数不到总数时不画成已读完。</remarks>
         private RefreshTaskResult WriteOnContext(
             SynchronizationContext context,
             ExcelInterop.Workbook workbook,
@@ -220,7 +240,8 @@ namespace DB2Sheet.Services
             int totalTasks,
             Stopwatch stopwatch,
             string operationId,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool reportReadBeforeWrite)
         {
             RefreshTaskResult result = null;
             Exception error = null;
@@ -228,16 +249,21 @@ namespace DB2Sheet.Services
             {
                 try
                 {
+                    int writeTask = completed.Count + 1;
+                    if (reportReadBeforeWrite)
+                        ReportReadFinished(progress, task, writeTask, totalTasks, stopwatch);
                     IProgress<OperationProgress> writeProgress = new ForwardingProgress(value =>
                     {
                         value.TaskId = task.Id;
                         value.TargetSheetName = task.TargetSheetName;
-                        value.CurrentTask = completed.Count + 1;
+                        value.CurrentTask = writeTask;
                         value.TotalTasks = totalTasks;
                         value.SucceededTasks = completed.Count(item => item.Succeeded);
                         value.FailedTasks = completed.Count(item => !item.Succeeded && !item.Skipped);
                         value.SkippedTasks = completed.Count(item => item.Skipped);
                         value.Elapsed = stopwatch.Elapsed;
+                        value.WriteTaskCount = writeTask;
+                        value.WritePercent = TrackPercent(writeTask, totalTasks, value.Percent);
                         progress?.Report(value);
                     });
                     long rows = _writer.WriteResult(
@@ -328,8 +354,71 @@ namespace DB2Sheet.Services
                 SkippedTasks = results.Count(item => item.Skipped),
                 RowsWritten = results.Sum(item => item.RowsWritten),
                 Elapsed = elapsed,
-                IsIndeterminate = stage != OperationStage.Completed
+                IsIndeterminate = stage != OperationStage.Completed,
+                WriteTaskCount = totalTasks,
+                WritePercent = stage == OperationStage.Completed ? 100 : (int?)null
             };
+        }
+
+        /// <summary>在界面线程上同步报告读取个数，返回后读取条已经画出。</summary>
+        /// <param name="context">启动批量刷新的 Excel UI 同步上下文。</param>
+        /// <param name="progress">进度报告。界面线程上会直接更新窗体。</param>
+        /// <param name="task">关联的任务。整批读完时可以为空。</param>
+        /// <param name="finished">已经结束的查询个数。</param>
+        /// <param name="totalTasks">本批查询总数。</param>
+        /// <param name="stopwatch">本批计时。</param>
+        /// <remarks>必须在 <see cref="WriteOnContext"/> 的阻塞写入之前调用。Send 返回时读取条已经按这个个数画完。</remarks>
+        private static void ReportReadFinishedOnUi(
+            SynchronizationContext context,
+            IProgress<OperationProgress> progress,
+            RefreshTaskDefinition task,
+            int finished,
+            int totalTasks,
+            Stopwatch stopwatch)
+        {
+            if (progress == null) return;
+            context.Send(
+                _ => ReportReadFinished(progress, task, finished, totalTasks, stopwatch),
+                null);
+        }
+
+        /// <summary>某条查询已经结束时推进读取条。成功和失败都计数，取消不在这里报告。</summary>
+        /// <remarks>只报告已结束个数和总数。读取没有任务内部的百分比，窗体按这一个比例画条。在界面线程上调用时会立刻画出。</remarks>
+        private static void ReportReadFinished(
+            IProgress<OperationProgress> progress,
+            RefreshTaskDefinition task,
+            int finished,
+            int totalTasks,
+            Stopwatch stopwatch)
+        {
+            bool allRead = totalTasks > 0 && finished >= totalTasks;
+            progress?.Report(new OperationProgress
+            {
+                TaskId = task?.Id,
+                TargetSheetName = task?.TargetSheetName,
+                Stage = allRead ? OperationStage.Writing : OperationStage.Reading,
+                Message = allRead ? "查询已全部读取，开始写入。" : "查询已结束。",
+                CurrentTask = finished,
+                TotalTasks = totalTasks,
+                ReadTaskCount = finished,
+                Elapsed = stopwatch.Elapsed,
+                IsIndeterminate = true
+            });
+        }
+
+        /// <summary>把当前任务序号和任务内部百分比合成整批的 0 到 100。</summary>
+        private static int TrackPercent(int currentTask, int totalTasks, int? innerPercent)
+        {
+            if (totalTasks < 1) return 0;
+            int completed = currentTask < 1 ? 0 : currentTask - 1;
+            if (completed > totalTasks) completed = totalTasks;
+            int inner = innerPercent ?? 0;
+            if (inner < 0) inner = 0;
+            if (inner > 100) inner = 100;
+            long overall = (completed * 100L + inner) / totalTasks;
+            if (overall < 0) return 0;
+            if (overall > 100) return 100;
+            return (int)overall;
         }
 
         private static IReadOnlyList<RefreshTaskResult> OrderResults(
@@ -372,5 +461,6 @@ namespace DB2Sheet.Services
                 if (value != null) _report(value);
             }
         }
+
     }
 }

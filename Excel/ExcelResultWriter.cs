@@ -14,7 +14,7 @@ namespace DB2Sheet.Excel
     /// <remarks>
     /// 交互式写入会清空目标工作表已用区域的内容和格式，并从 A1 开始。
     /// 批量刷新按起始单元格锚定：结果所占列从锚点清到原数据末行，右侧多余列仅在参数要求时清空。
-    /// 标题只占一行字段编码，编码行加粗并使用灰色底。数据从标题的下一行开始。
+    /// 标题只占一行字段编码，编码行加粗。成功时标题底为深绿，结果被截断时为橙色，与批量刷新状态圆点相同。数据从标题的下一行开始。
     /// 标题和数据组成的表格使用灰色细网格线。
     /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
     /// 文件日志只在写入完成或失败时各记一条汇总。
@@ -23,6 +23,13 @@ namespace DB2Sheet.Excel
     public sealed class ExcelResultWriter : IExcelResultWriter
     {
         private const int HeaderRowCount = 1;
+
+        /// <summary>成功写入时标题行和状态圆点使用的深绿色。</summary>
+        public static readonly Color SuccessColor = Color.FromArgb(46, 160, 67);
+
+        /// <summary>结果被截断时标题行和状态圆点使用的橙色。</summary>
+        public static readonly Color TruncatedColor = Color.DarkOrange;
+
         private readonly ILogger _logger;
 
         /// <summary>创建 Excel 结果写入器。</summary>
@@ -83,7 +90,12 @@ namespace DB2Sheet.Excel
                     LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                     return 0;
                 }
-                WriteHeaders(worksheet, result, options.AnchorRow, options.AnchorColumn);
+                WriteHeaders(
+                    worksheet,
+                    result,
+                    options.AnchorRow,
+                    options.AnchorColumn,
+                    result.IsTruncated ? TruncatedColor : SuccessColor);
 
                 int targetRow = options.AnchorRow + HeaderRowCount;
                 int writtenBlocks = 0;
@@ -275,8 +287,14 @@ namespace DB2Sheet.Excel
             }
         }
 
-        /// <summary>写入一行字段编码标题。编码加粗，底色为灰色。数据从下一行开始。</summary>
-        private static void WriteHeaders(ExcelInterop.Worksheet worksheet, BufferedQueryResult result, int anchorRow, int anchorColumn)
+        /// <summary>写入一行字段编码标题。编码加粗，底色表示成功或截断。数据从下一行开始。</summary>
+        /// <param name="headerColor">标题行底色。成功为深绿，截断为橙色。</param>
+        private static void WriteHeaders(
+            ExcelInterop.Worksheet worksheet,
+            BufferedQueryResult result,
+            int anchorRow,
+            int anchorColumn,
+            Color headerColor)
         {
             int columnCount = result.Columns.Count;
             object[,] headers = new object[HeaderRowCount, columnCount];
@@ -298,7 +316,7 @@ namespace DB2Sheet.Excel
                 range = worksheet.Range[start, end];
                 range.Value2 = headers;
                 interior = range.Interior;
-                interior.Color = ColorTranslator.ToOle(Color.FromArgb(217, 217, 217));
+                interior.Color = ColorTranslator.ToOle(headerColor);
                 font = range.Font;
                 font.Bold = true;
             }

@@ -33,6 +33,8 @@ namespace DB2Sheet.UI
         private readonly DataGridView _preview;
         private readonly Label _queryInfoLabel;
         private readonly Label _sqlQueryNameLabel;
+        private readonly Label _sqlLimitHint;
+        private readonly Font _sqlLimitHintFont;
         private readonly ToolStripStatusLabel _status;
         private readonly SplitContainer _resultsSplit;
         private readonly List<Image> _actionIcons = new List<Image>();
@@ -213,9 +215,21 @@ namespace DB2Sheet.UI
             sqlActions.Controls.Add(exportButton);
             sqlActions.Controls.Add(saveButton);
             Panel sqlHeader = BuildSqlHeader(sqlActions);
+            _sqlLimitHintFont = new Font(AppPresentation.DefaultFontName, 8.25f, FontStyle.Regular);
+            _sqlLimitHint = new Label
+            {
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                Height = 48,
+                ForeColor = SystemColors.GrayText,
+                Font = _sqlLimitHintFont,
+                Padding = new Padding(8, 6, 8, 0),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
 
             Panel sqlPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 30, 0, 0) };
             sqlPanel.Controls.Add(_sql);
+            sqlPanel.Controls.Add(_sqlLimitHint);
             sqlPanel.Controls.Add(sqlHeader);
 
             Panel previewPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 30, 0, 0) };
@@ -273,6 +287,8 @@ namespace DB2Sheet.UI
             _connectionTree.SelectionChanged += (sender, args) => UpdateConnectionMenuState();
             _connectionTree.ActiveConnectionChanged += (sender, args) => UpdateQueryInfo();
             FormClosed += QueryEditorFormFormClosed;
+            Activated += (sender, args) => UpdateSqlLimitHint();
+            UpdateSqlLimitHint();
             workspace.SizeChanged += (sender, args) =>
             {
                 _userDraggingWorkspaceSplit = false;
@@ -799,6 +815,17 @@ namespace DB2Sheet.UI
             _actionIcons.Clear();
             _queryScriptIcon.Dispose();
             _previewHeaderTypeFont.Dispose();
+            _sqlLimitHintFont.Dispose();
+        }
+
+        /// <summary>在 SQL 标题和编辑框之间说明预览、导出和超时限制。激活时按当前设置刷新。</summary>
+        private void UpdateSqlLimitHint()
+        {
+            _sqlLimitHint.Text = string.Format(
+                "最大预览行数：{0}（可在设置中修改）。最大导出 Excel 行：{1}（可在设置中修改）。查询超时：{2} 秒（可在设置中修改）。",
+                _settings.Get(CoreSettings.MaxPreviewRows),
+                _settings.Get(CoreSettings.MaxExportRows),
+                _settings.Get(CoreSettings.QueryTimeoutSeconds));
         }
 
         private void PreviewCellPainting(object sender, DataGridViewCellPaintingEventArgs e)

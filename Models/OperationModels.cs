@@ -64,6 +64,13 @@ namespace DB2Sheet.Models
         public long RowsWritten { get; set; }
         /// <summary>获取或设置 0 到 100 的完成百分比；未知时为 <see langword="null"/>。</summary>
         public int? Percent { get; set; }
+        /// <summary>获取或设置写入条的 0 到 100 百分比。为 null 时进度窗不改写入条。</summary>
+        public int? WritePercent { get; set; }
+        /// <summary>获取或设置已经结束的读取任务个数。为 null 时进度窗不改读取条。</summary>
+        /// <remarks>读取条的文字和填充都只由这个个数和 <see cref="TotalTasks"/> 决定。后到的更小个数会被忽略。</remarks>
+        public int? ReadTaskCount { get; set; }
+        /// <summary>获取或设置写入条左侧显示的任务序号，从 1 开始。为 null 时不改该数字。</summary>
+        public int? WriteTaskCount { get; set; }
         /// <summary>获取或设置是否显示无法估算完成比例的进度。</summary>
         public bool IsIndeterminate { get; set; }
         /// <summary>获取或设置当前结果是否因行数上限被截断。</summary>
