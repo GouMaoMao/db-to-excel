@@ -36,6 +36,8 @@ namespace DB2Sheet.UI
         private readonly Label _sqlLimitHint;
         private readonly Font _sqlLimitHintFont;
         private readonly ToolStripStatusLabel _status;
+        private readonly SplitContainer _workspace;
+        private readonly SplitContainer _leftSplit;
         private readonly SplitContainer _resultsSplit;
         private readonly List<Image> _actionIcons = new List<Image>();
         private readonly Image _queryScriptIcon;
@@ -88,7 +90,7 @@ namespace DB2Sheet.UI
             _openJdbcEnvironment = openJdbcEnvironment;
 
             Text = AppPresentation.WindowTitle("SQL 查询");
-            Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+            Rectangle workingArea = FormSizeMemory.CursorWorkingArea();
             Width = Math.Min(1320, workingArea.Width - 40);
             Height = Math.Min(860, workingArea.Height - 60);
             MinimumSize = new Size(820, 600);
@@ -246,27 +248,27 @@ namespace DB2Sheet.UI
             _resultsSplit.Panel1.Controls.Add(sqlPanel);
             _resultsSplit.Panel2.Controls.Add(previewPanel);
 
-            SplitContainer leftSplit = new SplitContainer
+            _leftSplit = new SplitContainer
             {
                 Dock = DockStyle.Fill,
                 Orientation = Orientation.Horizontal
             };
-            leftSplit.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionTree));
-            leftSplit.Panel2.Controls.Add(SectionPanel("查询方案", BuildQueryProfilesPanel()));
+            _leftSplit.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionTree));
+            _leftSplit.Panel2.Controls.Add(SectionPanel("查询方案", BuildQueryProfilesPanel()));
 
-            SplitContainer workspace = new SplitContainer
+            _workspace = new SplitContainer
             {
                 Dock = DockStyle.Fill,
                 Orientation = Orientation.Vertical,
                 SplitterWidth = 6
             };
-            workspace.Panel1.Controls.Add(leftSplit);
-            workspace.Panel2.Controls.Add(_resultsSplit);
+            _workspace.Panel1.Controls.Add(_leftSplit);
+            _workspace.Panel2.Controls.Add(_resultsSplit);
 
             StatusStrip statusStrip = new StatusStrip { Dock = DockStyle.Bottom, SizingGrip = false };
             statusStrip.Items.Add(_status);
 
-            Controls.Add(workspace);
+            Controls.Add(_workspace);
             Controls.Add(statusStrip);
             Controls.Add(menu);
 
@@ -289,39 +291,9 @@ namespace DB2Sheet.UI
             FormClosed += QueryEditorFormFormClosed;
             Activated += (sender, args) => UpdateSqlLimitHint();
             UpdateSqlLimitHint();
-            workspace.SizeChanged += (sender, args) =>
-            {
-                _userDraggingWorkspaceSplit = false;
-                _applyingWorkspaceSplit = true;
-                try
-                {
-                    ApplySplitterPanelMinSizes(workspace, 140, 420);
-                    TrySetSplitterDistance(workspace, WorkspaceSplitDistance(workspace));
-                }
-                finally
-                {
-                    _applyingWorkspaceSplit = false;
-                }
-            };
-            workspace.SplitterMoving += (sender, args) => _userDraggingWorkspaceSplit = true;
-            workspace.SplitterMoved += (sender, args) => RememberWorkspaceSplit(workspace);
-            Shown += (sender, args) =>
-            {
-                BeginInvoke(new Action(() =>
-                {
-                    _applyingWorkspaceSplit = true;
-                    try
-                    {
-                        ApplySplitterPanelMinSizes(workspace, 140, 420);
-                        TrySetSplitterDistance(workspace, WorkspaceSplitDistance(workspace));
-                        TrySetSplitterDistance(leftSplit, leftSplit.Height / 2);
-                    }
-                    finally
-                    {
-                        _applyingWorkspaceSplit = false;
-                    }
-                }));
-            };
+            _workspace.SizeChanged += (sender, args) => ApplyWorkspaceSplit();
+            _workspace.SplitterMoving += (sender, args) => _userDraggingWorkspaceSplit = true;
+            _workspace.SplitterMoved += (sender, args) => RememberWorkspaceSplit(_workspace);
 
             ReloadQueries(null, false);
             NewQuery();
@@ -658,6 +630,32 @@ namespace DB2Sheet.UI
             TrySetSplitterDistance(_resultsSplit, available / 2);
         }
 
+        /// <summary>
+        /// 窗口仍隐藏时按最终客户区摆左右分栏，并把左栏上下分成两半。
+        /// 显示之后再改分割条会把旧位置留在屏幕上。
+        /// </summary>
+        protected override void PrepareFirstShow()
+        {
+            ApplyWorkspaceSplit();
+            TrySetSplitterDistance(_leftSplit, _leftSplit.Height / 2);
+        }
+
+        /// <summary>按已记住的千分比摆左右分栏。容器还没有宽度时不改距离。</summary>
+        private void ApplyWorkspaceSplit()
+        {
+            _userDraggingWorkspaceSplit = false;
+            _applyingWorkspaceSplit = true;
+            try
+            {
+                ApplySplitterPanelMinSizes(_workspace, 140, 420);
+                TrySetSplitterDistance(_workspace, WorkspaceSplitDistance(_workspace));
+            }
+            finally
+            {
+                _applyingWorkspaceSplit = false;
+            }
+        }
+
         /// <summary>在容器拥有足够可用尺寸后应用分割面板最小尺寸，避免构造期触发 WinForms 距离范围异常。</summary>
         /// <param name="split">要设置最小尺寸约束的分割容器。</param>
         /// <param name="panel1MinSize">左侧或上方面板的最小像素尺寸。</param>
@@ -822,7 +820,7 @@ namespace DB2Sheet.UI
         private void UpdateSqlLimitHint()
         {
             _sqlLimitHint.Text = string.Format(
-                "最大预览行数：{0}（可在设置中修改）。最大导出 Excel 行：{1}（可在设置中修改）。查询超时：{2} 秒（可在设置中修改）。",
+                "最大预览行数：{0}（可修改）。最大导出 Excel 行：{1}（可修改）。查询超时：{2} 秒（可修改）。",
                 _settings.Get(CoreSettings.MaxPreviewRows),
                 _settings.Get(CoreSettings.MaxExportRows),
                 _settings.Get(CoreSettings.QueryTimeoutSeconds));

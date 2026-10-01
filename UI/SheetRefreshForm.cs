@@ -53,6 +53,9 @@ namespace DB2Sheet.UI
         private bool _suppressActivate;
         private bool _scanning;
         private bool _binding;
+
+        /// <summary>首次显示前已经扫过任务。紧接着的那次激活不再重扫，避免同一次打开读两遍 SQL 页。</summary>
+        private bool _skipActivateScan;
         private string _scanSummary = "正在读取 SQL 页。";
 
         /// <summary>创建 Sheet 批量刷新窗体。</summary>
@@ -201,12 +204,27 @@ namespace DB2Sheet.UI
             _workspace.SizeChanged += WorkspaceSizeChanged;
             _workspace.SplitterMoving += (sender, args) => _userDraggingSplit = true;
             _workspace.SplitterMoved += (sender, args) => RememberSplit();
-            Shown += (sender, args) => BeginInvoke(new Action(ApplySplit));
             UpdateModeLabel();
+        }
+
+        /// <summary>
+        /// 窗口仍隐藏时按最终宽度摆分栏，并读完 SQL 页任务。
+        /// 显示之后再改分割条或逐行填表，会把上一帧留在屏幕上。
+        /// </summary>
+        protected override void PrepareFirstShow()
+        {
+            ApplySplit();
+            ScanTasks();
+            _skipActivateScan = true;
         }
 
         private void SheetRefreshFormActivated(object sender, EventArgs e)
         {
+            if (_skipActivateScan)
+            {
+                _skipActivateScan = false;
+                return;
+            }
             if (_suppressActivate || _scanning || IsDisposed) return;
             if (_tasks.IsCurrentCellInEditMode) return;
             UpdateModeLabel();
@@ -671,12 +689,12 @@ namespace DB2Sheet.UI
         {
             BatchExecutionMode mode = _settings.Get(CoreSettings.BatchMode);
             string execution = mode == BatchExecutionMode.Parallel
-                ? "执行方式：并行，最大并发 " + _settings.Get(CoreSettings.MaxParallelism).ToString() + "（可在设置中修改）。"
-                : "执行方式：串行（可在设置中修改）。";
+                ? "执行方式：并行，最大并发 " + _settings.Get(CoreSettings.MaxParallelism).ToString() + "（可修改）。"
+                : "执行方式：串行（可修改）。";
             _hint.Text = "按住 Ctrl 或 Shift 可选中多行。"
                 + execution
-                + "最大导出 Excel 行：" + _settings.Get(CoreSettings.MaxExportRows).ToString() + "（可在设置中修改）。"
-                + "查询超时：" + _settings.Get(CoreSettings.QueryTimeoutSeconds).ToString() + " 秒（可在设置中修改）。";
+                + "最大导出 Excel 行：" + _settings.Get(CoreSettings.MaxExportRows).ToString() + "（可修改）。"
+                + "查询超时：" + _settings.Get(CoreSettings.QueryTimeoutSeconds).ToString() + " 秒（可修改）。";
         }
 
         private void TasksCurrentCellDirtyStateChanged(object sender, EventArgs e)
@@ -821,12 +839,17 @@ namespace DB2Sheet.UI
                     size,
                     size);
                 SmoothingMode smoothing = e.Graphics.SmoothingMode;
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (SolidBrush brush = new SolidBrush(color.Value))
+                using (Region previousClip = e.Graphics.Clip)
                 {
-                    e.Graphics.FillEllipse(brush, box);
+                    e.Graphics.SetClip(e.CellBounds, CombineMode.Intersect);
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (SolidBrush brush = new SolidBrush(color.Value))
+                    {
+                        e.Graphics.FillEllipse(brush, box);
+                    }
+                    e.Graphics.SmoothingMode = smoothing;
+                    e.Graphics.Clip = previousClip;
                 }
-                e.Graphics.SmoothingMode = smoothing;
             }
             e.Handled = true;
         }
