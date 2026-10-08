@@ -102,7 +102,7 @@ namespace DB2Sheet
                 {
                     _queryEditorForm = new QueryEditorForm(
                         _queries, _connections, _providers, _executionService, _queryBuffer,
-                        _resultWriter, _operationRunner, _settings, workbook, OpenJdbcEnvironment);
+                        _resultWriter, _operationRunner, _settings, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
                     _queryEditorForm.FormClosed += (sender, args) => _queryEditorForm = null;
                     _queryEditorForm.Show();
                 }
@@ -132,7 +132,7 @@ namespace DB2Sheet
                     }
                     _sheetRefreshForm = new SheetRefreshForm(
                         _connections, _providers, _executionService, _operationRunner, _settings,
-                        _taskReader, _batchRefresh, workbook, OpenJdbcEnvironment);
+                        _taskReader, _batchRefresh, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
                     _sheetRefreshForm.FormClosed += (sender, args) => _sheetRefreshForm = null;
                     _sheetRefreshForm.Show();
                 }
@@ -149,7 +149,7 @@ namespace DB2Sheet
             ExecuteUiAction(() =>
             {
                 using (ConnectionProfilesForm form = new ConnectionProfilesForm(
-                    _connections, _providers, _executionService, _operationRunner, _settings, null, OpenJdbcEnvironment))
+                    _connections, _providers, _executionService, _operationRunner, _settings, _jdbcEnvironment, null, OpenJdbcEnvironment))
                 {
                     form.ShowDialog();
                 }

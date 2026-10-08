@@ -16,6 +16,7 @@ namespace DB2Sheet.UI
         private readonly IProviderRegistry _providers;
         private readonly IDataSourceExecutionService _executionService;
         private readonly IOperationRunner _operationRunner;
+        private readonly IJdbcEnvironmentStore _jdbcEnvironment;
         private readonly Action _openJdbcEnvironment;
         private readonly ListView _profiles;
         private readonly Button _editButton;
@@ -28,6 +29,7 @@ namespace DB2Sheet.UI
         /// <param name="executionService">连接测试服务。</param>
         /// <param name="operationRunner">连接测试进度运行器。</param>
         /// <param name="settings">用于记住窗体尺寸的设置存储。</param>
+        /// <param name="jdbcEnvironment">本机 Java 路径，传给连接编辑窗做 JDBC 检查。</param>
         /// <param name="selectedProfileId">打开时优先选中的方案标识。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体的操作。</param>
         public ConnectionProfilesForm(
@@ -36,6 +38,7 @@ namespace DB2Sheet.UI
             IDataSourceExecutionService executionService,
             IOperationRunner operationRunner,
             ISettingsStore settings,
+            IJdbcEnvironmentStore jdbcEnvironment,
             string selectedProfileId = null,
             Action openJdbcEnvironment = null)
         {
@@ -43,6 +46,7 @@ namespace DB2Sheet.UI
             _providers = providers ?? throw new ArgumentNullException(nameof(providers));
             _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
+            _jdbcEnvironment = jdbcEnvironment ?? throw new ArgumentNullException(nameof(jdbcEnvironment));
             _openJdbcEnvironment = openJdbcEnvironment;
             if (settings == null) throw new ArgumentNullException(nameof(settings));
 
@@ -167,6 +171,7 @@ namespace DB2Sheet.UI
                 _executionService,
                 _operationRunner,
                 _repository,
+                _jdbcEnvironment,
                 profile,
                 _openJdbcEnvironment))
             {

@@ -67,6 +67,7 @@ namespace DB2Sheet.UI
         /// <param name="taskReader">SQL 页任务读取、首行写回和跳转。</param>
         /// <param name="refreshService">批量刷新编排服务。</param>
         /// <param name="workbook">当前操作的 Excel 工作簿。</param>
+        /// <param name="jdbcEnvironment">本机 Java 路径，传给连接树里的编辑窗。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体；为空时连接编辑不显示该入口。</param>
         public SheetRefreshForm(
             IConnectionProfileRepository connections,
@@ -77,9 +78,11 @@ namespace DB2Sheet.UI
             ISqlSheetTaskReader taskReader,
             IBatchRefreshService refreshService,
             ExcelInterop.Workbook workbook,
+            IJdbcEnvironmentStore jdbcEnvironment,
             Action openJdbcEnvironment = null)
         {
             if (executionService == null) throw new ArgumentNullException(nameof(executionService));
+            if (jdbcEnvironment == null) throw new ArgumentNullException(nameof(jdbcEnvironment));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _taskReader = taskReader ?? throw new ArgumentNullException(nameof(taskReader));
@@ -94,7 +97,7 @@ namespace DB2Sheet.UI
             FormSizeMemory.Attach(this, _settings, "SheetRefresh");
 
             _connectionTree = new DatabaseConnectionTree(
-                connections, providers, executionService, _operationRunner, _settings, openJdbcEnvironment);
+                connections, providers, executionService, _operationRunner, _settings, jdbcEnvironment, openJdbcEnvironment);
             _linkFont = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Underline);
             _hintFont = new Font(AppPresentation.DefaultFontName, 8.25f, FontStyle.Regular);
             _hint = new Label

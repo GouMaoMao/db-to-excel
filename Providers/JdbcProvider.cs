@@ -87,6 +87,13 @@ namespace DB2Sheet.Providers
                 return ConnectionTestResult.Failure(string.Join(Environment.NewLine, errors), TimeSpan.Zero);
             }
 
+            JdbcEnvironmentSettings environment = _environment.Load();
+            JavaResolution java = JavaRuntimeProbe.Resolve(environment == null ? string.Empty : environment.JavaExecutable);
+            if (!java.Found)
+            {
+                return ConnectionTestResult.Failure(JavaRuntimeProbe.MissingJavaMessage, TimeSpan.Zero);
+            }
+
             Stopwatch stopwatch = Stopwatch.StartNew();
             try
             {

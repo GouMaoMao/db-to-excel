@@ -25,6 +25,7 @@ namespace DB2Sheet.UI
         private readonly IDataSourceExecutionService _executionService;
         private readonly IOperationRunner _operationRunner;
         private readonly ISettingsStore _settings;
+        private readonly IJdbcEnvironmentStore _jdbcEnvironment;
         private readonly Action _openJdbcEnvironment;
         private readonly TreeView _tree;
         private readonly ImageList _images;
@@ -45,6 +46,7 @@ namespace DB2Sheet.UI
         /// <param name="executionService">连接测试服务。</param>
         /// <param name="operationRunner">测试连接时使用的进度窗体运行器。</param>
         /// <param name="settings">当前连接标识的会话设置。</param>
+        /// <param name="jdbcEnvironment">本机 Java 路径，传给连接编辑窗做 JDBC 检查。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体；为空时连接编辑不显示该入口。</param>
         public DatabaseConnectionTree(
             IConnectionProfileRepository connections,
@@ -52,6 +54,7 @@ namespace DB2Sheet.UI
             IDataSourceExecutionService executionService,
             IOperationRunner operationRunner,
             ISettingsStore settings,
+            IJdbcEnvironmentStore jdbcEnvironment,
             Action openJdbcEnvironment)
         {
             _connections = connections ?? throw new ArgumentNullException(nameof(connections));
@@ -59,6 +62,7 @@ namespace DB2Sheet.UI
             _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _jdbcEnvironment = jdbcEnvironment ?? throw new ArgumentNullException(nameof(jdbcEnvironment));
             _openJdbcEnvironment = openJdbcEnvironment;
 
             Dock = DockStyle.Fill;
@@ -134,7 +138,7 @@ namespace DB2Sheet.UI
         public void CreateConnection()
         {
             using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(
-                _providers, _executionService, _operationRunner, _connections, null, _openJdbcEnvironment))
+                _providers, _executionService, _operationRunner, _connections, _jdbcEnvironment, null, _openJdbcEnvironment))
             {
                 if (editor.ShowDialog(FindForm()) != DialogResult.OK || editor.Profile == null) return;
                 _connections.Save(editor.Profile);
@@ -150,7 +154,7 @@ namespace DB2Sheet.UI
             if (selected == null) return;
             bool wasActive = string.Equals(_activeConnection?.Id, selected.Id, StringComparison.OrdinalIgnoreCase);
             using (ConnectionProfileEditForm editor = new ConnectionProfileEditForm(
-                _providers, _executionService, _operationRunner, _connections, selected, _openJdbcEnvironment))
+                _providers, _executionService, _operationRunner, _connections, _jdbcEnvironment, selected, _openJdbcEnvironment))
             {
                 if (editor.ShowDialog(FindForm()) != DialogResult.OK || editor.Profile == null) return;
                 _connections.Save(editor.Profile);

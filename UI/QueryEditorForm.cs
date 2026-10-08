@@ -25,6 +25,7 @@ namespace DB2Sheet.UI
         private readonly IExcelResultWriter _writer;
         private readonly IOperationRunner _operationRunner;
         private readonly ISettingsStore _settings;
+        private readonly IJdbcEnvironmentStore _jdbcEnvironment;
         private readonly Action _openJdbcEnvironment;
         private readonly ExcelInterop.Workbook _workbook;
         private readonly DatabaseConnectionTree _connectionTree;
@@ -65,6 +66,7 @@ namespace DB2Sheet.UI
         /// <param name="operationRunner">进度窗体运行器。</param>
         /// <param name="settings">查询行数、超时和分块大小设置。</param>
         /// <param name="workbook">当前操作的 Excel 工作簿。</param>
+        /// <param name="jdbcEnvironment">本机 Java 路径，传给连接树里的编辑窗。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体；为空时连接编辑不显示该入口。</param>
         public QueryEditorForm(
             IQueryProfileRepository queries,
@@ -76,6 +78,7 @@ namespace DB2Sheet.UI
             IOperationRunner operationRunner,
             ISettingsStore settings,
             ExcelInterop.Workbook workbook,
+            IJdbcEnvironmentStore jdbcEnvironment,
             Action openJdbcEnvironment = null)
         {
             _queries = queries ?? throw new ArgumentNullException(nameof(queries));
@@ -87,6 +90,7 @@ namespace DB2Sheet.UI
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
+            _jdbcEnvironment = jdbcEnvironment ?? throw new ArgumentNullException(nameof(jdbcEnvironment));
             _openJdbcEnvironment = openJdbcEnvironment;
 
             Text = AppPresentation.WindowTitle("SQL 查询");
@@ -98,7 +102,7 @@ namespace DB2Sheet.UI
             FormSizeMemory.Attach(this, _settings, "QueryEditor");
 
             _connectionTree = new DatabaseConnectionTree(
-                _connections, _providers, _executionService, _operationRunner, _settings, _openJdbcEnvironment);
+                _connections, _providers, _executionService, _operationRunner, _settings, _jdbcEnvironment, _openJdbcEnvironment);
             _queryScriptIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_script.png");
             int queryLineHeight = TextRenderer.MeasureText("方案", Font).Height;
             _queryProfiles = new ListBox

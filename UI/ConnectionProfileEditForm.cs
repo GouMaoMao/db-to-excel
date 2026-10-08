@@ -19,6 +19,7 @@ namespace DB2Sheet.UI
         private readonly IDataSourceExecutionService _executionService;
         private readonly IOperationRunner _operationRunner;
         private readonly IConnectionProfileRepository _connections;
+        private readonly IJdbcEnvironmentStore _jdbcEnvironment;
         private readonly TextBox _name;
         private readonly ComboBox _provider;
         private readonly TableLayoutPanel _parameters;
@@ -40,6 +41,7 @@ namespace DB2Sheet.UI
         /// <param name="executionService">用于测试连接的服务。</param>
         /// <param name="operationRunner">负责显示连接测试进度。</param>
         /// <param name="connections">用于校验方案名称是否与其它连接重名。</param>
+        /// <param name="jdbcEnvironment">本机 Java 路径。选中 JDBC 和测试连接时做快速检查。</param>
         /// <param name="profile">要编辑的快照；为空表示新建方案。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体的操作；非 JDBC 连接不显示入口。</param>
         public ConnectionProfileEditForm(
@@ -47,6 +49,7 @@ namespace DB2Sheet.UI
             IDataSourceExecutionService executionService,
             IOperationRunner operationRunner,
             IConnectionProfileRepository connections,
+            IJdbcEnvironmentStore jdbcEnvironment,
             ConnectionProfileSnapshot profile = null,
             Action openJdbcEnvironment = null)
         {
@@ -54,6 +57,7 @@ namespace DB2Sheet.UI
             _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _connections = connections ?? throw new ArgumentNullException(nameof(connections));
+            _jdbcEnvironment = jdbcEnvironment ?? throw new ArgumentNullException(nameof(jdbcEnvironment));
             _openJdbcEnvironment = openJdbcEnvironment;
             _profileId = profile?.Id ?? Guid.NewGuid().ToString("N");
 
@@ -141,6 +145,7 @@ namespace DB2Sheet.UI
             _jdbcEnvironmentButton.Click += (sender, args) => _openJdbcEnvironment?.Invoke();
             _testButton.Click += TestButtonClick;
             _saveButton.Click += SaveButtonClick;
+            Shown += (sender, args) => TryEnsureJdbcJava(true);
             AcceptButton = _saveButton;
             CancelButton = cancelButton;
 
@@ -179,8 +184,14 @@ namespace DB2Sheet.UI
             _storedParameters.Clear();
             BuildParameterEditors(null);
             UpdateJdbcEnvironmentButton();
-            _status.Text = string.Empty;
             InvalidateConnectionTest();
+            if (IsJdbcSelected())
+            {
+                TryEnsureJdbcJava(true);
+                return;
+            }
+
+            _status.Text = string.Empty;
         }
 
         private void BuildParameterEditors(IReadOnlyDictionary<string, string> values)
@@ -521,8 +532,75 @@ namespace DB2Sheet.UI
 
         private void UpdateJdbcEnvironmentButton()
         {
-            _jdbcEnvironmentButton.Visible = _openJdbcEnvironment != null &&
-                string.Equals(SelectedProvider?.ProviderId, "jdbc", StringComparison.OrdinalIgnoreCase);
+            _jdbcEnvironmentButton.Visible = _openJdbcEnvironment != null && IsJdbcSelected();
+        }
+
+        /// <summary>当前是否选中 JDBC 数据源。</summary>
+        private bool IsJdbcSelected()
+        {
+            return string.Equals(
+                SelectedProvider?.ProviderId,
+                JdbcConnectionComposer.ProviderId,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>按已保存路径加快速档查找 java.exe，不扫描 C 盘。</summary>
+        /// <returns>查找结果。</returns>
+        private JavaResolution ResolveConfiguredJava()
+        {
+            JdbcEnvironmentSettings settings = _jdbcEnvironment.Load();
+            return JavaRuntimeProbe.Resolve(settings == null ? string.Empty : settings.JavaExecutable);
+        }
+
+        /// <summary>选中 JDBC 或测试连接前确认本机已有 Java。未找到时可打开 JDBC 环境后再查一次。</summary>
+        /// <param name="promptIfMissing">未找到时是否询问并打开 JDBC 环境。</param>
+        /// <returns>已找到可用 java.exe 时为 true。非 JDBC 时直接为 true。</returns>
+        /// <remarks>询问后仍可继续填写 URL 和 jar。测试连接在返回 false 时不会启动进度窗。</remarks>
+        private bool TryEnsureJdbcJava(bool promptIfMissing)
+        {
+            if (!IsJdbcSelected()) return true;
+
+            JavaResolution resolution = ResolveConfiguredJava();
+            if (resolution.Found)
+            {
+                _status.ForeColor = SystemColors.GrayText;
+                _status.Text = "已检测到 Java。";
+                return true;
+            }
+
+            if (promptIfMissing && _openJdbcEnvironment != null)
+            {
+                DialogResult answer = MessageBox.Show(
+                    this,
+                    "JDBC 连接需要本机 Java（JDK 8 或更高）。当前没有找到可用的 Java。是否打开「JDBC 环境」进行检测或指定？",
+                    "连接方案",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                if (answer == DialogResult.Yes)
+                {
+                    _openJdbcEnvironment();
+                    resolution = ResolveConfiguredJava();
+                    if (resolution.Found)
+                    {
+                        _status.ForeColor = SystemColors.GrayText;
+                        _status.Text = "已检测到 Java。";
+                        return true;
+                    }
+                }
+            }
+            else if (promptIfMissing)
+            {
+                MessageBox.Show(
+                    this,
+                    JavaRuntimeProbe.MissingJavaMessage,
+                    "连接方案",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+
+            _status.ForeColor = Color.DarkRed;
+            _status.Text = JavaRuntimeProbe.MissingJavaMessage;
+            return false;
         }
 
         private static ParameterEditor CreateEditor(ParameterDefinition definition)
@@ -577,6 +655,7 @@ namespace DB2Sheet.UI
 
         private void TestButtonClick(object sender, EventArgs e)
         {
+            if (!TryEnsureJdbcJava(true)) return;
             if (!TryCreateProfile(out ConnectionProfile profile, true)) return;
 
             try
