@@ -196,9 +196,11 @@ namespace DB2Sheet.UI
 
         private void FormatSelectionOrAll()
         {
-            int start = _editor.SelectionLength > 0 ? _editor.SelectionStart : 0;
-            int length = _editor.SelectionLength > 0 ? _editor.SelectionLength : _editor.TextLength;
-            string formatted = _formattingService.Format(_editor.Text.Substring(start, length));
+            bool hasSelection = _editor.SelectionLength > 0;
+            int start = hasSelection ? _editor.SelectionStart : 0;
+            string segment = hasSelection ? _editor.SelectedText : _editor.Text;
+            string formatted = _formattingService.Format(segment);
+            int length = hasSelection ? _editor.SelectionLength : _editor.TextLength;
             _editor.Select(start, length);
             _editor.SelectedText = formatted;
             _editor.Select(start, formatted.Length);
@@ -247,7 +249,9 @@ namespace DB2Sheet.UI
         private void ChangeSelectionIndent(bool outdent)
         {
             GetAffectedLineRange(out int start, out int end);
-            string block = _editor.Text.Substring(start, end - start);
+            int blockLength = Math.Max(0, end - start);
+            _editor.Select(start, blockLength);
+            string block = _editor.SelectedText;
             string[] lines = SplitLinesPreservingTrailingBreak(block);
             for (int index = 0; index < lines.Length; index++)
             {
