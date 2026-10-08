@@ -20,6 +20,7 @@ namespace DB2Sheet.UI
     /// 左栏与 SQL 查询窗体共用连接树和当前连接。右栏列出任务。
     /// 特殊参数按键分列，改完后写回 SQL 页首行，不改 SQL 正文。
     /// 点击摘要跳到 SQL 命令首行，点击目标表名打开该表。任务行右键可复制该行结果说明。
+    /// 单击勾选框切换该行并记为连续勾选的起点。按住 Shift 点击时，把起点那次的勾选结果写到起点与该行之间，且不跳转。
     /// 窗体尺寸沿用会话记忆；左右比例只在用户拖动分割条时写入。
     /// </remarks>
     public sealed class SheetRefreshForm : AppForm
@@ -57,6 +58,21 @@ namespace DB2Sheet.UI
         private bool _suppressActivate;
         private bool _scanning;
         private bool _binding;
+
+        /// <summary>上一次单击勾选框的行。按住 Shift 时从这里延续到所点的行。重新绑表后作废。</summary>
+        private int _rangeAnchor = -1;
+
+        /// <summary>起点那次点击之后的勾选结果。Shift 范围整段都写成这个值。</summary>
+        private bool _rangeAnchorChecked;
+
+        /// <summary>这次按下已经按住 Shift。点击处理完之前用来拦住跳转，并识别勾选框是否先自己翻转。</summary>
+        private bool _shiftClick;
+
+        /// <summary>按住 Shift 时已经自己翻转过的勾选框所在行。只跳过这一行，避免再翻一次。</summary>
+        private int _shiftAdjustedRow = -1;
+
+        /// <summary>Shift 点击结束参数格的编辑时不把内容写回 SQL 页。</summary>
+        private bool _discardEdit;
 
         /// <summary>首次显示前已经扫过任务。紧接着的那次激活不再重扫，避免同一次打开读两遍 SQL 页。</summary>
         private bool _skipActivateScan;
@@ -130,7 +146,7 @@ namespace DB2Sheet.UI
                 AllowUserToResizeRows = false,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = true,
+                MultiSelect = false,
                 BackgroundColor = SystemColors.Window,
                 BorderStyle = BorderStyle.None,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
@@ -395,6 +411,7 @@ namespace DB2Sheet.UI
 
         private void BindRows()
         {
+            _rangeAnchor = -1;
             _binding = true;
             try
             {
@@ -676,14 +693,7 @@ namespace DB2Sheet.UI
             try
             {
                 foreach (DataGridViewRow gridRow in _tasks.Rows)
-                {
-                    TaskRow row = gridRow.Tag as TaskRow;
-                    if (row == null) continue;
-                    row.Checked = select;
-                    ApplyCheckState(row);
-                    gridRow.Cells[_checkColumn].Value = select;
-                    DecorateRow(gridRow, row);
-                }
+                    WriteChecked(gridRow, select);
             }
             finally
             {
@@ -708,7 +718,7 @@ namespace DB2Sheet.UI
             string execution = mode == BatchExecutionMode.Parallel
                 ? "执行方式：并行，最大并发 " + _settings.Get(CoreSettings.MaxParallelism).ToString() + "（可修改）。"
                 : "执行方式：串行（可修改）。";
-            _hint.Text = "按住 Ctrl 或 Shift 可选中多行。"
+            _hint.Text = "按住 Shift 点击，可一次勾上或去掉连续多行。"
                 + execution
                 + "最大导出 Excel 行：" + _settings.Get(CoreSettings.MaxExportRows).ToString() + "（可修改）。"
                 + "查询超时：" + _settings.Get(CoreSettings.QueryTimeoutSeconds).ToString() + " 秒（可修改）。";
@@ -731,18 +741,30 @@ namespace DB2Sheet.UI
             InvalidateHeaderCheck();
             DecorateRow(_tasks.Rows[e.RowIndex], row);
             _tasks.InvalidateRow(e.RowIndex);
+            if (_shiftClick)
+                _shiftAdjustedRow = e.RowIndex;
+            else
+            {
+                _rangeAnchor = e.RowIndex;
+                _rangeAnchorChecked = row.Checked;
+            }
             TasksSelectionChanged(this, EventArgs.Empty);
         }
 
         private void TasksCellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
         {
+            if (_shiftClick)
+            {
+                e.Cancel = true;
+                return;
+            }
             if (e.ColumnIndex == _checkColumn || e.ColumnIndex >= _optionColumnStart) return;
             e.Cancel = true;
         }
 
         private void TasksCellEndEdit(object sender, DataGridViewCellEventArgs e)
         {
-            if (_binding || e.RowIndex < 0 || e.ColumnIndex < _optionColumnStart) return;
+            if (_binding || _discardEdit || e.RowIndex < 0 || e.ColumnIndex < _optionColumnStart) return;
             DataGridViewRow gridRow = _tasks.Rows[e.RowIndex];
             TaskRow row = gridRow.Tag as TaskRow;
             if (row == null) return;
@@ -771,13 +793,114 @@ namespace DB2Sheet.UI
             TasksSelectionChanged(this, EventArgs.Empty);
         }
 
-        /// <summary>右键先选中所点的任务行，随后弹出的菜单复制的就是这一行。</summary>
+        /// <summary>右键先选中所点的任务行。左键按下时记下是否按住 Shift，点击结束后再决定跳转还是连续勾选。</summary>
         private void TasksCellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
         {
-            if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            DataGridViewCell cell = _tasks.Rows[e.RowIndex].Cells[e.ColumnIndex];
-            if (_tasks.CurrentCell != cell)
-                _tasks.CurrentCell = cell;
+            if (e.Button == MouseButtons.Right)
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+                DataGridViewCell cell = _tasks.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                if (_tasks.CurrentCell != cell)
+                    _tasks.CurrentCell = cell;
+                return;
+            }
+
+            if (e.Button != MouseButtons.Left || e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            _shiftClick = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+        }
+
+        /// <summary>
+        /// 把起点那次的勾选结果写到起点与所点行之间。没有起点时只切换所点的这一行，并把它记成起点。
+        /// </summary>
+        /// <param name="rowIndex">这次 Shift 点击的任务行。</param>
+        /// <remarks>
+        /// 延后到这次点击处理完再写。勾选框有时会先自己翻转，那种情况不再翻第二次。
+        /// 起点只在单击勾选框时移动，方便按住 Shift 继续往更远的行扩。
+        /// </remarks>
+        private void ApplyShiftRange(int rowIndex)
+        {
+            if (!_tasks.IsDisposed && _tasks.IsCurrentCellInEditMode)
+            {
+                if (_tasks.CurrentCell is DataGridViewCheckBoxCell)
+                    _tasks.EndEdit();
+                else
+                {
+                    _discardEdit = true;
+                    try
+                    {
+                        _tasks.CancelEdit();
+                    }
+                    finally
+                    {
+                        _discardEdit = false;
+                    }
+                }
+            }
+
+            bool alreadyToggled = _shiftAdjustedRow == rowIndex;
+            _shiftAdjustedRow = -1;
+            _shiftClick = false;
+            if (_tasks.IsDisposed || rowIndex < 0 || rowIndex >= _tasks.Rows.Count) return;
+
+            if (_rangeAnchor < 0 || _rangeAnchor >= _tasks.Rows.Count)
+            {
+                TaskRow row = _tasks.Rows[rowIndex].Tag as TaskRow;
+                if (row == null) return;
+                if (!alreadyToggled)
+                {
+                    _binding = true;
+                    try
+                    {
+                        WriteChecked(_tasks.Rows[rowIndex], !row.Checked);
+                    }
+                    finally
+                    {
+                        _binding = false;
+                    }
+                    _tasks.RefreshEdit();
+                    InvalidateHeaderCheck();
+                    _tasks.InvalidateColumn(_statusColumn);
+                }
+                _rangeAnchor = rowIndex;
+                _rangeAnchorChecked = row.Checked;
+                TasksSelectionChanged(this, EventArgs.Empty);
+                return;
+            }
+
+            int start = Math.Min(_rangeAnchor, rowIndex);
+            int end = Math.Max(_rangeAnchor, rowIndex);
+            bool select = _rangeAnchorChecked;
+            _binding = true;
+            try
+            {
+                for (int i = start; i <= end; i++)
+                    WriteChecked(_tasks.Rows[i], select);
+            }
+            finally
+            {
+                _binding = false;
+            }
+
+            _tasks.RefreshEdit();
+            InvalidateHeaderCheck();
+            _tasks.InvalidateColumn(_statusColumn);
+            TasksSelectionChanged(this, EventArgs.Empty);
+        }
+
+        /// <summary>把一行的勾选结果写进任务和勾选框，并刷新该行颜色。</summary>
+        /// <param name="gridRow">任务列表中的一行。</param>
+        /// <param name="select">这一行要变成的勾选结果。</param>
+        /// <remarks>调用方在绑定期间调用，避免勾选框把这次写入再报一遍。</remarks>
+        private void WriteChecked(DataGridViewRow gridRow, bool select)
+        {
+            TaskRow row = gridRow.Tag as TaskRow;
+            if (row == null) return;
+            row.Checked = select;
+            ApplyCheckState(row);
+            gridRow.Cells[_checkColumn].Value = select;
+            DecorateRow(gridRow, row);
+            if (gridRow.DataGridView != null)
+                gridRow.DataGridView.InvalidateRow(gridRow.Index);
         }
 
         /// <summary>只有点在任务单元格上才弹出菜单。说明为空时不能复制。</summary>
@@ -814,6 +937,13 @@ namespace DB2Sheet.UI
         private void TasksCellClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0) return;
+            if (_shiftClick)
+            {
+                int rowIndex = e.RowIndex;
+                BeginInvoke(new Action(() => ApplyShiftRange(rowIndex)));
+                return;
+            }
+
             TaskRow row = _tasks.Rows[e.RowIndex].Tag as TaskRow;
             if (row == null) return;
             if (e.ColumnIndex == _targetColumn) JumpToTarget(row);
