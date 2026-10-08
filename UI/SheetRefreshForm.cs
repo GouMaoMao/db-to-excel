@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
@@ -18,7 +19,7 @@ namespace DB2Sheet.UI
     /// <remarks>
     /// 左栏与 SQL 查询窗体共用连接树和当前连接。右栏列出任务。
     /// 特殊参数按键分列，改完后写回 SQL 页首行，不改 SQL 正文。
-    /// 点击摘要跳到 SQL 命令首行，点击目标表名打开该表。
+    /// 点击摘要跳到 SQL 命令首行，点击目标表名打开该表。任务行右键可复制该行结果说明。
     /// 窗体尺寸沿用会话记忆；左右比例只在用户拖动分割条时写入。
     /// </remarks>
     public sealed class SheetRefreshForm : AppForm
@@ -48,6 +49,9 @@ namespace DB2Sheet.UI
         private readonly int _statusColumn;
         private readonly int _optionColumnStart;
         private readonly List<TaskRow> _rows = new List<TaskRow>();
+        private readonly ContextMenuStrip _taskMenu;
+        private readonly ToolStripMenuItem _copyResultItem;
+        private TaskRow _contextRow;
         private bool _applyingSplit;
         private bool _userDraggingSplit;
         private bool _suppressActivate;
@@ -161,6 +165,10 @@ namespace DB2Sheet.UI
             AddOptionColumn(SqlSheetHeader.ClearExtraColumnsKey);
             foreach (DataGridViewColumn column in _tasks.Columns)
                 column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            _copyResultItem = new ToolStripMenuItem("复制结果信息");
+            _taskMenu = new ContextMenuStrip();
+            _taskMenu.Items.Add(_copyResultItem);
+            _tasks.ContextMenuStrip = _taskMenu;
 
             FlowLayoutPanel actions = new FlowLayoutPanel
             {
@@ -199,7 +207,10 @@ namespace DB2Sheet.UI
             _tasks.CellPainting += TasksCellPainting;
             _tasks.ColumnHeaderMouseClick += TasksColumnHeaderMouseClick;
             _tasks.CellClick += TasksCellClick;
+            _tasks.CellMouseDown += TasksCellMouseDown;
             _tasks.CellMouseMove += TasksCellMouseMove;
+            _taskMenu.Opening += TaskMenuOpening;
+            _copyResultItem.Click += CopyResultMessage;
             _tasks.MouseLeave += (sender, args) => _tasks.Cursor = Cursors.Default;
             _tasks.SelectionChanged += TasksSelectionChanged;
             FormClosed += SheetRefreshFormFormClosed;
@@ -760,6 +771,46 @@ namespace DB2Sheet.UI
             TasksSelectionChanged(this, EventArgs.Empty);
         }
 
+        /// <summary>右键先选中所点的任务行，随后弹出的菜单复制的就是这一行。</summary>
+        private void TasksCellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            DataGridViewCell cell = _tasks.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            if (_tasks.CurrentCell != cell)
+                _tasks.CurrentCell = cell;
+        }
+
+        /// <summary>只有点在任务单元格上才弹出菜单。说明为空时不能复制。</summary>
+        private void TaskMenuOpening(object sender, CancelEventArgs e)
+        {
+            Point point = _tasks.PointToClient(Cursor.Position);
+            DataGridView.HitTestInfo hit = _tasks.HitTest(point.X, point.Y);
+            _contextRow = hit.RowIndex < 0 ? null : _tasks.Rows[hit.RowIndex].Tag as TaskRow;
+            if (_contextRow == null)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            _copyResultItem.Enabled = !string.IsNullOrEmpty(_contextRow.Message);
+        }
+
+        /// <summary>把右键所在任务行的结果说明写入剪贴板。</summary>
+        /// <remarks>剪贴板偶发占用时不打断操作。</remarks>
+        private void CopyResultMessage(object sender, EventArgs e)
+        {
+            TaskRow row = _contextRow;
+            if (row == null || string.IsNullOrEmpty(row.Message)) return;
+            try
+            {
+                Clipboard.SetText(row.Message);
+            }
+            catch (Exception)
+            {
+                // 剪贴板偶发占用；复制失败不打断操作。
+            }
+        }
+
         private void TasksCellClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0) return;
@@ -1057,6 +1108,7 @@ namespace DB2Sheet.UI
             _actionIcons.Clear();
             _linkFont.Dispose();
             _hintFont.Dispose();
+            _taskMenu.Dispose();
         }
 
         private static Color? StatusColor(TaskRow row)
