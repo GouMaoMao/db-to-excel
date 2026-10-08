@@ -152,7 +152,7 @@ namespace DB2Sheet.UI
             switch (controlId)
             {
                 case "DB2SheetQueryButton":
-                    fileName = "icon_script.png";
+                    fileName = "icon_code.png";
                     size = 32;
                     return true;
                 case "DB2SheetRefreshButton":

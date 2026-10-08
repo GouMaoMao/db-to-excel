@@ -298,6 +298,7 @@
     <EmbeddedResource Include="Resources\icon_refreshall.png" />
     <EmbeddedResource Include="Resources\icon_selectall.png" />
     <EmbeddedResource Include="Resources\icon_piliangzhixing.png" />
+    <EmbeddedResource Include="Resources\icon_code.png" />
     <EmbeddedResource Include="Resources\icon_connect.png" />
     <EmbeddedResource Include="Resources\icon_setting.png" />
     <EmbeddedResource Include="Resources\icon_java.png" />
