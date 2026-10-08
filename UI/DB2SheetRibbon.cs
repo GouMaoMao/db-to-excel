@@ -185,7 +185,7 @@ namespace DB2Sheet.UI
 
         /// <summary>返回「关于」组的版本标签。由 Office 在绘制 Ribbon 时调用。</summary>
         /// <param name="control">版本标签控件；Id 不是版本标签时返回空字符串。</param>
-        /// <returns>形如“版本 1.0.0”的文本；未知控件返回空字符串。</returns>
+        /// <returns>形如“版本 1.0.1”的文本；未知控件返回空字符串。</returns>
         public string GetAboutLabel(OfficeCore.IRibbonControl control)
         {
             return FormatAboutLabel(control == null ? null : control.Id);
