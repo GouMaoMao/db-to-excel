@@ -72,14 +72,28 @@ namespace DB2Sheet.UI
         /// <summary>获取视图节点的图像键。</summary>
         public static string View(bool active) => Key(ViewKey, active);
 
-        /// <summary>读取嵌入图标并缩放到 16 像素，供按钮显示在文字左侧。</summary>
+        /// <summary>读取嵌入图标并缩放到 16 像素，供窗体按钮显示在文字左侧。</summary>
         /// <param name="fileName">Resources 目录下的文件名，例如 icon_execute.png。</param>
         /// <returns>调用方负责释放的 16 像素位图。</returns>
         /// <exception cref="InvalidOperationException">嵌入图片缺失或无法读取。</exception>
         public static Image LoadActionIcon(string fileName)
         {
+            return LoadActionIcon(fileName, 16);
+        }
+
+        /// <summary>读取嵌入图标并缩放到指定边长的正方形。</summary>
+        /// <param name="fileName">Resources 目录下的文件名，例如 icon_execute.png。</param>
+        /// <param name="size">目标边长（像素）。窗体按钮用 16，功能区大按钮用 32。</param>
+        /// <returns>调用方负责释放的位图。透明通道保留。</returns>
+        /// <exception cref="ArgumentOutOfRangeException">边长小于 1。</exception>
+        /// <exception cref="InvalidOperationException">嵌入图片缺失或无法读取。</exception>
+        public static Image LoadActionIcon(string fileName, int size)
+        {
+            if (size < 1)
+                throw new ArgumentOutOfRangeException(nameof(size));
+
             using (Image source = Load(fileName))
-                return Resize(source);
+                return Resize(source, size);
         }
 
         private static string Key(string baseKey, bool active) => baseKey + (active ? "-color" : "-gray");
@@ -87,7 +101,7 @@ namespace DB2Sheet.UI
         private static void AddPair(ImageList images, string key, string fileName)
         {
             using (Image source = Load(fileName))
-            using (Bitmap color = Resize(source))
+            using (Bitmap color = Resize(source, 16))
             using (Bitmap gray = ToGray(color))
             {
                 images.Images.Add(Key(key, true), (Image)color.Clone());
@@ -108,15 +122,15 @@ namespace DB2Sheet.UI
             }
         }
 
-        private static Bitmap Resize(Image source)
+        private static Bitmap Resize(Image source, int size)
         {
-            Bitmap result = new Bitmap(16, 16, PixelFormat.Format32bppArgb);
+            Bitmap result = new Bitmap(size, size, PixelFormat.Format32bppArgb);
             using (Graphics graphics = Graphics.FromImage(result))
             {
                 graphics.Clear(Color.Transparent);
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                graphics.DrawImage(source, new Rectangle(0, 0, 16, 16));
+                graphics.DrawImage(source, new Rectangle(0, 0, size, size));
             }
             return result;
         }
