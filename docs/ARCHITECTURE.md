@@ -57,7 +57,7 @@
 - `ProviderRegistry`：注册和解析 Provider。
 - `SettingsRegistry`：注册核心及未来扩展设置。
 - `SqlReadOnlyValidator`：去除注释和字面量后执行只读规则校验。
-- `DataSourceExecutionService`：统一调用 Provider 并写入脱敏日志。
+- `DataSourceExecutionService`：统一调用 Provider。查询日志写入 SQL 正文和哈希；文件日志对密码类键脱敏。
 - `OperationRunner`：协调进度窗体、任务和取消。
 - `QueryBufferService`：将流式结果消费为多个二维数组块。
 - `BatchRefreshService`：串行或受限并行读取，并在 Excel UI 上下文串行写入。
@@ -68,11 +68,12 @@
 
 `%LocalAppData%\DB2Sheet`
 
-文件包括：
+文件和目录包括：
 
 - `connections.json`
-- `queries.json`
 - `settings.json`
+- `jdbc-environment.json`
+- `queries\`：每个查询方案一个文件。旧版 `queries.json` 只在首次加载时迁入该目录。
 - `Logs\db2sheet-yyyyMMdd.log`
 
 仓储采用临时文件和替换方式写入；损坏的 JSON 会被重命名备份。
@@ -81,22 +82,25 @@
 
 ### Excel
 
-- `SqlSheetTaskReader`：读取固定名称 `SQL` 的工作表。
-- `ExcelResultWriter`：查找或创建目标 Sheet、清空旧内容、写标题和数据块。
+- `SqlSheetTaskReader`：读取固定名称 `SQL` 的工作表，交给 `SqlSheetTaskParser` 解析。
+- `SqlSheetHeader`：解析每列第 1 行的目标表名，以及 `//` 后的参数。当前会执行的键是「起始单元格」和「清空多余列」。
+- `ExcelResultWriter`：查找或创建目标 Sheet，写一行标题和数据块。交互查询清空目标表已用区域并从 A1 写。批量刷新按起始单元格锚定，右侧多余列仅在参数要求时清空。
+
+每列一个任务。第 2 行起的非空单元格拼成 SQL，前置注释留在 SQL 里并作为列表摘要。目标表名忽略大小写后必须唯一，否则整批不写。列协议的细则见 `.github/copilot-instructions.md`。
 
 Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程直接操作 Workbook、Worksheet 或 Range。
 
 ### UI
 
 - `OperationProgressForm`：通用进度和取消窗口。
-- `ConnectionProfileSelector`：两个业务窗体复用的共享连接选择器。
+- `DatabaseConnectionTree`：SQL 查询和批量刷新共用的连接树。
 - `ConnectionProfileEditForm`：由 Provider 参数元数据动态生成字段。
 - `ConnectionProfilesForm`：连接方案增删改。
 - `SettingsForm`：由设置注册表动态生成编辑界面。
 - `QueryEditorForm`：交互式 SQL 查询、方案复用、预览和导出。
 - `SheetRefreshForm`：SQL Sheet 任务展示和批量刷新。
 - `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
-- `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。
+- `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」「JDBC 环境」。关于组显示版本。窗体和按钮的细则见 `.github/copilot-instructions.md`。
 
 ## 应用组装
 
@@ -108,27 +112,26 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 4. 连接与查询仓储
 5. 执行服务、操作协调器和查询缓冲服务
 6. SQL Sheet 读取器、Excel 写入器和批量刷新服务
-7. Ribbon 回调和业务窗体
+
+功能区在 Excel 请求 Ribbon 时创建。业务窗体在用户点击对应按钮时创建。SQL 查询和批量刷新保持单实例；连接管理、设置和 JDBC 环境用模态窗体。
 
 ## 查询执行流程
 
 1. UI 选择共享连接并生成 `DataSourceRequest`。
 2. Provider 校验连接和只读 SQL。
-3. 打开连接并配置 Provider 特定只读会话。
-4. 使用 `SequentialAccess` 执行 Reader。
-5. `DatabaseResultStream` 按设置的块大小读取。
-6. 预览绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。
-7. 进度通过 `IProgress<OperationProgress>` 上报；取消令牌触发命令取消。
+3. ADO.NET 提供程序打开连接并配置只读会话，用 `SequentialAccess` 执行 Reader，由 `DatabaseResultStream` 按块读取。JDBC 不走 ADO.NET，由进程外的 `java.exe` 执行，结果经 `JdbcResultStream` 按块读取。
+4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。
+5. 进度通过 `IProgress<OperationProgress>` 上报；取消令牌触发命令取消。
 
 ## 批量刷新流程
 
 1. `SqlSheetTaskReader` 扫描 `SQL` 工作表的每个已用列。
-2. 第 1 行作为目标 Sheet，第 2 行起拼接为 SQL。
-3. `SheetRefreshForm` 统一选择连接并读取批量设置。
-4. 串行模式逐任务查询和写入。
-5. 并行模式仅并行数据库读取，且受最大并发数限制。
-6. Excel 写入始终回到启动刷新时的 UI 同步上下文并串行执行。
-7. 重复目标 Sheet 的后续任务跳过。
+2. 第 1 行是目标表名和 `//` 参数，第 2 行起的非空单元格拼成 SQL。
+3. `SheetRefreshForm` 统一选择一个连接并读取批量设置。连接不写在 SQL 页里。
+4. 目标表名忽略大小写后有重复时，刷新开始前抛出异常，不写入任何表。
+5. 串行模式逐任务查询和写入。
+6. 并行模式仅并行数据库读取，且受最大并发数限制。
+7. Excel 写入始终回到启动刷新时的 UI 同步上下文并串行执行。单个任务失败不终止其余任务；用户取消会终止整批。
 
 ## 安全边界
 
@@ -138,7 +141,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - 最小权限和网络访问控制。
 - Provider 连接只读意图或会话只读设置。
 - 客户端 SQL 词法校验。
-- 日志脱敏，不记录完整凭据或完整 SQL。
+- 查询日志写入 SQL 正文和哈希。文件日志对密码、令牌、连接字符串一类键脱敏，不把这条脱敏当成可以主动记录密码。
 
 ## 扩展原则
 

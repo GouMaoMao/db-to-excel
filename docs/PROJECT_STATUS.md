@@ -17,11 +17,9 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 
 ## 当前进度
 
-**总体进度：约 90%**
+功能主路径已在代码中实现：连接、只读查询、预览、写入 Excel、SQL 页批量刷新，以及 JDBC。
 
-当前处于“核心纯逻辑自动化测试完成，进入真实 Excel 集成测试和稳定化”阶段。
-
-最近一次验证：Debug 构建成功；MSTest v2 自动化测试 60 个全部通过，0 个失败。
+真实 Excel 集成测试尚未记为完成。解决方案引用 `DB2Sheet.Tests`，该目录不入库，当前工作区没有这份源码。本文不记录测试通过个数。
 
 ## 已完成
 
@@ -32,42 +30,38 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 - Ribbon XML 动态加载，提供“SQL 查询”“批量刷新”“连接管理”，以及「设置」下拉（「参数设置」「JDBC 环境」）。
 - 通用及 Provider 特定只读 SQL 校验。JDBC 允许查询前的 `SET` 语句。
 - MySQL、PostgreSQL、SQLite 只读会话；SQL Server 使用只读连接意图；DuckDB 在打开连接时使用只读访问模式。
-- `DbDataReader` 流式读取、结果分块、行数限制和截断检测。
+- ADO.NET 用 `DbDataReader` 流式读取；JDBC 用 `JdbcResultStream`。两者都按块读取，并做行数限制和截断检测。
 - 独立通用进度窗体和统一操作执行协调器。
 - 共享连接方案仓储及 JSON 持久化。
-- 查询方案仓储，支持保存、覆盖、删除和复用。
+- 查询方案仓储，支持保存、覆盖、删除和复用。每个方案一个文件，放在 `queries\`；旧版 `queries.json` 在首次加载时迁移。
 - 可扩展设置注册表、未知键保留、动态设置界面和批量保存。
-- 滚动文件日志、关联 ID 和敏感信息脱敏。
+- 滚动文件日志和关联 ID。查询日志写入 SQL 正文和哈希；文件日志对密码类键脱敏。
 - 动态连接参数编辑、连接测试、连接管理和共享连接选择控件。
 - `QueryEditorForm`：SQL 编辑、方案复用、结果预览、写入目标 Sheet。
 - `SheetRefreshForm`：扫描 SQL Sheet、展示任务、统一连接选择、批量刷新。
-- SQL Sheet 协议：每列一个任务，第 1 行为目标 Sheet 名，第 2 行起为 SQL。
-- Excel 目标 Sheet 创建、旧内容清理、标题写入和结果分块写入。
+- SQL 页协议的实现见 `Excel/SqlSheetTaskParser` 与 `Excel/SqlSheetHeader`。细则见 `.github/copilot-instructions.md`。
+- Excel 写入：交互查询清空目标表已用区域并从 A1 写；批量刷新按起始单元格锚定，多余列仅在参数要求时清空。
 - 批量串行或受限并行数据库读取；Excel COM 写入保持串行。
-- 同一批次重复目标 Sheet 的后续任务跳过。
-- `ThisAddIn` 中的服务组装和业务窗体生命周期管理。
-- Office PIA 引用已通过 `UseOfficeInterop` 启用，Ribbon 相关代码编译通过。
-- 已建立 `DB2Sheet.Tests`（.NET Framework 4.7.2、MSTest v2）自动化测试项目。
-- SQL 只读校验、核心设置注册与定义共 15 个测试通过。
-- SQL Sheet 二维单元格解析已从 Excel COM 读取中提取，4 个纯逻辑测试通过。
-- JSON 设置存储 8 个测试通过，覆盖持久化、批量校验、未知键保留、事件和损坏文件恢复。
-- 连接方案与查询方案仓储共 14 个测试通过，覆盖持久化、复制隔离、排序、覆盖、删除、校验和损坏文件恢复。
+- 目标表名忽略大小写后重复时，整批失败，不写入任何表。单个任务失败不终止其余任务。
+- `ThisAddIn` 在启动时组装服务。功能区在 Excel 请求 Ribbon 时创建，业务窗体在用户点击时创建。
+- Office PIA 引用已通过 `UseOfficeInterop` 启用，Ribbon 相关代码在主项目中。
+- Ribbon 关于组显示版本。
 
 ## 尚未完成
 
-1. 在真实 Excel 调试宿主中验证 Ribbon 加载及四个回调。
-2. 使用实际数据库验证连接测试、预览、导出和批量刷新。
+1. 在真实 Excel 调试宿主中验证 Ribbon：SQL 查询、批量刷新、连接管理、参数设置、JDBC 环境、版本。
+2. 使用实际数据库验证连接测试、预览、导出和批量刷新。JDBC 需本机 Java 和连接方案中的驱动 jar。
 3. 验证取消、超时、截断、空结果、大结果和并行刷新。
 4. 验证工作簿关闭、切换活动工作簿和窗体长期打开等生命周期场景。
 5. 根据运行结果修复 COM 释放、线程切换或 Provider 兼容问题。
 6. 在批量调度与 Excel COM 写入边界解耦后，扩展串并行、失败隔离和取消自动化测试。
-7. 完善使用、安全、Provider 扩展和 Advanced Installer 部署文档。
+7. 部署上尚未决定的项见 `docs/DEPLOYMENT.md`：代码签名、Office 最低版本、x86/x64、安装范围，以及卸载时是否保留用户配置。连接密码仍明文保存在 `connections.json`。
 
 ## 关键业务规则
 
 - 只允许只读查询；数据库侧仍应优先使用只读账号。
 - `SQL` 工作表名称固定为 `SQL`。
-- SQL Sheet 每列一个任务：第 1 行为目标 Sheet，第 2 行至最后使用行的非空内容按换行拼接为 SQL。
+- SQL 页每列一个任务。第 1 行是目标表名和 `//` 参数，第 2 行起的非空单元格拼成 SQL。细则见 `.github/copilot-instructions.md`。
 - 批量刷新窗体统一选择一个共享连接，不在 SQL Sheet 中保存连接信息。
 - 预览上限、导出上限、查询超时、结果块大小、串并行模式和最大并发数均来自动态设置。
 - Ribbon 使用 Ribbon XML，不使用可视化 Ribbon Designer。
@@ -79,11 +73,11 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 2. 阅读 `docs/ARCHITECTURE.md`，确认边界和既有设计决策。
 3. 阅读 `docs/TESTING.md`，执行必须人工完成的 Excel 集成测试。
 4. 根据集成测试结果评估批量调度与 Excel COM 写入边界解耦。
-5. 修复集成测试发现的问题，并同步更新本文件。
-6. 最后完善 `docs/DEPLOYMENT.md` 并制作 Advanced Installer 安装包。
+5. 修复集成测试发现的问题，并按约定正文「文档」一节同步更新受影响的文档。
+6. 发布使用 `scripts/publish-release.ps1`。安装工程在本机，不入库。签名和位数等待决定项见 `docs/DEPLOYMENT.md`。
 
 ## 文档维护规则
 
-- 本文件是项目长期进度和待办事项的权威来源。
-- 每完成一个阶段，应同步更新“当前进度”“已完成”“尚未完成”和最近验证结果。
-- `C:\Users\YQSL\.copilot\plans\plan-db2sheet-excel.md` 仅作为本机 Copilot 工作计划，不作为项目权威记录。
+- 进度描述跟当前代码走。完成一个阶段时，同步更新「当前进度」「已完成」和「尚未完成」。
+- 行为细则以 `.github/copilot-instructions.md` 为准。本文件只记进度，不另写一版界面、SQL 页或批量刷新规则。
+- 改行为时，按约定正文「文档」一节，同一改动里更新受影响的 `docs` 文件。
