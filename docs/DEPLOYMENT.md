@@ -4,7 +4,7 @@
 
 本项目不使用 VSTO ClickOnce。最终安装包由 Advanced Installer 创建和维护。
 
-当前文档记录部署边界和待办事项；在真实 Excel 集成测试完成前，不应视为最终发布流程。
+发布在仓库根目录运行 `scripts/publish-release.ps1`。脚本读取已提交的 `AssemblyFileVersion`，先做 Release 构建，再用本地的 `installer\db-to-excel.aip` 生成 exe，并把它挂到对应的 GitHub Release。版本号仍只改 `Properties/AssemblyInfo.cs`。安装工程和安装包不提交。
 
 ## 目标环境
 
