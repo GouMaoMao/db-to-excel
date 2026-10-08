@@ -616,11 +616,14 @@ namespace DB2Sheet.UI
             ShowRefreshSummary(result, succeeded, failed, truncated);
         }
 
-        /// <summary>刷新正常结束后列出失败和截断。取消或异常不走这里。</summary>
+        /// <summary>刷新正常结束后列出失败和截断，并用文字说明目标表标题行底色。取消或异常不走这里。</summary>
         private void ShowRefreshSummary(BatchRefreshResult result, int succeeded, int failed, int truncated)
         {
             StringBuilder text = new StringBuilder();
             text.AppendFormat("刷新完成：成功 {0}，失败 {1}，截断 {2}。", succeeded, failed, truncated);
+            text.AppendLine();
+            text.AppendLine();
+            text.Append("目标表标题行：深绿色表示本次写入成功，结果完整；橙色表示写入成功，但结果达到「最大导出行数」后被截断。");
             foreach (RefreshTaskResult item in result.Tasks)
             {
                 if (item.Succeeded || item.Skipped) continue;
