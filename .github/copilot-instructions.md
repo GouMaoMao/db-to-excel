@@ -6,13 +6,19 @@
 
 - .NET Framework 4.7.2，C# 7.3。不要使用更高版本的语法。
 - 旧式 csproj。新增 UI 等源文件必须在 `DB2Sheet.csproj` 里显式 `Compile Include`。
-- 不使用 VSTO ClickOnce。部署由 Advanced Installer 封装。
+- 发布不用 VSTO ClickOnce，由 Advanced Installer 封装。调试时 Excel 仍只复制 `DB2Sheet.dll.manifest` 里列出的文件。
 - 用户可见名称、窗口标题、界面字体和代码字体只改 `UI/AppPresentation.cs`。程序集名、命名空间、Ribbon 控件 ID、持久化目录是独立技术标识。
 - JDBC 是通用数据源。连接编辑填写完整 JDBC URL、驱动 jar、驱动类和凭据。不要把 JDK 或厂商驱动打进安装包。
 - `db2sheet-jdbc-bridge.jar` 嵌在 `DB2Sheet.dll` 内，首次使用释放到 `%LocalAppData%\DB2Sheet`。不要改回只在插件 DLL 旁边查找；Excel 经 VSTO 加载时那个目录里没有这个文件。
+- `duckdb.dll` 必须写进 VSTO 清单，随插件一起带走。加载时按插件原始目录查找（`Assembly.CodeBase`），不能只在 Excel 复制出去的临时目录里找。
 - 「JDBC 环境」只管本机 Java：点「检测 Java」搜索本机，或浏览指定 java.exe；也可打开 JDK 下载页自行安装。厂商驱动 jar 写在连接方案里，不要再做集中驱动文件夹。不要让用户去下载转接程序。不要在插件内一键下载 JDK。
 - 用户操作失败不得只写状态栏、吞掉异常或空 `catch` 后继续；须弹出错误详情窗（含异常类型、消息、堆栈与 InnerException，可用 `ExceptionDetailForm`）。仅清理、取消、资源释放等非用户主路径可故意吞异常，并在代码注释里写明原因。
 - 改代码不要用打补丁叠在旧逻辑上。先从现有功能和架构看，能不能和已有需求合在一起，或直接改设计。先问清需求方要解决的是什么。若看起来只能打补丁，先反问需求方这个需求是否真有必要，得到确认后再做。
+- 在保证功能实现的前提下，以精简代码为荣，以重复代码为耻。能并进已有逻辑就不要再写一份。判断精简和重复时不计注释；中文 XML 文档注释仍按「代码文档」章节编写。
+
+## 操作说明
+
+- 给用户跟着做的步骤说明（含计划）里，步骤用正文按顺序写成完整句子，一段一件事。原因、名词、限制和可以不做的事项不写进步骤句子，紧跟在该段后面，用 Markdown 引用块单独标出。代码注释、提交说明和界面文案仍按本文件已有章节。
 
 ## 代码文档
 
@@ -54,7 +60,7 @@
 ## 预览与写入
 
 - 不要把 LIMIT 或 TOP 拼进用户 SQL。
-- 仅预览时加会话行数上限，值为「最大预览行数 + 1」：MySQL 用 `SQL_SELECT_LIMIT`，SQL Server 用 `ROWCOUNT`。PostgreSQL 和 SQLite 没有对应会话设置，不要改写 SQL。
+- 仅预览时加会话行数上限，值为「最大预览行数 + 1」：MySQL 用 `SQL_SELECT_LIMIT`，SQL Server 用 `ROWCOUNT`。PostgreSQL、SQLite 和 DuckDB 没有对应会话设置，不要改写 SQL。
 - 导出使用最大导出行数，不套预览用的会话行数上限。
 - 达到上限后仍 `Cancel()` 以停掉服务器；释放读取器时吞掉因此产生的异常，不能把截断当成操作失败。
 - 状态要写出已读行数和上限，并提示可在设置中修改「最大预览行数」。
