@@ -71,24 +71,23 @@ namespace DB2Sheet.UI
             }
         }
 
-        /// <summary>为 SQL 编辑器创建中英文同一字面高度的代码字体；优先细体雅黑，缺失时回退。</summary>
-        /// <param name="style">字重样式；关键字使用粗体。</param>
-        /// <returns>已解析到本机已安装字体族的字体实例。</returns>
-        public static Font CreateCodeFont(FontStyle style)
+        /// <summary>为 SQL 编辑器创建中英文同一字面高度的常规代码字体；优先细体雅黑，缺失时回退。</summary>
+        /// <returns>已解析到本机已安装字体族的字体实例。调用方负责释放。</returns>
+        public static Font CreateCodeFont()
         {
             string[] candidates = { "Microsoft YaHei UI Light", "DengXian Light", "Microsoft YaHei UI" };
             foreach (string name in candidates)
             {
-                using (Font probe = new Font(name, CodeFontSize, style, GraphicsUnit.Point))
+                using (Font probe = new Font(name, CodeFontSize, FontStyle.Regular, GraphicsUnit.Point))
                 {
                     if (!string.Equals(probe.FontFamily.Name, name, StringComparison.OrdinalIgnoreCase))
                         continue;
                 }
 
-                return new Font(name, CodeFontSize, style, GraphicsUnit.Point);
+                return new Font(name, CodeFontSize, FontStyle.Regular, GraphicsUnit.Point);
             }
 
-            return new Font(DefaultFontName, CodeFontSize, style, GraphicsUnit.Point);
+            return new Font(DefaultFontName, CodeFontSize, FontStyle.Regular, GraphicsUnit.Point);
         }
 
         /// <summary>生成统一格式的功能窗体标题。</summary>

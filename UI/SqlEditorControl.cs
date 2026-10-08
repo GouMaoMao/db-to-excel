@@ -1,53 +1,44 @@
 using System;
 using System.Drawing;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
-using DB2Sheet.Models;
 
 namespace DB2Sheet.UI
 {
-    /// <summary>封装支持语法高亮、格式化、行注释和选区执行请求的 SQL 富文本编辑器。</summary>
+    /// <summary>封装支持格式化、行注释和选区执行请求的 SQL 文本编辑器。</summary>
     /// <remarks>
-    /// 控件只处理文本和 UI 状态，不直接连接数据库。高亮在 UI 线程由短延迟计时器执行；
-    /// 调用方负责响应 <see cref="ExecuteSelectionRequested"/> 并执行只读校验及查询。
+    /// 控件使用普通多行文本框，只接收纯文本，粘贴不会带入富文本边框。
+    /// 控件不直接连接数据库。调用方负责响应 <see cref="ExecuteSelectionRequested"/> 并执行只读校验及查询。
     /// </remarks>
     public sealed class SqlEditorControl : UserControl
     {
-        private const int EmGetScrollPos = 0x04DD;
-        private const int EmSetScrollPos = 0x04DE;
-        private const int WmSetRedraw = 0x000B;
-
         private readonly ISqlFormattingService _formattingService;
-        private readonly RichTextBox _editor;
-        private readonly Timer _highlightTimer;
-        private readonly Font _regularFont;
-        private readonly Font _keywordFont;
+        private readonly TextBox _editor;
+        private readonly Font _font;
         private readonly ToolStripMenuItem _copyItem;
         private readonly ToolStripMenuItem _executeSelectionItem;
         private readonly ToolStripMenuItem _formatItem;
         private readonly ToolStripMenuItem _commentItem;
-        private bool _applyingHighlight;
 
-        /// <summary>创建 SQL 富文本编辑器。</summary>
-        /// <param name="formattingService">共享的 SQL 词法分析和格式化服务。</param>
+        /// <summary>创建 SQL 文本编辑器。</summary>
+        /// <param name="formattingService">共享的 SQL 格式化服务。</param>
         public SqlEditorControl(ISqlFormattingService formattingService)
         {
             _formattingService = formattingService ?? throw new ArgumentNullException(nameof(formattingService));
-            _regularFont = AppPresentation.CreateCodeFont(FontStyle.Regular);
-            _keywordFont = AppPresentation.CreateCodeFont(FontStyle.Bold);
-
-            _editor = new RichTextBox
+            _font = AppPresentation.CreateCodeFont();
+            _editor = new TextBox
             {
                 Dock = DockStyle.Fill,
+                Multiline = true,
+                AcceptsReturn = true,
                 AcceptsTab = true,
-                DetectUrls = false,
-                Font = _regularFont,
                 WordWrap = false,
-                BorderStyle = BorderStyle.FixedSingle,
-                HideSelection = false
+                ScrollBars = ScrollBars.Both,
+                HideSelection = false,
+                MaxLength = 0,
+                Font = _font,
+                BorderStyle = BorderStyle.FixedSingle
             };
-            _highlightTimer = new Timer { Interval = 250 };
             _copyItem = new ToolStripMenuItem("复制");
             _executeSelectionItem = new ToolStripMenuItem("执行选中文本");
             _formatItem = new ToolStripMenuItem("格式化 SQL");
@@ -63,9 +54,7 @@ namespace DB2Sheet.UI
             _editor.ContextMenuStrip = menu;
             Controls.Add(_editor);
 
-            _editor.TextChanged += EditorTextChanged;
             _editor.KeyDown += EditorKeyDown;
-            _highlightTimer.Tick += HighlightTimerTick;
             _copyItem.Click += (sender, args) => _editor.Copy();
             _executeSelectionItem.Click += (sender, args) => ExecuteSelectionRequested?.Invoke(this, EventArgs.Empty);
             _formatItem.Click += (sender, args) => FormatSelectionOrAll();
@@ -75,15 +64,11 @@ namespace DB2Sheet.UI
         /// <summary>用户请求预览当前非空选区时触发。</summary>
         public event EventHandler ExecuteSelectionRequested;
 
-        /// <summary>获取或设置编辑器中的纯 SQL 文本。</summary>
+        /// <summary>获取或设置编辑器中的 SQL 文本。</summary>
         public string SqlText
         {
             get => _editor.Text;
-            set
-            {
-                _editor.Text = value ?? string.Empty;
-                ApplyHighlight();
-            }
+            set => _editor.Text = ToEditorNewlines(value);
         }
 
         /// <summary>获取当前选中的 SQL 文本。</summary>
@@ -99,24 +84,21 @@ namespace DB2Sheet.UI
             _editor.Focus();
         }
 
-        /// <summary>将输入焦点移入内部富文本编辑器。</summary>
+        /// <summary>将输入焦点移入内部文本编辑器。</summary>
         public void FocusEditor()
         {
             _editor.Focus();
         }
 
-        /// <summary>释放计时器、字体和右键菜单等托管 UI 资源。</summary>
+        /// <summary>释放字体和右键菜单等托管 UI 资源。</summary>
         /// <param name="disposing">是否释放托管资源。</param>
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                _highlightTimer.Stop();
-                _highlightTimer.Dispose();
                 _editor.KeyDown -= EditorKeyDown;
                 _editor.ContextMenuStrip?.Dispose();
-                _keywordFont.Dispose();
-                _regularFont.Dispose();
+                _font.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -131,19 +113,6 @@ namespace DB2Sheet.UI
         public void ToggleComment()
         {
             ToggleLineComments();
-        }
-
-        private void EditorTextChanged(object sender, EventArgs e)
-        {
-            if (_applyingHighlight) return;
-            _highlightTimer.Stop();
-            _highlightTimer.Start();
-        }
-
-        private void HighlightTimerTick(object sender, EventArgs e)
-        {
-            _highlightTimer.Stop();
-            ApplyHighlight();
         }
 
         private void EditorKeyDown(object sender, KeyEventArgs e)
@@ -163,48 +132,16 @@ namespace DB2Sheet.UI
             e.SuppressKeyPress = true;
         }
 
-        private void ApplyHighlight()
-        {
-            if (_editor.IsDisposed || !_editor.IsHandleCreated) return;
-            int selectionStart = _editor.SelectionStart;
-            int selectionLength = _editor.SelectionLength;
-            Point scrollPosition = new Point();
-            SendMessage(_editor.Handle, EmGetScrollPos, IntPtr.Zero, ref scrollPosition);
-            _applyingHighlight = true;
-            SendMessage(_editor.Handle, WmSetRedraw, IntPtr.Zero, IntPtr.Zero);
-            try
-            {
-                _editor.SelectAll();
-                _editor.SelectionColor = SystemColors.WindowText;
-                _editor.SelectionFont = _regularFont;
-                foreach (SqlToken token in _formattingService.Tokenize(_editor.Text))
-                {
-                    _editor.Select(token.Start, token.Length);
-                    _editor.SelectionColor = ColorFor(token.Kind);
-                    _editor.SelectionFont = token.Kind == SqlTokenKind.Keyword ? _keywordFont : _regularFont;
-                }
-                _editor.Select(Math.Min(selectionStart, _editor.TextLength), Math.Min(selectionLength, Math.Max(0, _editor.TextLength - selectionStart)));
-                SendMessage(_editor.Handle, EmSetScrollPos, IntPtr.Zero, ref scrollPosition);
-            }
-            finally
-            {
-                SendMessage(_editor.Handle, WmSetRedraw, new IntPtr(1), IntPtr.Zero);
-                _editor.Invalidate();
-                _applyingHighlight = false;
-            }
-        }
-
         private void FormatSelectionOrAll()
         {
             bool hasSelection = _editor.SelectionLength > 0;
             int start = hasSelection ? _editor.SelectionStart : 0;
             string segment = hasSelection ? _editor.SelectedText : _editor.Text;
-            string formatted = _formattingService.Format(segment);
+            string formatted = ToEditorNewlines(_formattingService.Format(segment));
             int length = hasSelection ? _editor.SelectionLength : _editor.TextLength;
             _editor.Select(start, length);
             _editor.SelectedText = formatted;
             _editor.Select(start, formatted.Length);
-            ApplyHighlight();
         }
 
         private void ToggleLineComments()
@@ -239,11 +176,7 @@ namespace DB2Sheet.UI
                 }
             }
 
-            string replacement = string.Join("\n", lines);
-            _editor.Select(start, end - start);
-            _editor.SelectedText = replacement;
-            _editor.Select(start, SelectionLengthWithoutTrailingBreak(replacement));
-            ApplyHighlight();
+            ReplaceEditorText(start, end - start, string.Join("\n", lines));
         }
 
         private void ChangeSelectionIndent(bool outdent)
@@ -268,18 +201,36 @@ namespace DB2Sheet.UI
                 }
             }
 
-            string replacement = string.Join("\n", lines);
-            _editor.Select(start, end - start);
+            ReplaceEditorText(start, end - start, string.Join("\n", lines));
+        }
+
+        /// <summary>把文本写回编辑器。普通文本框只把回车换行当成换行，单独的换行符会被忽略。</summary>
+        /// <param name="start">替换起点。</param>
+        /// <param name="length">被替换的原文字符数。</param>
+        /// <param name="value">新文本，换行可以是换行符或回车换行。</param>
+        private void ReplaceEditorText(int start, int length, string value)
+        {
+            string replacement = ToEditorNewlines(value);
+            _editor.Select(start, length);
             _editor.SelectedText = replacement;
             _editor.Select(start, SelectionLengthWithoutTrailingBreak(replacement));
-            ApplyHighlight();
+        }
+
+        /// <summary>把各种换行收成文本框要求的回车换行。</summary>
+        /// <param name="value">待写入的文本。</param>
+        /// <returns>只含回车换行的文本。空文本原样返回。</returns>
+        private static string ToEditorNewlines(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            return value.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
         }
 
         private static int SelectionLengthWithoutTrailingBreak(string replacement)
         {
             if (string.IsNullOrEmpty(replacement)) return 0;
             int length = replacement.Length;
-            if (replacement[length - 1] == '\n') length--;
+            if (length >= 2 && replacement[length - 2] == '\r' && replacement[length - 1] == '\n') return length - 2;
+            if (replacement[length - 1] == '\n' || replacement[length - 1] == '\r') return length - 1;
             return length;
         }
 
@@ -334,25 +285,5 @@ namespace DB2Sheet.UI
             _formatItem.Enabled = _editor.TextLength > 0;
             _commentItem.Enabled = _editor.TextLength > 0;
         }
-
-        private static Color ColorFor(SqlTokenKind kind)
-        {
-            switch (kind)
-            {
-                case SqlTokenKind.Keyword: return Color.RoyalBlue;
-                case SqlTokenKind.String: return Color.Firebrick;
-                case SqlTokenKind.Comment: return Color.ForestGreen;
-                case SqlTokenKind.Number: return Color.DarkCyan;
-                case SqlTokenKind.Parameter: return Color.DarkMagenta;
-                case SqlTokenKind.QuotedIdentifier: return Color.SaddleBrown;
-                default: return SystemColors.WindowText;
-            }
-        }
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, ref Point lParam);
     }
 }
