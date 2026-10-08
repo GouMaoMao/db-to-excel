@@ -12,7 +12,7 @@ namespace DB2Sheet.UI
     /// 更新方法可从后台线程调用，内部会自动切换到 UI 线程。
     /// 日志列表按构造时传入的最低级别过滤。先按快照改条和标题，再写日志；写完日志就不再改界面，避免日志重入把旧快照画回去。
     /// 批量刷新的读取条只按已结束个数占总数绘制，分母取第一次出现双条时的总数。个数达到总数后读取条钉住，后到的读取快照只进日志。
-    /// 写入条的序号和填充来自同一次快照，序号只向前。读取个数在阻塞写入之前已经画出。单次查询仍只有一条。两条都只向前。
+    /// 写入条的序号和填充来自同一次快照，序号只向前。读取个数在阻塞写入之前已经画出。单次查询仍只有一条。两条都只向前，填充色都用系统高亮色。
     /// 长报错在详情区和日志里按窗体宽度换行，不能把列撑出客户区，以免挡住取消和关闭。
     /// </remarks>
     public sealed class OperationProgressForm : AppForm
@@ -26,7 +26,7 @@ namespace DB2Sheet.UI
         private readonly Label _readCaption;
         private readonly Label _writeCaption;
         private readonly CountBar _readBar;
-        private readonly ProgressBar _writeBar;
+        private readonly CountBar _writeBar;
         private readonly RowStyle _meterRow;
         private readonly RichTextBox _logBox;
         private readonly Button _cancelButton;
@@ -58,7 +58,7 @@ namespace DB2Sheet.UI
             _stageLabel = new Label { AutoSize = true, Text = "正在准备…", Font = new Font(Font, FontStyle.Bold) };
             _detailLabel = new Label { AutoSize = true, Text = string.Empty };
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee, Height = 18 };
-            _readRow = CreateCountRow("读取", out _readCaption, out _readBar);
+            _readRow = CreateMeterRow("读取", out _readCaption, out _readBar);
             _writeRow = CreateMeterRow("写入", out _writeCaption, out _writeBar);
             _readRow.Visible = false;
             _writeRow.Visible = false;
@@ -230,7 +230,7 @@ namespace DB2Sheet.UI
             if (_dualMeters)
             {
                 if (error == null && !cancelled)
-                    SetBar(_writeBar, 100);
+                    _writeBar.SetPercent(100);
             }
             else
             {
@@ -368,7 +368,7 @@ namespace DB2Sheet.UI
             if (percent >= _writePercentShown)
             {
                 _writePercentShown = percent;
-                SetBar(_writeBar, percent);
+                _writeBar.SetPercent(percent);
             }
 
             _writeCountShown = taskCount;
@@ -376,27 +376,8 @@ namespace DB2Sheet.UI
             return true;
         }
 
-        /// <summary>把进度条设为连续模式并限制在 0 到 100。</summary>
-        /// <remarks>系统进度条画到最大值时会做一段回缩动画。先抬高上限再收回，满格才会停住。</remarks>
-        private static void SetBar(ProgressBar bar, int percent)
-        {
-            bar.Style = ProgressBarStyle.Continuous;
-            int value = percent;
-            if (value < 0) value = 0;
-            if (value > 100) value = 100;
-            if (value == 100)
-            {
-                bar.Maximum = value + 1;
-                bar.Value = value + 1;
-                bar.Maximum = value;
-                return;
-            }
-
-            bar.Value = value;
-        }
-
-        /// <summary>左侧文字加一条按个数绘制的读取条。调用方负责把条先加入，再停靠文字。</summary>
-        private static Panel CreateCountRow(string caption, out Label label, out CountBar bar)
+        /// <summary>左侧文字加一条系统高亮色填充条。先加入条再停靠文字，避免文字被盖住。</summary>
+        private static Panel CreateMeterRow(string caption, out Label label, out CountBar bar)
         {
             label = new Label
             {
@@ -412,13 +393,14 @@ namespace DB2Sheet.UI
             return row;
         }
 
-        /// <summary>按已结束个数占总数的宽度填充。不用系统进度条，避免接近满格时被画成已经完成。</summary>
+        /// <summary>按分子分母宽度填充，填充色为 <see cref="SystemColors.Highlight"/>。</summary>
+        /// <remarks>不用系统进度条，避免接近满格时被画成已经完成，也避免主题色与高亮色不一致。</remarks>
         private sealed class CountBar : Control
         {
             private int _count;
             private int _total;
 
-            /// <summary>创建一条空白的个数条。</summary>
+            /// <summary>创建一条空白的填充条。</summary>
             public CountBar()
             {
                 SetStyle(
@@ -440,7 +422,16 @@ namespace DB2Sheet.UI
                 Invalidate();
             }
 
-            /// <summary>背景留空，填充宽度等于个数乘以内宽再除以总数。</summary>
+            /// <summary>按 0 到 100 的百分比填充并重画。</summary>
+            /// <param name="percent">完成百分比。</param>
+            public void SetPercent(int percent)
+            {
+                if (percent < 0) percent = 0;
+                if (percent > 100) percent = 100;
+                SetCount(percent, 100);
+            }
+
+            /// <summary>背景留空，填充宽度等于个数乘以内宽再除以总数，颜色用系统高亮色。</summary>
             /// <param name="e">绘制参数。</param>
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -458,30 +449,6 @@ namespace DB2Sheet.UI
                 using (SolidBrush fore = new SolidBrush(SystemColors.Highlight))
                     e.Graphics.FillRectangle(fore, bar);
             }
-        }
-
-        /// <summary>左侧文字加一条进度条。调用方负责把进度条先加入，再停靠文字，避免文字被填满盖住。</summary>
-        private static Panel CreateMeterRow(string caption, out Label label, out ProgressBar bar)
-        {
-            label = new Label
-            {
-                Text = caption,
-                Dock = DockStyle.Left,
-                Width = 96,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            bar = new ProgressBar
-            {
-                Dock = DockStyle.Fill,
-                Style = ProgressBarStyle.Continuous,
-                Minimum = 0,
-                Maximum = 100,
-                Value = 0
-            };
-            Panel row = new Panel { Dock = DockStyle.Top, Height = 22 };
-            row.Controls.Add(bar);
-            row.Controls.Add(label);
-            return row;
         }
 
         /// <summary>批次进度写在进度条上方。日志仍只用阶段名，避免每一行都重复任务序号。</summary>
