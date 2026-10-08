@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
@@ -13,11 +14,12 @@ namespace DB2Sheet.UI
     /// <summary>让用户检测或指定本机 java.exe，供 JDBC 查询使用。</summary>
     /// <remarks>
     /// 厂商驱动不在此配置，而在连接方案中选择。窗体记住宽高。
-    /// 「检测 Java」会搜索本机常见位置并填入路径；不提供一键下载安装。
+    /// 「检测 Java」通过进度窗搜索本机；常见位置没有时继续扫描 C 盘。不提供一键下载安装。
     /// </remarks>
     public sealed class JdbcEnvironmentForm : AppForm
     {
         private readonly IJdbcEnvironmentStore _store;
+        private readonly IOperationRunner _operationRunner;
         private readonly TextBox _javaPath;
         private readonly Button _browseJava;
         private readonly Button _detectJavaButton;
@@ -28,10 +30,12 @@ namespace DB2Sheet.UI
         /// <summary>创建 JDBC 环境窗体。</summary>
         /// <param name="store">环境设置存储。</param>
         /// <param name="settings">用于记住窗体尺寸的设置存储。</param>
-        public JdbcEnvironmentForm(IJdbcEnvironmentStore store, ISettingsStore settings)
+        /// <param name="operationRunner">检测 Java 时弹出进度窗的运行器。</param>
+        public JdbcEnvironmentForm(IJdbcEnvironmentStore store, ISettingsStore settings, IOperationRunner operationRunner)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
             if (settings == null) throw new ArgumentNullException(nameof(settings));
+            _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
 
             Text = AppPresentation.WindowTitle("JDBC 环境");
             Width = 720;
@@ -111,27 +115,40 @@ namespace DB2Sheet.UI
             CancelButton = closeButton;
         }
 
+        /// <summary>打开进度窗搜索本机 Java，并把找到的路径写入设置。</summary>
+        /// <remarks>取消不弹错误窗。没找到时进度窗关闭，原因显示在本窗体状态文字里。</remarks>
         private async void DetectJava(object sender, EventArgs e)
         {
             try
             {
                 SetBusy(true);
                 _javaStatus.Text = "正在搜索本机 Java…";
+                _javaStatus.ForeColor = SystemColors.GrayText;
                 string preferred = _javaPath.Text.Trim();
-                JavaResolution resolution = await Task.Run(() => JavaRuntimeProbe.Discover(preferred)).ConfigureAwait(true);
-                if (!resolution.Found)
+                JavaDetectResult detected = await _operationRunner.RunAsync(
+                    this,
+                    "检测 Java",
+                    true,
+                    (progress, cancellationToken) => Task.Run(
+                        () => DetectOnBackground(preferred, progress, cancellationToken),
+                        cancellationToken));
+                if (!detected.Resolution.Found)
                 {
-                    SetStatus(_javaStatus, false, resolution.Detail);
+                    SetStatus(_javaStatus, false, detected.Resolution.Detail);
                     return;
                 }
 
-                _javaPath.Text = resolution.Executable;
+                _javaPath.Text = detected.Resolution.Executable;
                 SaveCore();
-                string version = await Task.Run(() => JavaRuntimeProbe.TryReadVersion(resolution.Executable)).ConfigureAwait(true);
-                string message = string.IsNullOrWhiteSpace(version)
-                    ? "已找到 " + resolution.Executable + "，但无法读取版本。请确认它是可用的 java.exe。"
-                    : "已找到 " + version + Environment.NewLine + resolution.Executable;
-                SetStatus(_javaStatus, !string.IsNullOrWhiteSpace(version), message);
+                string message = string.IsNullOrWhiteSpace(detected.Version)
+                    ? "已找到 " + detected.Resolution.Executable + "，但无法读取版本。请确认它是可用的 java.exe。"
+                    : "已找到 " + detected.Version + Environment.NewLine + detected.Resolution.Executable;
+                SetStatus(_javaStatus, !string.IsNullOrWhiteSpace(detected.Version), message);
+            }
+            catch (OperationCanceledException)
+            {
+                _javaStatus.ForeColor = SystemColors.GrayText;
+                _javaStatus.Text = "已取消检测。";
             }
             catch (Exception exception)
             {
@@ -142,6 +159,37 @@ namespace DB2Sheet.UI
             {
                 SetBusy(false);
             }
+        }
+
+        /// <summary>在后台搜索 java.exe 并读取版本。供进度窗里的操作调用。</summary>
+        /// <param name="preferred">路径框中的当前值。</param>
+        /// <param name="progress">进度窗接收器。搜索阶段和读版本都会报告。</param>
+        /// <param name="cancellationToken">用户取消进度窗时触发。取消会中断搜索，正在运行的 java -version 会等到进程结束或超时。</param>
+        /// <returns>查找结果和版本行。没找到时版本为空，且不抛异常。</returns>
+        private static JavaDetectResult DetectOnBackground(
+            string preferred,
+            IProgress<OperationProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            JavaResolution found = JavaRuntimeProbe.Search(preferred, true, progress, cancellationToken);
+            if (!found.Found)
+            {
+                return new JavaDetectResult(found, string.Empty);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (progress != null)
+            {
+                progress.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Executing,
+                    Message = "正在读取 Java 版本…",
+                    Percent = 99,
+                    IsIndeterminate = false
+                });
+            }
+            string version = JavaRuntimeProbe.TryReadVersion(found.Executable);
+            return new JavaDetectResult(found, version);
         }
 
         private void SaveClick(object sender, EventArgs e)
@@ -243,7 +291,7 @@ namespace DB2Sheet.UI
                 "连接方式是 JDBC，且本机还没有 Java；或者已有 Java，但版本低于 JDK 8。",
                 first: false);
             AddGuideSection(guide, 4, "操作步骤：",
-                "1. 点击「检测 Java」，自动搜索本机已安装的 Java。" + Environment.NewLine +
+                "1. 点击「检测 Java」，自动搜索本机已安装的 Java。常见位置没有时会继续扫描 C 盘，可能要稍等。" + Environment.NewLine +
                 "2. 若未找到，可点「浏览…」指定 java.exe，或点「打开 JDK 下载页」自行安装。" + Environment.NewLine +
                 "3. 安装完成后，再点一次「检测 Java」。",
                 first: false);
@@ -330,6 +378,25 @@ namespace DB2Sheet.UI
                 WrapContents = false,
                 Padding = new Padding(0, 4, 0, 8)
             };
+        }
+
+        /// <summary>一次检测带回的 java.exe 和版本行。没找到时版本为空。</summary>
+        private sealed class JavaDetectResult
+        {
+            /// <summary>创建检测结果。</summary>
+            /// <param name="resolution">路径查找结果。</param>
+            /// <param name="version">java -version 的首行。读不到时为空。</param>
+            public JavaDetectResult(JavaResolution resolution, string version)
+            {
+                Resolution = resolution;
+                Version = version ?? string.Empty;
+            }
+
+            /// <summary>获取路径查找结果。</summary>
+            public JavaResolution Resolution { get; }
+
+            /// <summary>获取版本行。</summary>
+            public string Version { get; }
         }
     }
 }

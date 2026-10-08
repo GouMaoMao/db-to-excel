@@ -161,7 +161,7 @@ namespace DB2Sheet
         {
             ExecuteUiAction(() =>
             {
-                using (JdbcEnvironmentForm form = new JdbcEnvironmentForm(_jdbcEnvironment, _settings))
+                using (JdbcEnvironmentForm form = new JdbcEnvironmentForm(_jdbcEnvironment, _settings, _operationRunner))
                 {
                     form.ShowDialog();
                 }
