@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
 using DB2Sheet.Models;
@@ -12,7 +13,10 @@ using DB2Sheet.Providers;
 namespace DB2Sheet.UI
 {
     /// <summary>提供连接方案的新建、编辑、参数校验和连接测试界面。</summary>
-    /// <remarks>窗体本身不保存仓储；确认后通过 <see cref="Profile"/> 输出用户编辑得到的模型。</remarks>
+    /// <remarks>
+    /// 窗体本身不保存仓储；确认后通过 <see cref="Profile"/> 输出用户编辑得到的模型。
+    /// 类型标题、说明和悬停文案来自 <see cref="AppPresentation"/>。新建默认 SQL Server；选 JDBC 时用横幅提示 Java，测试前再硬拦。
+    /// </remarks>
     public sealed class ConnectionProfileEditForm : AppForm
     {
         private readonly IProviderRegistry _providers;
@@ -22,10 +26,17 @@ namespace DB2Sheet.UI
         private readonly IJdbcEnvironmentStore _jdbcEnvironment;
         private readonly TextBox _name;
         private readonly ComboBox _provider;
+        private readonly Label _providerHint;
+        private readonly Label _nameLabel;
+        private readonly Label _providerLabel;
+        private readonly Panel _jdbcBanner;
+        private readonly Label _jdbcBannerLabel;
         private readonly TableLayoutPanel _parameters;
         private readonly Label _status;
+        private readonly Label _saveHint;
         private readonly Button _testButton;
         private readonly Button _saveButton;
+        private readonly ToolTip _tips = new ToolTip();
         private readonly Dictionary<string, ParameterEditor> _editors =
             new Dictionary<string, ParameterEditor>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _storedParameters =
@@ -33,8 +44,12 @@ namespace DB2Sheet.UI
         private readonly Action _openJdbcEnvironment;
         private readonly Button _jdbcEnvironmentButton;
         private readonly string _profileId;
+        private readonly bool _isNew;
         private bool _loading;
         private bool _connectionTestPassed;
+        private bool _nameOwnedByUser;
+        private string _lastAutoName = string.Empty;
+        private bool _updatingName;
 
         /// <summary>创建连接方案编辑窗体。</summary>
         /// <param name="providers">提供数据源类型和参数定义的注册表。</param>
@@ -60,11 +75,13 @@ namespace DB2Sheet.UI
             _jdbcEnvironment = jdbcEnvironment ?? throw new ArgumentNullException(nameof(jdbcEnvironment));
             _openJdbcEnvironment = openJdbcEnvironment;
             _profileId = profile?.Id ?? Guid.NewGuid().ToString("N");
+            _isNew = profile == null;
+            _nameOwnedByUser = !_isNew && !string.IsNullOrWhiteSpace(profile.Name);
 
-            Text = AppPresentation.WindowTitle(profile == null ? "新建连接方案" : "编辑连接方案");
+            Text = AppPresentation.WindowTitle(_isNew ? "新建连接方案" : "编辑连接方案");
             Width = 1000;
-            Height = 620;
-            MinimumSize = new Size(800, 460);
+            Height = 640;
+            MinimumSize = new Size(800, 480);
             StartPosition = FormStartPosition.CenterParent;
 
             _name = new TextBox { Dock = DockStyle.Fill };
@@ -74,6 +91,31 @@ namespace DB2Sheet.UI
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 DisplayMember = nameof(ProviderItem.DisplayName)
             };
+            _nameLabel = new Label { Text = "显示名称", AutoSize = true, Anchor = AnchorStyles.Left };
+            _providerLabel = new Label { Text = "数据源类型", AutoSize = true, Anchor = AnchorStyles.Left };
+            _providerHint = new Label
+            {
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                ForeColor = SystemColors.GrayText,
+                Padding = new Padding(0, 2, 0, 4)
+            };
+            _jdbcBannerLabel = new Label
+            {
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                ForeColor = Color.DarkRed,
+                Padding = new Padding(8, 6, 8, 6)
+            };
+            _jdbcBanner = new Panel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                Visible = false,
+                BackColor = Color.FromArgb(255, 243, 205),
+                Padding = new Padding(0, 0, 0, 8)
+            };
+            _jdbcBanner.Controls.Add(_jdbcBannerLabel);
             _parameters = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -92,6 +134,14 @@ namespace DB2Sheet.UI
             };
             _testButton = new Button { Text = "测试连接", AutoSize = true };
             _saveButton = new Button { Text = "保存", AutoSize = true, Enabled = false };
+            _saveHint = new Label
+            {
+                Text = AppPresentation.SaveRequiresTestHint,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(8, 8, 0, 0)
+            };
             _jdbcEnvironmentButton = new Button { Text = "配置 JDBC 环境…", AutoSize = true, Visible = false };
             Button cancelButton = new Button { Text = "取消", AutoSize = true, DialogResult = DialogResult.Cancel };
 
@@ -100,26 +150,34 @@ namespace DB2Sheet.UI
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 ColumnCount = 2,
-                Padding = new Padding(0, 0, 0, 8)
+                Padding = new Padding(0, 0, 0, 4)
             };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            header.Controls.Add(new Label { Text = "方案名称", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+            header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            header.Controls.Add(_nameLabel, 0, 0);
             header.Controls.Add(_name, 1, 0);
-            header.Controls.Add(new Label { Text = "数据源类型", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
+            header.Controls.Add(_providerLabel, 0, 1);
             header.Controls.Add(_provider, 1, 1);
+            header.SetColumnSpan(_providerHint, 2);
+            header.Controls.Add(_providerHint, 0, 2);
 
             Panel parameterHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
             parameterHost.Controls.Add(_parameters);
+            parameterHost.Controls.Add(_jdbcBanner);
 
             FlowLayoutPanel actions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false
             };
             actions.Controls.Add(cancelButton);
             actions.Controls.Add(_saveButton);
+            actions.Controls.Add(_saveHint);
             actions.Controls.Add(_testButton);
             actions.Controls.Add(_jdbcEnvironmentButton);
 
@@ -140,36 +198,74 @@ namespace DB2Sheet.UI
             root.Controls.Add(actions, 0, 3);
             Controls.Add(root);
 
-            _name.TextChanged += (sender, args) => InvalidateConnectionTest();
+            AppPresentation.SetCueBanner(_name, AppPresentation.ConnectionNameCue);
+            AttachTip(_nameLabel, _name, "name");
+            AttachTip(_providerLabel, _provider, "provider");
+            AttachTip(null, _testButton, "test");
+            AttachTip(null, _saveButton, "save");
+
+            _name.TextChanged += NameTextChanged;
             _provider.SelectedIndexChanged += ProviderSelectedIndexChanged;
-            _jdbcEnvironmentButton.Click += (sender, args) => _openJdbcEnvironment?.Invoke();
+            _jdbcEnvironmentButton.Click += JdbcEnvironmentButtonClick;
             _testButton.Click += TestButtonClick;
             _saveButton.Click += SaveButtonClick;
-            Shown += (sender, args) => TryEnsureJdbcJava(true);
+            Shown += (sender, args) => RefreshJdbcJavaUi(false);
+            Resize += (sender, args) => ApplyHintWidths();
+            FormClosed += (sender, args) => _tips.Dispose();
             AcceptButton = _saveButton;
             CancelButton = cancelButton;
 
             LoadProviders(profile);
+            ApplyHintWidths();
         }
 
         /// <summary>获取用户验证并确认后的连接方案；取消或尚未保存时为空。</summary>
         public ConnectionProfile Profile { get; private set; }
 
+        /// <summary>按固定顺序装入类型列表。新建默认 SQL Server；编辑保留已保存类型。</summary>
         private void LoadProviders(ConnectionProfileSnapshot profile)
         {
             _loading = true;
             try
             {
-                List<ProviderItem> items = _providers.GetAll().Select(item => new ProviderItem(item)).ToList();
+                Dictionary<string, IDataSourceProvider> byId = _providers.GetAll()
+                    .ToDictionary(item => item.ProviderId, item => item, StringComparer.OrdinalIgnoreCase);
+                List<ProviderItem> items = new List<ProviderItem>();
+                foreach (string id in AppPresentation.ConnectionProviderOrder)
+                {
+                    IDataSourceProvider provider;
+                    if (byId.TryGetValue(id, out provider))
+                    {
+                        items.Add(new ProviderItem(provider));
+                        byId.Remove(id);
+                    }
+                }
+
+                foreach (IDataSourceProvider leftover in byId.Values.OrderBy(item => item.DisplayName))
+                {
+                    items.Add(new ProviderItem(leftover));
+                }
+
                 _provider.DataSource = items;
                 _name.Text = profile?.Name ?? string.Empty;
 
                 string providerId = profile?.ProviderId;
                 int selectedIndex = items.FindIndex(item =>
                     string.Equals(item.Provider.ProviderId, providerId, StringComparison.OrdinalIgnoreCase));
+                if (selectedIndex < 0)
+                {
+                    selectedIndex = items.FindIndex(item =>
+                        string.Equals(item.Provider.ProviderId, "sqlserver", StringComparison.OrdinalIgnoreCase));
+                }
+
                 _provider.SelectedIndex = selectedIndex >= 0 ? selectedIndex : (items.Count > 0 ? 0 : -1);
                 BuildParameterEditors(profile?.Parameters);
+                UpdateProviderHint();
                 UpdateJdbcEnvironmentButton();
+                if (_isNew && !_nameOwnedByUser)
+                {
+                    ApplySuggestedName();
+                }
             }
             finally
             {
@@ -183,15 +279,32 @@ namespace DB2Sheet.UI
             _editors.Clear();
             _storedParameters.Clear();
             BuildParameterEditors(null);
+            UpdateProviderHint();
             UpdateJdbcEnvironmentButton();
             InvalidateConnectionTest();
-            if (IsJdbcSelected())
+            RefreshJdbcJavaUi(false);
+            if (!_nameOwnedByUser)
             {
-                TryEnsureJdbcJava(true);
-                return;
+                ApplySuggestedName();
+            }
+        }
+
+        private void NameTextChanged(object sender, EventArgs e)
+        {
+            if (_loading || _updatingName) return;
+            if (!string.Equals(_name.Text, _lastAutoName, StringComparison.Ordinal))
+            {
+                _nameOwnedByUser = true;
             }
 
-            _status.Text = string.Empty;
+            InvalidateConnectionTest();
+        }
+
+        private void JdbcEnvironmentButtonClick(object sender, EventArgs e)
+        {
+            if (_openJdbcEnvironment == null) return;
+            _openJdbcEnvironment();
+            RefreshJdbcJavaUi(false);
         }
 
         private void BuildParameterEditors(IReadOnlyDictionary<string, string> values)
@@ -248,6 +361,12 @@ namespace DB2Sheet.UI
                     }
 
                     WireEditorChangeHandlers(editor);
+                    AttachTip(label, editor.Control, definition.Key);
+                    if (editor.AuxiliaryControl != null)
+                    {
+                        AttachTip(null, editor.AuxiliaryControl, definition.Key);
+                    }
+
                     _editors.Add(definition.Key, editor);
                     _parameters.Controls.Add(label, 0, row);
                     _parameters.Controls.Add(editor.Control, 1, row);
@@ -268,11 +387,23 @@ namespace DB2Sheet.UI
         private void BuildJdbcParameterEditors()
         {
             TextBox url = new TextBox { Dock = DockStyle.Fill };
-            AddLabeledRow("JDBC URL *", url, null);
+            Label urlLabel = AddLabeledRow("JDBC URL *", url, null);
             ParameterEditor urlEditor = new ParameterEditor(url, null, value => url.Text = value, () => url.Text.Trim());
             urlEditor.SetValue(CurrentParameterValue(JdbcParameterKeys.JdbcUrl));
             WireEditorChangeHandlers(urlEditor);
+            AttachTip(urlLabel, url, JdbcParameterKeys.JdbcUrl);
             _editors.Add(JdbcParameterKeys.JdbcUrl, urlEditor);
+
+            Label urlExample = new Label
+            {
+                Text = AppPresentation.JdbcUrlExample,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(3, 0, 8, 6)
+            };
+            int exampleRow = _parameters.RowCount++;
+            _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _parameters.Controls.Add(urlExample, 1, exampleRow);
 
             ListBox jars = new ListBox
             {
@@ -309,7 +440,7 @@ namespace DB2Sheet.UI
                         if (!exists) jars.Items.Add(full);
                     }
 
-                    InvalidateConnectionTest();
+                    OnParameterEdited();
                 }
             };
             removeJar.Click += (sender, args) =>
@@ -320,9 +451,9 @@ namespace DB2Sheet.UI
                     jars.Items.RemoveAt(jars.SelectedIndices[0]);
                 }
 
-                InvalidateConnectionTest();
+                OnParameterEdited();
             };
-            AddLabeledRow("驱动 jar *", jars, jarButtons);
+            Label jarsLabel = AddLabeledRow("驱动 jar *", jars, jarButtons);
             ParameterEditor jarsEditor = new ParameterEditor(
                 jars,
                 jarButtons,
@@ -336,7 +467,20 @@ namespace DB2Sheet.UI
                 },
                 () => JdbcConnectionComposer.JoinDriverJars(jars.Items.Cast<object>().Select(item => Convert.ToString(item))));
             jarsEditor.SetValue(CurrentParameterValue(JdbcParameterKeys.DriverJars));
+            AttachTip(jarsLabel, jars, JdbcParameterKeys.DriverJars);
+            AttachTip(null, addJar, JdbcParameterKeys.DriverJars);
             _editors.Add(JdbcParameterKeys.DriverJars, jarsEditor);
+
+            Label jarHint = new Label
+            {
+                Text = AppPresentation.DriverJarHint,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(3, 0, 8, 6)
+            };
+            int jarHintRow = _parameters.RowCount++;
+            _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _parameters.Controls.Add(jarHint, 1, jarHintRow);
 
             TextBox driverClass = new TextBox { Dock = DockStyle.Fill };
             Button detectDriver = new Button { Text = "检测驱动类", AutoSize = true };
@@ -369,6 +513,7 @@ namespace DB2Sheet.UI
                     driverClass.Text = names[0];
                     _status.ForeColor = Color.DarkGreen;
                     _status.Text = "已填入驱动类 " + names[0];
+                    OnParameterEdited();
                     return;
                 }
 
@@ -406,34 +551,40 @@ namespace DB2Sheet.UI
                     if (chooser.ShowDialog(this) == DialogResult.OK && list.SelectedItem != null)
                     {
                         driverClass.Text = Convert.ToString(list.SelectedItem);
+                        OnParameterEdited();
                     }
                 }
             };
-            AddLabeledRow("驱动类 *", driverClass, detectDriver);
+            Label driverLabel = AddLabeledRow("驱动类 *", driverClass, detectDriver);
             ParameterEditor driverClassEditor = new ParameterEditor(
                 driverClass, detectDriver, value => driverClass.Text = value, () => driverClass.Text.Trim());
             driverClassEditor.SetValue(CurrentParameterValue(JdbcParameterKeys.DriverClass));
             WireEditorChangeHandlers(driverClassEditor);
+            AttachTip(driverLabel, driverClass, JdbcParameterKeys.DriverClass);
+            AttachTip(null, detectDriver, JdbcParameterKeys.DriverClass);
             _editors.Add(JdbcParameterKeys.DriverClass, driverClassEditor);
 
             TextBox userName = new TextBox { Dock = DockStyle.Fill };
-            AddLabeledRow("用户名", userName, null);
+            Label userLabel = AddLabeledRow("用户名", userName, null);
             ParameterEditor userNameEditor = new ParameterEditor(
                 userName, null, value => userName.Text = value, () => userName.Text.Trim());
             userNameEditor.SetValue(CurrentParameterValue(DatabaseParameterKeys.UserName));
             WireEditorChangeHandlers(userNameEditor);
+            AttachTip(userLabel, userName, DatabaseParameterKeys.UserName);
             _editors.Add(DatabaseParameterKeys.UserName, userNameEditor);
 
             TextBox password = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
-            AddLabeledRow("密码", password, null);
+            Label passwordLabel = AddLabeledRow("密码", password, null);
             ParameterEditor passwordEditor = new ParameterEditor(
                 password, null, value => password.Text = value, () => password.Text);
             passwordEditor.SetValue(CurrentParameterValue(DatabaseParameterKeys.Password));
             WireEditorChangeHandlers(passwordEditor);
+            AttachTip(passwordLabel, password, DatabaseParameterKeys.Password);
             _editors.Add(DatabaseParameterKeys.Password, passwordEditor);
         }
 
-        private void AddLabeledRow(string labelText, Control editor, Control auxiliary)
+        /// <summary>追加一行标签加编辑器，并返回标签以便挂悬停说明。</summary>
+        private Label AddLabeledRow(string labelText, Control editor, Control auxiliary)
         {
             int row = _parameters.RowCount++;
             _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -450,13 +601,15 @@ namespace DB2Sheet.UI
             {
                 _parameters.Controls.Add(auxiliary, 2, row);
             }
+
+            return label;
         }
 
         private void ParameterChoiceChanged(object sender, EventArgs e)
         {
             if (_loading) return;
             BuildParameterEditors(null);
-            InvalidateConnectionTest();
+            OnParameterEdited();
         }
 
         /// <summary>名称、类型或连接参数变更后须重新测试才能保存。</summary>
@@ -465,6 +618,17 @@ namespace DB2Sheet.UI
             if (_loading) return;
             _connectionTestPassed = false;
             _saveButton.Enabled = false;
+            _saveHint.Visible = true;
+        }
+
+        /// <summary>参数变更后刷新测试状态，并在用户未改名称时更新建议名称。</summary>
+        private void OnParameterEdited()
+        {
+            InvalidateConnectionTest();
+            if (!_nameOwnedByUser)
+            {
+                ApplySuggestedName();
+            }
         }
 
         /// <summary>监听编辑控件变更，使保存按钮在参数改动后重新禁用。</summary>
@@ -474,15 +638,15 @@ namespace DB2Sheet.UI
             Control control = editor.Control;
             if (control is TextBox textBox)
             {
-                textBox.TextChanged += (sender, args) => InvalidateConnectionTest();
+                textBox.TextChanged += (sender, args) => OnParameterEdited();
             }
             else if (control is ComboBox comboBox)
             {
-                comboBox.SelectedIndexChanged += (sender, args) => InvalidateConnectionTest();
+                comboBox.SelectedIndexChanged += (sender, args) => OnParameterEdited();
             }
             else if (control is CheckBox checkBox)
             {
-                checkBox.CheckedChanged += (sender, args) => InvalidateConnectionTest();
+                checkBox.CheckedChanged += (sender, args) => OnParameterEdited();
             }
         }
 
@@ -535,6 +699,21 @@ namespace DB2Sheet.UI
             _jdbcEnvironmentButton.Visible = _openJdbcEnvironment != null && IsJdbcSelected();
         }
 
+        private void UpdateProviderHint()
+        {
+            _providerHint.Text = AppPresentation.ConnectionProviderHint(SelectedProvider?.ProviderId);
+            ApplyHintWidths();
+        }
+
+        /// <summary>把说明文字收窄到客户区，避免横向撑出窗体。</summary>
+        private void ApplyHintWidths()
+        {
+            int width = Math.Max(120, ClientSize.Width - 48);
+            _providerHint.MaximumSize = new Size(width, 0);
+            _jdbcBannerLabel.MaximumSize = new Size(Math.Max(120, width - 16), 0);
+            _jdbcBanner.Height = _jdbcBannerLabel.PreferredHeight + 12;
+        }
+
         /// <summary>当前是否选中 JDBC 数据源。</summary>
         private bool IsJdbcSelected()
         {
@@ -552,21 +731,29 @@ namespace DB2Sheet.UI
             return JavaRuntimeProbe.Resolve(settings == null ? string.Empty : settings.JavaExecutable);
         }
 
-        /// <summary>选中 JDBC 或测试连接前确认本机已有 Java。未找到时可打开 JDBC 环境后再查一次。</summary>
-        /// <param name="promptIfMissing">未找到时是否询问并打开 JDBC 环境。</param>
+        /// <summary>刷新 JDBC 的 Java 提示。选中时只更新横幅和状态，不弹窗。</summary>
+        /// <param name="promptIfMissing">为 true 时未找到会询问是否打开 JDBC 环境，供测试连接使用。</param>
         /// <returns>已找到可用 java.exe 时为 true。非 JDBC 时直接为 true。</returns>
-        /// <remarks>询问后仍可继续填写 URL 和 jar。测试连接在返回 false 时不会启动进度窗。</remarks>
-        private bool TryEnsureJdbcJava(bool promptIfMissing)
+        private bool RefreshJdbcJavaUi(bool promptIfMissing)
         {
-            if (!IsJdbcSelected()) return true;
+            if (!IsJdbcSelected())
+            {
+                _jdbcBanner.Visible = false;
+                return true;
+            }
 
             JavaResolution resolution = ResolveConfiguredJava();
             if (resolution.Found)
             {
+                _jdbcBanner.Visible = false;
                 _status.ForeColor = SystemColors.GrayText;
                 _status.Text = "已检测到 Java。";
                 return true;
             }
+
+            _jdbcBannerLabel.Text = AppPresentation.JdbcJavaBanner;
+            _jdbcBanner.Visible = true;
+            ApplyHintWidths();
 
             if (promptIfMissing && _openJdbcEnvironment != null)
             {
@@ -582,6 +769,7 @@ namespace DB2Sheet.UI
                     resolution = ResolveConfiguredJava();
                     if (resolution.Found)
                     {
+                        _jdbcBanner.Visible = false;
                         _status.ForeColor = SystemColors.GrayText;
                         _status.Text = "已检测到 Java。";
                         return true;
@@ -603,7 +791,89 @@ namespace DB2Sheet.UI
             return false;
         }
 
-        private static ParameterEditor CreateEditor(ParameterDefinition definition)
+        /// <summary>在用户未改名称时，按类型和已填内容写入建议显示名称。</summary>
+        private void ApplySuggestedName()
+        {
+            if (_nameOwnedByUser) return;
+            string suggested = BuildSuggestedName();
+            if (string.IsNullOrEmpty(suggested)) return;
+            _updatingName = true;
+            try
+            {
+                _lastAutoName = suggested;
+                if (!string.Equals(_name.Text, suggested, StringComparison.Ordinal))
+                {
+                    _name.Text = suggested;
+                }
+            }
+            finally
+            {
+                _updatingName = false;
+            }
+        }
+
+        /// <summary>按当前类型和参数拼建议名称。缺段则省略。</summary>
+        private string BuildSuggestedName()
+        {
+            IDataSourceProvider provider = SelectedProvider;
+            if (provider == null) return string.Empty;
+
+            if (IsJdbcSelected())
+            {
+                string fromUrl = ExtractJdbcNameHint(CurrentParameterValue(JdbcParameterKeys.JdbcUrl));
+                return string.IsNullOrEmpty(fromUrl) ? "JDBC" : "JDBC-" + fromUrl;
+            }
+
+            string title = AppPresentation.ConnectionProviderTitle(provider.ProviderId);
+            string filePath = CurrentParameterValue(DatabaseParameterKeys.FilePath);
+            if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                string fileName = Path.GetFileNameWithoutExtension(filePath);
+                return string.IsNullOrWhiteSpace(fileName) ? title : title + "-" + fileName;
+            }
+
+            List<string> parts = new List<string> { title };
+            string host = CurrentParameterValue(DatabaseParameterKeys.Host);
+            if (!string.IsNullOrWhiteSpace(host) &&
+                !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                parts.Add(host.Trim());
+            }
+
+            string database = CurrentParameterValue(DatabaseParameterKeys.Database);
+            if (!string.IsNullOrWhiteSpace(database))
+            {
+                parts.Add(database.Trim());
+            }
+
+            return string.Join("-", parts);
+        }
+
+        /// <summary>从 JDBC URL 里尽量抽出主机或库名，供建议显示名称使用。</summary>
+        private static string ExtractJdbcNameHint(string jdbcUrl)
+        {
+            if (string.IsNullOrWhiteSpace(jdbcUrl)) return string.Empty;
+            Match host = Regex.Match(jdbcUrl, @"[@/](?://)?([^:/;?\s]+)");
+            if (!host.Success) return string.Empty;
+            string value = host.Groups[1].Value.Trim();
+            if (string.IsNullOrEmpty(value) ||
+                string.Equals(value, "localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return value.Length > 40 ? value.Substring(0, 40) : value;
+        }
+
+        private void AttachTip(Control label, Control control, string fieldKey)
+        {
+            string tip = AppPresentation.ConnectionFieldTip(fieldKey);
+            if (string.IsNullOrEmpty(tip)) return;
+            if (label != null) _tips.SetToolTip(label, tip);
+            if (control != null) _tips.SetToolTip(control, tip);
+        }
+
+        private ParameterEditor CreateEditor(ParameterDefinition definition)
         {
             if (definition.ValueType == ParameterValueType.Boolean)
             {
@@ -636,6 +906,11 @@ namespace DB2Sheet.UI
                 Dock = DockStyle.Fill,
                 UseSystemPasswordChar = definition.ValueType == ParameterValueType.Password
             };
+            if (string.Equals(definition.Key, DatabaseParameterKeys.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                AppPresentation.SetCueBanner(textBox, AppPresentation.ConnectionHostCue);
+            }
+
             Control auxiliary = null;
             if (definition.ValueType == ParameterValueType.FilePath)
             {
@@ -655,7 +930,7 @@ namespace DB2Sheet.UI
 
         private void TestButtonClick(object sender, EventArgs e)
         {
-            if (!TryEnsureJdbcJava(true)) return;
+            if (!RefreshJdbcJavaUi(true)) return;
             if (!TryCreateProfile(out ConnectionProfile profile, true)) return;
 
             try
@@ -675,17 +950,20 @@ namespace DB2Sheet.UI
                 {
                     _connectionTestPassed = true;
                     _saveButton.Enabled = true;
+                    _saveHint.Visible = false;
                     return;
                 }
 
                 _connectionTestPassed = false;
                 _saveButton.Enabled = false;
+                _saveHint.Visible = true;
                 ExceptionDetailForm.Show(this, "连接测试失败", result.Message);
             }
             catch (OperationCanceledException)
             {
                 _connectionTestPassed = false;
                 _saveButton.Enabled = false;
+                _saveHint.Visible = true;
                 _status.ForeColor = SystemColors.GrayText;
                 _status.Text = "连接测试已取消。";
             }
@@ -693,6 +971,7 @@ namespace DB2Sheet.UI
             {
                 _connectionTestPassed = false;
                 _saveButton.Enabled = false;
+                _saveHint.Visible = true;
                 _status.ForeColor = Color.DarkRed;
                 _status.Text = exception.Message;
                 ExceptionDetailForm.Show(this, exception);
@@ -719,7 +998,7 @@ namespace DB2Sheet.UI
             IDataSourceProvider provider = SelectedProvider;
             if (string.IsNullOrWhiteSpace(_name.Text))
             {
-                return ValidationFailure("请输入连接方案名称。", showValidation, _name);
+                return ValidationFailure("请输入显示名称。", showValidation, _name);
             }
             if (provider == null)
             {
@@ -772,7 +1051,7 @@ namespace DB2Sheet.UI
 
         private IDataSourceProvider SelectedProvider => (_provider.SelectedItem as ProviderItem)?.Provider;
 
-        /// <summary>为下拉框包装数据源提供程序及其显示名称。</summary>
+        /// <summary>为下拉框包装数据源提供程序及其用户可见标题。</summary>
         private sealed class ProviderItem
         {
             public ProviderItem(IDataSourceProvider provider)
@@ -781,7 +1060,9 @@ namespace DB2Sheet.UI
             }
 
             public IDataSourceProvider Provider { get; }
-            public string DisplayName => Provider.DisplayName;
+
+            /// <summary>下拉显示的标题，来自 AppPresentation，不是 Provider.DisplayName。</summary>
+            public string DisplayName => AppPresentation.ConnectionProviderTitle(Provider.ProviderId);
         }
 
         /// <summary>统一封装不同类型参数控件的取值和赋值操作。</summary>

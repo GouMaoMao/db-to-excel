@@ -142,7 +142,10 @@ namespace DB2Sheet.UI
                 {
                     IDataSourceProvider provider = _providers.GetById(profile.ProviderId);
                     ListViewItem item = new ListViewItem(profile.Name) { Tag = profile };
-                    item.SubItems.Add(provider?.DisplayName ?? profile.ProviderId);
+                    item.SubItems.Add(
+                        provider == null
+                            ? AppPresentation.ConnectionProviderTitle(profile.ProviderId)
+                            : AppPresentation.ConnectionProviderTitle(provider.ProviderId));
                     item.SubItems.Add(profile.Id);
                     _profiles.Items.Add(item);
                     if (string.Equals(profile.Id, targetId, StringComparison.OrdinalIgnoreCase))
