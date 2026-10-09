@@ -10,7 +10,7 @@ using DB2Sheet.Models;
 namespace DB2Sheet.UI
 {
     /// <summary>根据设置注册表动态生成分类编辑界面，并批量保存用户设置。</summary>
-    /// <remarks>保存成功时设置 <see cref="Form.DialogResult"/> 为 OK；恢复默认值需要用户确认。</remarks>
+    /// <remarks>保存成功时设置 <see cref="Form.DialogResult"/> 为 OK；恢复默认值需要用户确认。框下说明来自 <see cref="AppPresentation.SettingNote"/>，随窗体宽度折行。</remarks>
     public sealed class SettingsForm : AppForm
     {
         private readonly ISettingsRegistry _registry;
@@ -18,6 +18,7 @@ namespace DB2Sheet.UI
         private readonly Dictionary<string, SettingEditor> _editors =
             new Dictionary<string, SettingEditor>(StringComparer.OrdinalIgnoreCase);
         private readonly Label _status;
+        private readonly List<Label> _notes = new List<Label>();
 
         /// <summary>创建设置窗体。</summary>
         /// <param name="registry">提供设置类型、分类、默认值和校验规则。</param>
@@ -74,8 +75,11 @@ namespace DB2Sheet.UI
 
             resetButton.Click += ResetButtonClick;
             saveButton.Click += SaveButtonClick;
+            Resize += (sender, args) => ApplyNoteWidths();
+            Shown += (sender, args) => ApplyNoteWidths();
             AcceptButton = saveButton;
             CancelButton = cancelButton;
+            ApplyNoteWidths();
         }
 
         private void BuildCategories(TabControl categories)
@@ -110,11 +114,62 @@ namespace DB2Sheet.UI
                     _editors.Add(definition.Key, editor);
                     table.Controls.Add(label, 0, row);
                     table.Controls.Add(editor.Control, 1, row);
+                    AddSettingNote(table, definition.Key);
                 }
 
                 page.Controls.Add(table);
                 categories.TabPages.Add(page);
             }
+        }
+
+        /// <summary>在当前设置项下方追加灰色说明。没有说明时不占行。</summary>
+        /// <param name="table">该分类的参数表。</param>
+        /// <param name="key">设置键，对应 <see cref="AppPresentation.SettingNote"/>。</param>
+        private void AddSettingNote(TableLayoutPanel table, string key)
+        {
+            string text = AppPresentation.SettingNote(key);
+            if (string.IsNullOrEmpty(text)) return;
+
+            Label note = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(3, 0, 8, 8)
+            };
+            _notes.Add(note);
+            int row = table.RowCount++;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(note, 1, row);
+        }
+
+        /// <summary>把框下说明收进所在参数表的输入列，避免长句横向撑出窗体。</summary>
+        private void ApplyNoteWidths()
+        {
+            foreach (Label note in _notes)
+            {
+                if (note.IsDisposed) continue;
+                int width = NoteWidth(note.Parent as TableLayoutPanel);
+                if (note.MaximumSize.Width == width) continue;
+                note.MaximumSize = new Size(width, 0);
+            }
+        }
+
+        /// <summary>说明放在输入列。列宽尚未算出时按窗体宽度减去名称列估算。</summary>
+        /// <param name="table">说明所在的参数表。</param>
+        /// <returns>说明标签的最大宽度。</returns>
+        private int NoteWidth(TableLayoutPanel table)
+        {
+            if (table != null)
+            {
+                int[] columns = table.GetColumnWidths();
+                if (columns != null && columns.Length > 1 && columns[1] > 40)
+                {
+                    return Math.Max(120, columns[1] - 8);
+                }
+            }
+
+            return Math.Max(120, ClientSize.Width - 270);
         }
 
         private static SettingEditor CreateEditor(SettingDefinition definition)

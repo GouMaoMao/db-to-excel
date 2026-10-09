@@ -9,7 +9,7 @@ namespace DB2Sheet.UI
     /// <summary>集中定义所有用户可见品牌名称、版本展示和公共 UI 字体。</summary>
     /// <remarks>
     /// 更换插件展示名称时修改 <see cref="DisplayName"/> 即可。程序集名、持久化目录和 Ribbon 控件 ID 是独立的技术标识。
-    /// 连接编辑窗的类型标题、说明、悬停和空框提示也放在此处，避免散落在各 Provider。
+    /// 连接编辑窗的类型标题、类型介绍、框下说明、悬停和空框提示，以及参数设置窗的框下说明，也放在此处。
     /// </remarks>
     internal static class AppPresentation
     {
@@ -39,11 +39,26 @@ namespace DB2Sheet.UI
         /// <summary>服务器地址空框提示。</summary>
         public const string ConnectionHostCue = "主机名或 IP";
 
+        /// <summary>JDBC URL 下方说明的第一句。</summary>
+        public const string JdbcUrlNote =
+            "厂商规定的完整连接地址，写明连哪台机器、哪个库。向管理员索取后原样粘贴。";
+
         /// <summary>JDBC URL 下方的示例行。</summary>
         public const string JdbcUrlExample = "示例：jdbc:oracle:thin:@主机:1521:库名";
 
-        /// <summary>驱动 jar 旁的简短说明。</summary>
-        public const string DriverJarHint = "向管理员或厂商要 .jar";
+        /// <summary>驱动 jar 下方的说明。</summary>
+        public const string DriverJarNote =
+            "JDBC 驱动程序，数据库厂商提供的 .jar 文件。Java 加载它，才能按该库的协议建立连接。驱动含多个 jar 时全部添加。";
+
+        /// <summary>驱动类下方的说明。</summary>
+        public const string DriverClassNote =
+            "该驱动程序中供 JDBC 加载的类名，例如 oracle.jdbc.OracleDriver。点「检测驱动类」从 jar 中读取；jar 未声明时按厂商文档填写。";
+
+        /// <summary>JDBC 用户名下方的说明。</summary>
+        public const string JdbcUserNameNote = "登录账号。有的库把账号写在 JDBC URL 里，这里可以留空。";
+
+        /// <summary>jar 中读不到驱动类时的提示。</summary>
+        public const string DriverClassMissingMessage = "jar 未声明驱动类，请按厂商文档填写。";
 
         /// <summary>未测试成功时保存按钮旁的说明。</summary>
         public const string SaveRequiresTestHint = "测试成功后才能保存";
@@ -118,33 +133,68 @@ namespace DB2Sheet.UI
             }
         }
 
-        /// <summary>选中某连接类型时显示在下拉下方的一句说明。</summary>
+        /// <summary>选中某连接类型时显示在下拉下方的一句介绍，只说这种库的特点。</summary>
         /// <param name="providerId">Provider 标识。</param>
-        /// <returns>白话说明。服务器型共用同一句。</returns>
+        /// <returns>一句介绍；未知标识为空。</returns>
         public static string ConnectionProviderHint(string providerId)
         {
             if (string.IsNullOrWhiteSpace(providerId)) return string.Empty;
             switch (providerId.Trim().ToLowerInvariant())
             {
                 case "sqlserver":
+                    return "微软的企业数据库，常见于公司业务系统，可用当前 Windows 账号登录。";
                 case "mysql":
+                    return "使用最广的开源数据库，多见于网站和一般业务系统。";
                 case "postgresql":
-                    return "填服务器、库名和账号。";
+                    return "开源数据库，擅长复杂查询和较严格的数据约束。";
                 case "sqlite":
+                    return "不需要数据库服务，整个库是本机上的一个文件。";
                 case "duckdb":
-                    return "本机一个文件，点浏览即可。";
+                    return "本机上的一个文件，专为分析查询设计，适合统计和汇总。";
                 case "jdbc":
-                    return "上面没有的库，需要驱动 jar 和本机 Java。";
+                    return "通用连接方式，用来连接这里没有单独列出的数据库，例如 Oracle，以及 Hive 等数据仓库。";
                 default:
                     return string.Empty;
             }
         }
 
-        /// <summary>连接编辑字段的悬停说明。</summary>
-        /// <param name="fieldKey">字段键，如 host、jdbcUrl，或 name、provider、test、save。</param>
-        /// <returns>一句白话；未知键为空。</returns>
-        public static string ConnectionFieldTip(string fieldKey)
+        /// <summary>输入框下方的灰色说明。没有说明的字段返回空，窗体不另占一行。</summary>
+        /// <param name="providerId">当前数据源类型。用户名说明只在 JDBC 下出现。</param>
+        /// <param name="fieldKey">字段键，如 jdbcUrl、driverJars、integratedSecurity。</param>
+        /// <returns>框下说明；不需要说明时为空。</returns>
+        public static string ConnectionFieldNote(string providerId, string fieldKey)
         {
+            if (string.IsNullOrWhiteSpace(fieldKey)) return string.Empty;
+            bool jdbc = string.Equals(providerId, "jdbc", StringComparison.OrdinalIgnoreCase);
+            switch (fieldKey.Trim())
+            {
+                case "jdbcUrl":
+                    return JdbcUrlNote + Environment.NewLine + JdbcUrlExample;
+                case "driverJars":
+                    return DriverJarNote;
+                case "driverClass":
+                    return DriverClassNote;
+                case "userName":
+                    return jdbc ? JdbcUserNameNote : string.Empty;
+                case "integratedSecurity":
+                    return "勾选后用当前 Windows 账号登录，用户名和密码可留空。";
+                case "encrypt":
+                    return "传输是否加密。没有管理员要求时保持默认。";
+                case "trustServerCertificate":
+                    return "内网或自签证书连不上时再勾选。";
+                default:
+                    return string.Empty;
+            }
+        }
+
+        /// <summary>连接编辑字段的悬停说明。已有框下说明的字段与说明使用同一句话。</summary>
+        /// <param name="providerId">当前数据源类型，用于区分 JDBC 用户名和其他库的用户名。</param>
+        /// <param name="fieldKey">字段键，如 host、jdbcUrl，或 name、provider、test、save。</param>
+        /// <returns>悬停说明；未知键为空。</returns>
+        public static string ConnectionFieldTip(string providerId, string fieldKey)
+        {
+            string note = ConnectionFieldNote(providerId, fieldKey);
+            if (!string.IsNullOrEmpty(note)) return note;
             if (string.IsNullOrWhiteSpace(fieldKey)) return string.Empty;
             switch (fieldKey.Trim())
             {
@@ -162,24 +212,39 @@ namespace DB2Sheet.UI
                     return "登录该库的账号；勾选 Windows 集成认证时可留空。";
                 case "password":
                     return "登录该库的密码；勾选 Windows 集成认证时可留空。";
-                case "integratedSecurity":
-                    return "用当前 Windows 账号登录，不必再填用户名密码。";
                 case "filePath":
                     return "本机数据库文件路径，可点浏览选择。";
-                case "encrypt":
-                    return "是否加密传输。一般保持默认，除非管理员有要求。";
-                case "trustServerCertificate":
-                    return "开发或内网环境可勾选，以信任服务器自签证书。";
-                case "jdbcUrl":
-                    return "厂商要求的连接串，向管理员索取。";
-                case "driverJars":
-                    return "厂商提供的驱动文件，向管理员或厂商索取。";
-                case "driverClass":
-                    return "一般点「检测驱动类」即可；检测不到再手工填。";
                 case "test":
                     return "用当前填写内容试连；通过后才能保存。";
                 case "save":
                     return "测试通过后才能保存；保存后可在查询里使用。";
+                default:
+                    return string.Empty;
+            }
+        }
+
+        /// <summary>参数设置窗里某一项下方的灰色说明。会话状态不出现在设置窗，这里也不写。</summary>
+        /// <param name="key">设置键，与 <c>CoreSettings</c> 中的持久化键相同。</param>
+        /// <returns>一句定义；未知键为空，窗体不另占一行。</returns>
+        public static string SettingNote(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+            switch (key.Trim())
+            {
+                case "query.maxPreviewRows":
+                    return "SQL 查询窗预览时最多读取并显示的行数。";
+                case "excel.maxExportRows":
+                    return "写入 Excel 的结果数据行上限，不含标题行。超出的行被截断。";
+                case "batch.mode":
+                    return "Serial 为串行，一项查询结束后再查下一项。Parallel 为并行，多项同时查询。";
+                case "batch.maxParallelism":
+                    return "并行时同时查询的任务个数。串行时不起作用。";
+                case "query.timeoutSeconds":
+                    return "单条查询允许运行的最长时间，超时后该查询失败。";
+                case "query.resultBlockSize":
+                    return "从数据库读取结果时每次取回的行数。只影响读取节奏，不改变最终行数。";
+                case "logging.level":
+                    return "进度窗口只显示不低于所选级别的日志。Debug 最详细，Error 只显示错误。写入文件的日志仍保留全部级别。";
                 default:
                     return string.Empty;
             }

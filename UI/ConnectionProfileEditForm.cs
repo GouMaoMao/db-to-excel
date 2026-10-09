@@ -15,7 +15,7 @@ namespace DB2Sheet.UI
     /// <summary>提供连接方案的新建、编辑、参数校验和连接测试界面。</summary>
     /// <remarks>
     /// 窗体本身不保存仓储；确认后通过 <see cref="Profile"/> 输出用户编辑得到的模型。
-    /// 类型标题、说明和悬停文案来自 <see cref="AppPresentation"/>。新建默认 SQL Server；选 JDBC 时用横幅提示 Java，测试前再硬拦。
+    /// 类型介绍、框下说明和悬停文案来自 <see cref="AppPresentation"/>。新建默认 SQL Server；选 JDBC 时用横幅提示 Java，测试前再硬拦。
     /// </remarks>
     public sealed class ConnectionProfileEditForm : AppForm
     {
@@ -43,6 +43,7 @@ namespace DB2Sheet.UI
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly Action _openJdbcEnvironment;
         private readonly Button _jdbcEnvironmentButton;
+        private readonly List<Label> _fieldNotes = new List<Label>();
         private readonly string _profileId;
         private readonly bool _isNew;
         private bool _loading;
@@ -209,7 +210,11 @@ namespace DB2Sheet.UI
             _jdbcEnvironmentButton.Click += JdbcEnvironmentButtonClick;
             _testButton.Click += TestButtonClick;
             _saveButton.Click += SaveButtonClick;
-            Shown += (sender, args) => RefreshJdbcJavaUi(false);
+            Shown += (sender, args) =>
+            {
+                ApplyHintWidths();
+                RefreshJdbcJavaUi(false);
+            };
             Resize += (sender, args) => ApplyHintWidths();
             FormClosed += (sender, args) => _tips.Dispose();
             AcceptButton = _saveButton;
@@ -327,6 +332,7 @@ namespace DB2Sheet.UI
                 _parameters.RowStyles.Clear();
                 _parameters.RowCount = 0;
                 _editors.Clear();
+                _fieldNotes.Clear();
 
                 IDataSourceProvider provider = SelectedProvider;
                 if (provider == null)
@@ -374,6 +380,8 @@ namespace DB2Sheet.UI
                     {
                         _parameters.Controls.Add(editor.AuxiliaryControl, 2, row);
                     }
+
+                    AddFieldNote(definition.Key);
                 }
             }
             finally
@@ -393,17 +401,7 @@ namespace DB2Sheet.UI
             WireEditorChangeHandlers(urlEditor);
             AttachTip(urlLabel, url, JdbcParameterKeys.JdbcUrl);
             _editors.Add(JdbcParameterKeys.JdbcUrl, urlEditor);
-
-            Label urlExample = new Label
-            {
-                Text = AppPresentation.JdbcUrlExample,
-                AutoSize = true,
-                ForeColor = SystemColors.GrayText,
-                Margin = new Padding(3, 0, 8, 6)
-            };
-            int exampleRow = _parameters.RowCount++;
-            _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            _parameters.Controls.Add(urlExample, 1, exampleRow);
+            AddFieldNote(JdbcParameterKeys.JdbcUrl);
 
             ListBox jars = new ListBox
             {
@@ -470,17 +468,7 @@ namespace DB2Sheet.UI
             AttachTip(jarsLabel, jars, JdbcParameterKeys.DriverJars);
             AttachTip(null, addJar, JdbcParameterKeys.DriverJars);
             _editors.Add(JdbcParameterKeys.DriverJars, jarsEditor);
-
-            Label jarHint = new Label
-            {
-                Text = AppPresentation.DriverJarHint,
-                AutoSize = true,
-                ForeColor = SystemColors.GrayText,
-                Margin = new Padding(3, 0, 8, 6)
-            };
-            int jarHintRow = _parameters.RowCount++;
-            _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            _parameters.Controls.Add(jarHint, 1, jarHintRow);
+            AddFieldNote(JdbcParameterKeys.DriverJars);
 
             TextBox driverClass = new TextBox { Dock = DockStyle.Fill };
             Button detectDriver = new Button { Text = "检测驱动类", AutoSize = true };
@@ -501,7 +489,7 @@ namespace DB2Sheet.UI
                 {
                     MessageBox.Show(
                         this,
-                        "这些 jar 里没有找到 META-INF/services/java.sql.Driver 声明，请手工填写驱动类。",
+                        AppPresentation.DriverClassMissingMessage,
                         "连接方案",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -563,6 +551,7 @@ namespace DB2Sheet.UI
             AttachTip(driverLabel, driverClass, JdbcParameterKeys.DriverClass);
             AttachTip(null, detectDriver, JdbcParameterKeys.DriverClass);
             _editors.Add(JdbcParameterKeys.DriverClass, driverClassEditor);
+            AddFieldNote(JdbcParameterKeys.DriverClass);
 
             TextBox userName = new TextBox { Dock = DockStyle.Fill };
             Label userLabel = AddLabeledRow("用户名", userName, null);
@@ -572,6 +561,7 @@ namespace DB2Sheet.UI
             WireEditorChangeHandlers(userNameEditor);
             AttachTip(userLabel, userName, DatabaseParameterKeys.UserName);
             _editors.Add(DatabaseParameterKeys.UserName, userNameEditor);
+            AddFieldNote(DatabaseParameterKeys.UserName);
 
             TextBox password = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
             Label passwordLabel = AddLabeledRow("密码", password, null);
@@ -705,13 +695,53 @@ namespace DB2Sheet.UI
             ApplyHintWidths();
         }
 
-        /// <summary>把说明文字收窄到客户区，避免横向撑出窗体。</summary>
+        /// <summary>把类型介绍、缺 Java 横幅和框下说明收窄到可用宽度，避免长句横向撑出窗体。</summary>
         private void ApplyHintWidths()
         {
             int width = Math.Max(120, ClientSize.Width - 48);
             _providerHint.MaximumSize = new Size(width, 0);
             _jdbcBannerLabel.MaximumSize = new Size(Math.Max(120, width - 16), 0);
             _jdbcBanner.Height = _jdbcBannerLabel.PreferredHeight + 12;
+
+            int noteWidth = FieldNoteWidth();
+            foreach (Label note in _fieldNotes)
+            {
+                if (note.IsDisposed || note.MaximumSize.Width == noteWidth) continue;
+                note.MaximumSize = new Size(noteWidth, 0);
+            }
+        }
+
+        /// <summary>框下说明放在参数表的输入列，宽度跟该列走；列宽尚未算出时按窗体宽度估算。</summary>
+        /// <returns>说明标签的最大宽度。</returns>
+        private int FieldNoteWidth()
+        {
+            int[] columns = _parameters.GetColumnWidths();
+            if (columns != null && columns.Length > 1 && columns[1] > 40)
+            {
+                return Math.Max(120, columns[1] - 8);
+            }
+
+            return Math.Max(120, ClientSize.Width - 220);
+        }
+
+        /// <summary>在当前字段下方追加灰色说明。该字段没有说明时不占行。</summary>
+        /// <param name="fieldKey">字段键，对应 <see cref="AppPresentation.ConnectionFieldNote"/>。</param>
+        private void AddFieldNote(string fieldKey)
+        {
+            string text = AppPresentation.ConnectionFieldNote(SelectedProvider?.ProviderId, fieldKey);
+            if (string.IsNullOrEmpty(text)) return;
+
+            Label note = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(3, 0, 8, 6)
+            };
+            _fieldNotes.Add(note);
+            int row = _parameters.RowCount++;
+            _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _parameters.Controls.Add(note, 1, row);
         }
 
         /// <summary>当前是否选中 JDBC 数据源。</summary>
@@ -867,7 +897,7 @@ namespace DB2Sheet.UI
 
         private void AttachTip(Control label, Control control, string fieldKey)
         {
-            string tip = AppPresentation.ConnectionFieldTip(fieldKey);
+            string tip = AppPresentation.ConnectionFieldTip(SelectedProvider?.ProviderId, fieldKey);
             if (string.IsNullOrEmpty(tip)) return;
             if (label != null) _tips.SetToolTip(label, tip);
             if (control != null) _tips.SetToolTip(control, tip);
