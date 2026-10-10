@@ -17,6 +17,7 @@ namespace DB2Sheet.Excel
     /// 标题只占一行字段编码，编码行加粗。成功时标题底为深绿，结果被截断时为橙色，与批量刷新状态圆点相同。数据从标题的下一行开始。
     /// 标题和数据组成的表格使用灰色细网格线。
     /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
+    /// 批量刷新会在写入前激活目标表并滚到锚点，写入期间关闭 Excel 重画，结束时恢复。交互式写入不跳表，也不改重画。
     /// 文件日志只在写入完成或失败时各记一条汇总。
     /// 应在 Excel UI 线程调用，并避免在方法外继续使用本类释放的 COM Range 和 Worksheet 引用。
     /// </remarks>
@@ -79,8 +80,30 @@ namespace DB2Sheet.Excel
             Stopwatch writeWatch = Stopwatch.StartNew();
             long rowsWritten = 0;
             int totalBlocks = result.Blocks.Count;
+            ExcelInterop.Application application = null;
+            bool restoreScreenUpdating = false;
+            bool previousScreenUpdating = true;
             try
             {
+                if (options.RevealTarget)
+                {
+                    RevealTarget(worksheet, options.AnchorRow, options.AnchorColumn);
+                    try
+                    {
+                        application = worksheet.Application;
+                        previousScreenUpdating = application.ScreenUpdating;
+                        restoreScreenUpdating = true;
+                        application.ScreenUpdating = false;
+                    }
+                    catch (COMException)
+                    {
+                        // 关不掉重画时仍继续写入。能改的话，finally 会写回原值。
+                    }
+                    catch (InvalidComObjectException)
+                    {
+                    }
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 int columnCount = result.Columns.Count;
                 ClearBeforeWrite(worksheet, options, columnCount);
@@ -145,7 +168,52 @@ namespace DB2Sheet.Excel
             }
             finally
             {
+                RestoreScreenUpdating(application, restoreScreenUpdating, previousScreenUpdating);
                 Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        /// <summary>激活目标表，并把锚点滚到当前窗口视口的左上角。</summary>
+        /// <remarks>不选择单元格，也不调用 Goto。隐藏表或没有窗口时吞掉 COM 异常，调用方继续写入。</remarks>
+        private static void RevealTarget(ExcelInterop.Worksheet worksheet, int anchorRow, int anchorColumn)
+        {
+            ExcelInterop.Window window = null;
+            try
+            {
+                worksheet.Activate();
+                window = worksheet.Application.ActiveWindow;
+                if (window == null) return;
+                window.ScrollRow = anchorRow;
+                window.ScrollColumn = anchorColumn;
+            }
+            catch (COMException)
+            {
+                // 隐藏表或没有窗口时继续写入。
+            }
+            catch (InvalidComObjectException)
+            {
+            }
+            finally
+            {
+                if (window != null) Marshal.FinalReleaseComObject(window);
+            }
+        }
+
+        /// <summary>把 Excel 重画恢复成进入写入前的值。</summary>
+        /// <remarks>不释放 Application。恢复失败时吞掉，避免盖住原来的写入异常。</remarks>
+        private static void RestoreScreenUpdating(ExcelInterop.Application application, bool restore, bool previous)
+        {
+            if (!restore || application == null) return;
+            try
+            {
+                application.ScreenUpdating = previous;
+            }
+            catch (COMException)
+            {
+                // 恢复失败不能盖住原来的写入异常。
+            }
+            catch (InvalidComObjectException)
+            {
             }
         }
 

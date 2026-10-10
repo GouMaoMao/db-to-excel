@@ -55,7 +55,8 @@ namespace DB2Sheet.UI
         private TaskRow _contextRow;
         private bool _applyingSplit;
         private bool _userDraggingSplit;
-        private bool _suppressActivate;
+        /// <summary>激活后重扫的抑制层数。对话框和批量写入可以嵌套，减到 0 才允许重扫。</summary>
+        private int _activateSuppressDepth;
         private bool _scanning;
         private bool _binding;
 
@@ -255,7 +256,7 @@ namespace DB2Sheet.UI
                 _skipActivateScan = false;
                 return;
             }
-            if (_suppressActivate || _scanning || IsDisposed) return;
+            if (_activateSuppressDepth > 0 || _scanning || IsDisposed) return;
             if (_tasks.IsCurrentCellInEditMode) return;
             UpdateModeLabel();
             ScanTasks();
@@ -330,29 +331,41 @@ namespace DB2Sheet.UI
         /// <summary>弹出错误详情时先挡住激活事件，避免对话框关闭后立刻重扫并打断当前编辑。</summary>
         private void ShowOwnedError(Exception exception)
         {
-            _suppressActivate = true;
+            PushActivateSuppress();
             try
             {
                 ExceptionDetailForm.Show(this, exception);
             }
             finally
             {
-                _suppressActivate = false;
+                PopActivateSuppress();
             }
+        }
+
+        /// <summary>增加一层激活重扫抑制。与 <see cref="PopActivateSuppress"/> 成对使用。</summary>
+        private void PushActivateSuppress()
+        {
+            _activateSuppressDepth++;
+        }
+
+        /// <summary>去掉一层激活重扫抑制。层数已经为 0 时不再减少。</summary>
+        private void PopActivateSuppress()
+        {
+            if (_activateSuppressDepth > 0) _activateSuppressDepth--;
         }
 
         private void ShowDuplicateWarning()
         {
             string message = SqlSheetHeader.DescribeDuplicateTargets(_rows.Select(item => item.Task).ToList());
             if (string.IsNullOrEmpty(message)) return;
-            _suppressActivate = true;
+            PushActivateSuppress();
             try
             {
                 MessageBox.Show(this, message, "批量刷新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally
             {
-                _suppressActivate = false;
+                PopActivateSuppress();
             }
         }
 
@@ -549,6 +562,8 @@ namespace DB2Sheet.UI
 
             if (!ConfirmRefresh(executable.Count, selected.Count - executable.Count)) return;
 
+            // 写入会激活目标表。抑制到结果和结束说明都结束，避免内层对话框提前放开重扫。
+            PushActivateSuppress();
             try
             {
                 BatchRefreshResult result = _operationRunner.Run(
@@ -578,6 +593,10 @@ namespace DB2Sheet.UI
                 _status.Text = exception.Message;
                 ShowOwnedError(exception);
             }
+            finally
+            {
+                PopActivateSuppress();
+            }
         }
 
         /// <summary>执行前让用户确认。取消则不开始刷新。</summary>
@@ -590,7 +609,7 @@ namespace DB2Sheet.UI
             if (skippedCount > 0)
                 message += Environment.NewLine + "另有 " + skippedCount.ToString() + " 个参数有误，将跳过。";
 
-            _suppressActivate = true;
+            PushActivateSuppress();
             try
             {
                 return MessageBox.Show(
@@ -602,7 +621,7 @@ namespace DB2Sheet.UI
             }
             finally
             {
-                _suppressActivate = false;
+                PopActivateSuppress();
             }
         }
 
@@ -671,14 +690,14 @@ namespace DB2Sheet.UI
                 text.Append(item.Message);
             }
 
-            _suppressActivate = true;
+            PushActivateSuppress();
             try
             {
                 TextPromptDialog.ShowText(this, "批量刷新", text.ToString());
             }
             finally
             {
-                _suppressActivate = false;
+                PopActivateSuppress();
             }
         }
 
@@ -977,7 +996,7 @@ namespace DB2Sheet.UI
             try
             {
                 if (_taskReader.TryActivateWorksheet(_workbook, row.Task.TargetSheetName)) return;
-                _suppressActivate = true;
+                PushActivateSuppress();
                 try
                 {
                     MessageBox.Show(
@@ -989,7 +1008,7 @@ namespace DB2Sheet.UI
                 }
                 finally
                 {
-                    _suppressActivate = false;
+                    PopActivateSuppress();
                 }
             }
             catch (Exception exception)

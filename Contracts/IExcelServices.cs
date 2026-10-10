@@ -68,7 +68,7 @@ namespace DB2Sheet.Contracts
         /// <param name="workbook">目标工作簿。</param>
         /// <param name="targetSheetName">目标工作表名称。</param>
         /// <param name="result">已在内存中缓冲的查询结果。</param>
-        /// <param name="options">锚点与清空范围。整表清空时从 A1 开始。</param>
+        /// <param name="options">锚点、清空范围，以及是否露出目标表。整表清空时从 A1 开始，且不跳表。</param>
         /// <param name="progress">可选的进度接收器。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <param name="operationId">与同一次查询读取日志关联的操作标识。</param>
