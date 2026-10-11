@@ -1,4 +1,4 @@
-# db-to-excel
+![db-to-excel 首页图](docs/images/banner.png)
 
 数分和报表岗日常最枯燥的重复劳动：打开 DBeaver/Navicat → 跑 SQL → 导出结果 → 复制粘贴进 Excel，当Excel底稿涉及多个 Sheet更新时，搬运数据的耗时尤其巨大。
 
@@ -17,7 +17,7 @@ flowchart LR
 
 
 批量更新Sheet演示：
-![批量刷新](docs/批量刷新.gif)
+![批量刷新](docs/images/批量刷新.gif)
 
 # 如何使用
 
@@ -37,7 +37,7 @@ flowchart LR
 - 根据选中的数据源类型，依次填写服务地址、数据库（或文件路径）、账号密码等连接信息。
 - 点击「测试连接」验证连通性；测试成功后，填写显示名称（自定义备注，方便后续识别）。
 - 测试通过后点「保存」。
-![新建连接](docs/新建连接_holo.png)
+![新建连接](docs/images/新建连接_holo.png)
 
 
 
@@ -52,21 +52,21 @@ flowchart LR
   - 从第 2 行开始，编写完整 SQL 查询语句，一列对应一个独立查询。
 
 > 效果：每一列的 SQL 执行完成后，查询结果自动写入对应Sheet。
-> ![SQL页](docs/SQL页.png)
+> ![SQL页](docs/images/SQL页.png)
 
 
 
 ### 3.2、 刷新步骤
 
 打开功能区「批量刷新」，在左边设置刚保存的连接为当前连接，勾上要更新的列，点窗口里的「批量刷新」。
-![SQL页](docs/批量刷新_6.gif)
+![SQL页](docs/images/批量刷新_6.gif)
 
 ## 4、单次查询
 
 - 点击顶部功能区「SQL 查询」，打开查询面板。
 - 输入 SQL 查询语句，支持先预览结果，确认无误后写入指定工作表。
   > 查询方案可保存复用
-  > ![SQL 查询](docs/SQL查询.gif)
+  > ![SQL 查询](docs/images/SQL查询.gif)
 
 
 
