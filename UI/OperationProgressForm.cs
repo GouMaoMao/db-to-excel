@@ -12,7 +12,7 @@ namespace DB2Sheet.UI
     /// 更新方法可从后台线程调用，内部会自动切换到 UI 线程。
     /// 日志列表按构造时传入的最低级别过滤。先按快照改条和标题，再写日志；写完日志就不再改界面，避免日志重入把旧快照画回去。
     /// 批量刷新的读取条只按已结束个数占总数绘制，分母取第一次出现双条时的总数。个数达到总数后读取条钉住，后到的读取快照只进日志。
-    /// 写入条的序号和填充来自同一次快照，序号只向前。读取个数在阻塞写入之前已经画出。单次查询仍只有一条。两条都只向前，填充色都用系统高亮色。
+    /// 写入条的序号和填充来自同一次快照，序号只向前，改完后立即重画，不等 Excel 重画恢复。读取个数在阻塞写入之前已经画出。单次查询仍只有一条。两条都只向前，填充色都用系统高亮色。
     /// 长报错在详情区和日志里按窗体宽度换行，不能把列撑出客户区，以免挡住取消和关闭。
     /// </remarks>
     public sealed class OperationProgressForm : AppForm
@@ -360,6 +360,7 @@ namespace DB2Sheet.UI
         /// <param name="taskCount">从 1 开始的写入序号。</param>
         /// <param name="percent">0 到 100 的写入百分比。</param>
         /// <returns>这次快照推进了序号或填充时为 true。</returns>
+        /// <remarks>改完后立即重画，不等界面线程从关闭了 Excel 重画的写入里返回。必须在写日志之前调用。</remarks>
         private bool PaintWriteMeter(int taskCount, int percent)
         {
             int total = _readTotal;
@@ -373,6 +374,8 @@ namespace DB2Sheet.UI
 
             _writeCountShown = taskCount;
             _writeCaption.Text = string.Format("写入 {0}/{1}", taskCount, total);
+            if (_writeCaption.IsHandleCreated) _writeCaption.Update();
+            if (_writeBar.IsHandleCreated) _writeBar.Update();
             return true;
         }
 
