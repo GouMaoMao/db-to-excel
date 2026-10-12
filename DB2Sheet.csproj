@@ -275,6 +275,9 @@
     <Compile Include="UI\ExceptionDetailForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UI\RefreshSummaryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="UI\SheetRefreshForm.cs">
       <SubType>Form</SubType>
     </Compile>

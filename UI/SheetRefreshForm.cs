@@ -690,41 +690,56 @@ namespace DB2Sheet.UI
             ShowRefreshSummary(result, succeeded, failed, truncated);
         }
 
-        /// <summary>刷新正常结束后列出失败和截断，并用文字说明目标表标题行底色。取消或异常不走这里。</summary>
+        /// <summary>刷新正常结束后列出失败和截断，图例单独说明目标表标题行底色。取消或异常不走这里。</summary>
         private void ShowRefreshSummary(BatchRefreshResult result, int succeeded, int failed, int truncated)
         {
-            StringBuilder text = new StringBuilder();
-            text.AppendFormat("刷新完成：成功 {0}，失败 {1}，截断 {2}。", succeeded, failed, truncated);
-            text.AppendLine();
-            text.AppendLine();
-            text.Append("目标表标题行：深绿色表示本次写入成功，结果完整；橙色表示写入成功，但结果达到「最大导出行数」后被截断。");
-            foreach (RefreshTaskResult item in result.Tasks)
-            {
-                if (item.Succeeded || item.Skipped) continue;
-                text.AppendLine();
-                text.Append("失败  ");
-                text.Append(item.Task.TargetSheetName);
-                text.Append("：");
-                text.Append(item.Message);
-            }
-            foreach (RefreshTaskResult item in result.Tasks)
-            {
-                if (!item.Succeeded || !item.IsTruncated) continue;
-                text.AppendLine();
-                text.Append("截断  ");
-                text.Append(item.Task.TargetSheetName);
-                text.Append("：");
-                text.Append(item.Message);
-            }
+            string summary = string.Format("刷新完成：成功 {0}，失败 {1}，截断 {2}。", succeeded, failed, truncated);
+            StringBuilder details = new StringBuilder();
+            AppendDetailSection(details, "失败", result.Tasks, item => !item.Succeeded && !item.Skipped);
+            AppendDetailSection(details, "截断", result.Tasks, item => item.Succeeded && item.IsTruncated);
 
             PushActivateSuppress();
             try
             {
-                TextPromptDialog.ShowText(this, "批量刷新", text.ToString());
+                RefreshSummaryForm.Show(this, summary, details.ToString());
             }
             finally
             {
                 PopActivateSuppress();
+            }
+        }
+
+        /// <summary>把一类结果写成一段：标题单独一行，下面每行是目标表和说明。没有条目时不写。</summary>
+        /// <param name="details">正在组装的明细。</param>
+        /// <param name="heading">段标题，例如「失败」或「截断」。</param>
+        /// <param name="tasks">本次刷新的全部任务结果。</param>
+        /// <param name="include">为 true 时该任务写入这一段。</param>
+        private static void AppendDetailSection(
+            StringBuilder details,
+            string heading,
+            IReadOnlyList<RefreshTaskResult> tasks,
+            Func<RefreshTaskResult, bool> include)
+        {
+            bool started = false;
+            foreach (RefreshTaskResult item in tasks)
+            {
+                if (!include(item)) continue;
+                if (!started)
+                {
+                    if (details.Length > 0)
+                    {
+                        details.AppendLine();
+                        details.AppendLine();
+                    }
+
+                    details.Append(heading);
+                    started = true;
+                }
+
+                details.AppendLine();
+                details.Append(item.Task.TargetSheetName);
+                details.Append("：");
+                details.Append(item.Message);
             }
         }
 
