@@ -554,13 +554,19 @@ namespace DB2Sheet.UI
                 .Where(item => string.IsNullOrEmpty(item.Task.OptionsError))
                 .Select(item => item.Task)
                 .ToList();
+            string optionErrors = DescribeOptionErrors(selected);
             if (executable.Count == 0)
             {
-                MessageBox.Show(this, "没有可执行的刷新任务。", "批量刷新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(
+                    this,
+                    "已勾选的任务参数有误，不能刷新。" + Environment.NewLine + Environment.NewLine + optionErrors,
+                    "批量刷新",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return;
             }
 
-            if (!ConfirmRefresh(executable.Count, selected.Count - executable.Count)) return;
+            if (!ConfirmRefresh(executable.Count, optionErrors)) return;
 
             // 写入会激活目标表。抑制到结果和结束说明都结束，避免内层对话框提前放开重扫。
             PushActivateSuppress();
@@ -599,15 +605,36 @@ namespace DB2Sheet.UI
             }
         }
 
+        /// <summary>列出已勾选且参数有误的任务。没有这类任务时为空。</summary>
+        /// <param name="selected">当前勾选的任务行。</param>
+        /// <returns>每个错误一行。句式与重名提示一致。没有错误时为空。</returns>
+        private static string DescribeOptionErrors(IReadOnlyList<TaskRow> selected)
+        {
+            StringBuilder message = new StringBuilder();
+            foreach (TaskRow row in selected)
+            {
+                string error = row.Task.OptionsError;
+                if (string.IsNullOrEmpty(error)) continue;
+                if (message.Length > 0) message.AppendLine();
+                message.Append("目标表“");
+                message.Append(row.Task.TargetSheetName);
+                message.Append("”：");
+                message.Append(error);
+                if (!error.EndsWith("。", StringComparison.Ordinal)) message.Append("。");
+            }
+
+            return message.ToString();
+        }
+
         /// <summary>执行前让用户确认。取消则不开始刷新。</summary>
         /// <param name="executableCount">参数有效、实际会执行的任务数。</param>
-        /// <param name="skippedCount">已勾选但参数有误、将跳过的任务数。</param>
+        /// <param name="optionErrors">已勾选但参数有误、将跳过的说明。没有时为空。</param>
         /// <returns>用户选择「是」时为 true。</returns>
-        private bool ConfirmRefresh(int executableCount, int skippedCount)
+        private bool ConfirmRefresh(int executableCount, string optionErrors)
         {
             string message = "确定刷新已勾选的 " + executableCount.ToString() + " 个任务吗？";
-            if (skippedCount > 0)
-                message += Environment.NewLine + "另有 " + skippedCount.ToString() + " 个参数有误，将跳过。";
+            if (!string.IsNullOrEmpty(optionErrors))
+                message += Environment.NewLine + optionErrors;
 
             PushActivateSuppress();
             try
