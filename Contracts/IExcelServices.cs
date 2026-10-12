@@ -47,7 +47,7 @@ namespace DB2Sheet.Contracts
     /// <summary>将已缓冲的查询结果写入 Excel 工作表。</summary>
     public interface IExcelResultWriter
     {
-        /// <summary>创建或清空目标工作表，并批量写入列名和数据。</summary>
+        /// <summary>创建或覆盖目标工作表，并批量写入列名和数据。</summary>
         /// <param name="workbook">目标工作簿。</param>
         /// <param name="targetSheetName">目标工作表名称。</param>
         /// <param name="result">已在内存中缓冲的查询结果。</param>
@@ -55,7 +55,7 @@ namespace DB2Sheet.Contracts
         /// <param name="cancellationToken">取消令牌。</param>
         /// <param name="operationId">与同一次查询读取日志关联的操作标识。</param>
         /// <returns>实际写入的数据行数，不包含标题行。</returns>
-        /// <remarks>从 A1 写入，并在写入前清空目标表整个已用区域。应在 Excel UI 线程调用。</remarks>
+        /// <remarks>从 A1 写入，并在写入前只清空目标表整个已用区域的值。原先单元格上的数值格式、字体、对齐和填充保留。应在 Excel UI 线程调用。</remarks>
         long WriteResult(
             ExcelInterop.Workbook workbook,
             string targetSheetName,
@@ -73,7 +73,7 @@ namespace DB2Sheet.Contracts
         /// <param name="cancellationToken">取消令牌。</param>
         /// <param name="operationId">与同一次查询读取日志关联的操作标识。</param>
         /// <returns>实际写入的数据行数，不包含标题行。</returns>
-        /// <remarks>应在 Excel UI 线程调用。完成或失败时写入一条文件汇总，不记录单元格内容。</remarks>
+        /// <remarks>只清除选项所指区域的值，保留数值格式、字体、对齐和填充；多出来的行不继承这些格式。应在 Excel UI 线程调用。完成或失败时写入一条文件汇总，不记录单元格内容。</remarks>
         long WriteResult(
             ExcelInterop.Workbook workbook,
             string targetSheetName,

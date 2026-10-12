@@ -12,10 +12,10 @@ namespace DB2Sheet.Excel
 {
     /// <summary>使用 Excel COM Interop 将缓冲查询结果批量写入指定工作表。</summary>
     /// <remarks>
-    /// 交互式写入会清空目标工作表已用区域的内容和格式，并从 A1 开始。
-    /// 批量刷新按起始单元格锚定：结果所占列从锚点清到原数据末行，右侧多余列仅在参数要求时清空。
-    /// 标题只占一行字段编码，编码行加粗。成功时标题底为深绿，结果被截断时为橙色，与批量刷新状态圆点相同。数据从标题的下一行开始。
-    /// 标题和数据组成的表格使用灰色细网格线。
+    /// 交互式写入只清空目标工作表已用区域的值，并从 A1 开始。原先单元格上的数值格式、字体、对齐和填充保留；本次多出来的行不继承这些格式。
+    /// 批量刷新按起始单元格锚定：结果所占列从锚点清掉值到原数据末行，右侧多余列仅在参数要求时清空值。
+    /// 清空范围内的边框会去掉，避免结果变短后留下空网格。写完后只在标题和数据组成的区域重新画灰色细网格线。
+    /// 标题只占一行字段编码，编码行加粗，底色表示成功或截断。这一步只改标题行的加粗和底色。成功时标题底为深绿，结果被截断时为橙色，与批量刷新状态圆点相同。数据从标题的下一行开始。
     /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
     /// 批量刷新会在写入前激活目标表并滚到锚点，写入期间关闭 Excel 重画，结束时恢复。交互式写入不跳表，也不改重画。
     /// 文件日志只在写入完成或失败时各记一条汇总。
@@ -278,7 +278,8 @@ namespace DB2Sheet.Excel
             return created;
         }
 
-        /// <summary>按选项清空写入区域。整表模式清已用区域；锚定模式只清锚点向下的结果列，并按参数决定是否清右侧原数据列。</summary>
+        /// <summary>按选项清空写入区域的值，并去掉该区域边框。整表模式处理已用区域；锚定模式只处理锚点向下的结果列，并按参数决定是否处理右侧原数据列。</summary>
+        /// <remarks>数值格式、字体、对齐和填充留在原单元格上。边框先整块去掉，调用方写完后再只给新的标题和数据区域画回灰色网格。</remarks>
         private static void ClearBeforeWrite(ExcelInterop.Worksheet worksheet, SheetWriteOptions options, int columnCount)
         {
             ExcelInterop.Range usedRange = null;
@@ -287,7 +288,7 @@ namespace DB2Sheet.Excel
                 usedRange = worksheet.UsedRange;
                 if (options.ClearEntireUsedRange)
                 {
-                    usedRange.Clear();
+                    ClearValuesAndBorders(usedRange);
                     return;
                 }
 
@@ -333,7 +334,8 @@ namespace DB2Sheet.Excel
             }
         }
 
-        /// <summary>清空一个矩形的内容和格式。不触及矩形以外的单元格。</summary>
+        /// <summary>清空一个矩形的值并去掉边框。不触及矩形以外的单元格。</summary>
+        /// <remarks>保留矩形内原有的数值格式、字体、对齐和填充。</remarks>
         private static void ClearRectangle(ExcelInterop.Worksheet worksheet, int startRow, int startColumn, int endRow, int endColumn)
         {
             if (endRow < startRow || endColumn < startColumn) return;
@@ -345,7 +347,7 @@ namespace DB2Sheet.Excel
                 start = worksheet.Cells[startRow, startColumn] as ExcelInterop.Range;
                 end = worksheet.Cells[endRow, endColumn] as ExcelInterop.Range;
                 range = worksheet.Range[start, end];
-                range.Clear();
+                ClearValuesAndBorders(range);
             }
             finally
             {
@@ -355,8 +357,26 @@ namespace DB2Sheet.Excel
             }
         }
 
+        /// <summary>只清除区域内的值，并去掉边框。不改数值格式、字体、对齐和填充。</summary>
+        /// <param name="range">要处理的区域。调用方负责释放。</param>
+        private static void ClearValuesAndBorders(ExcelInterop.Range range)
+        {
+            ExcelInterop.Borders borders = null;
+            try
+            {
+                range.ClearContents();
+                borders = range.Borders;
+                borders.LineStyle = ExcelInterop.XlLineStyle.xlLineStyleNone;
+            }
+            finally
+            {
+                Release(ref borders);
+            }
+        }
+
         /// <summary>写入一行字段编码标题。编码加粗，底色表示成功或截断。数据从下一行开始。</summary>
         /// <param name="headerColor">标题行底色。成功为深绿，截断为橙色。</param>
+        /// <remarks>只改标题行的加粗和底色。该行原有的数值格式、字体名称和对齐保留。</remarks>
         private static void WriteHeaders(
             ExcelInterop.Worksheet worksheet,
             BufferedQueryResult result,

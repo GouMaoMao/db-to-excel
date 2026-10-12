@@ -40,7 +40,7 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 - `QueryEditorForm`：SQL 编辑、方案复用、结果预览、写入目标 Sheet。
 - `SheetRefreshForm`：扫描 SQL Sheet、展示任务、统一连接选择、批量刷新。
 - SQL 页协议的实现见 `Excel/SqlSheetTaskParser` 与 `Excel/SqlSheetHeader`。细则见 `.github/copilot-instructions.md`。
-- Excel 写入：交互查询清空目标表已用区域并从 A1 写；批量刷新按起始单元格锚定，多余列仅在参数要求时清空。
+- Excel 写入：交互查询只清空目标表已用区域的值并从 A1 写；批量刷新按起始单元格锚定，多余列仅在参数要求时清空值。原先单元格上的数值格式、字体、对齐和填充保留，多出来的行不继承。
 - 批量串行或受限并行数据库读取；Excel COM 写入保持串行。
 - 目标表名忽略大小写后重复时，整批失败，不写入任何表。单个任务失败不终止其余任务。
 - `ThisAddIn` 在启动时组装服务。功能区在 Excel 请求 Ribbon 时创建，业务窗体在用户点击时创建。

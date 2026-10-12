@@ -90,8 +90,8 @@ namespace DB2Sheet.Models
 
     /// <summary>描述一次查询结果写入工作表时的锚点、清空范围，以及是否露出目标表。</summary>
     /// <remarks>
-    /// 交互式写入使用整表已用区域清空，并从 A1 开始，不跳表，也不改 Excel 重画。
-    /// 批量刷新按起始单元格锚定，只清结果所占列；是否再清右侧原数据列由任务参数决定。
+    /// 交互式写入只清空整表已用区域的值，并从 A1 开始，不跳表，也不改 Excel 重画。数值格式、字体、对齐和填充保留。
+    /// 批量刷新按起始单元格锚定，只清结果所占列的值；是否再清右侧原数据列由任务参数决定。
     /// 批量刷新在写入前激活目标表并滚到锚点，写入期间关闭重画，写完恢复。
     /// </remarks>
     public sealed class SheetWriteOptions
@@ -105,7 +105,7 @@ namespace DB2Sheet.Models
             RevealTarget = revealTarget;
         }
 
-        /// <summary>创建从 A1 写入并清空整个已用区域的选项。</summary>
+        /// <summary>创建从 A1 写入并只清空整个已用区域的值的选项。</summary>
         /// <returns>交互式写入使用的选项。不激活目标表，也不改 Excel 重画。</returns>
         public static SheetWriteOptions EntireUsedRange()
         {
@@ -128,7 +128,7 @@ namespace DB2Sheet.Models
         public int AnchorRow { get; }
         /// <summary>获取结果表左上角列号。</summary>
         public int AnchorColumn { get; }
-        /// <summary>获取是否在写入前清空目标表整个已用区域。</summary>
+        /// <summary>获取是否在写入前只清空目标表整个已用区域的值。</summary>
         public bool ClearEntireUsedRange { get; }
         /// <summary>获取是否清空结果列右侧的原数据列。整表清空时忽略此项。</summary>
         public bool ClearExtraColumns { get; }
