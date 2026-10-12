@@ -14,7 +14,7 @@
 
 1. 填写连接参数：
 
-- **JDBC URL**。`jdbc:odps:http://service.cn-beijing.maxcompute.aliyun.com/api?project=financial_dept&interactiveMode=true`
+- **JDBC URL**。示例：`jdbc:odps:http://service.cn-beijing.maxcompute.aliyun.com/api?project=financial_dept&interactiveMode=true`
 
 
 | 参数                 | 是否必填 | 说明                           |
