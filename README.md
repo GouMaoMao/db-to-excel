@@ -2,7 +2,7 @@
 
 数分和报表岗日常最枯燥的重复劳动：打开 DBeaver/Navicat → 跑 SQL → 导出结果 → 复制粘贴进 Excel，当Excel底稿涉及多个 Sheet更新时，搬运数据的耗时尤其巨大。
 
-db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直接执行 SQL，把数据库查询结果写入工作表。插件只负责【数据库到工作表的数据同步】，保留原有的 Excel 生态：公式、透视表、图表、看板不用重构。定期报表更新不再依靠手工搬运数据。
+db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直接执行 SQL，把数据库查询结果写入工作表。插件只负责【数据库到工作表的数据同步】，保留原有的 Excel 生态：公式、透视表、图表、看板不需重构。定期报表更新不再依靠手工搬运数据。
 
 ```mermaid
 flowchart LR
@@ -21,6 +21,8 @@ flowchart LR
 
 # 如何使用
 
+
+
 ## 1、安装
 
 从Releases下载 `db-to-excel.exe`，并运行这个安装包。点开Excel或WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
@@ -33,7 +35,7 @@ flowchart LR
 
 - 打开 Excel 或 WPS 表格，顶部菜单—>「SQL查询」—>「连接管理」—>「新建」
 - 选择数据源类型。
-  > 内置支持 SQL Server、MySQL、PostgreSQL、SQLite、DuckDB。 也可选用 JDBC 通用连接，需本机装Java环境，并准备对应数据库的 `.jar` 驱动文件。
+  > 内置支持 SQL Server、MySQL、PostgreSQL、SQLite、DuckDB。 也可选用 JDBC 通用连接，需本机装Java环境，并准备对应数据库的 `.jar` 驱动文件。针对阿里云MaxCompute数仓，使用JDBC连接，详见：[阿里云 MaxCompute JDBC 连接配置](docs/JDBC_MAXCOMPUTE.md)
 - 根据选中的数据源类型，依次填写服务地址、数据库（或文件路径）、账号密码等连接信息。
 - 点击「测试连接」验证连通性；测试成功后，填写显示名称（自定义备注，方便后续识别）。
 - 测试通过后点「保存」。
@@ -75,5 +77,5 @@ flowchart LR
 - 运行环境：Windows 环境，依赖 .NET Framework 4.7.2
 - 架构说明：详见文档 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 数据库连接配置、查询方案、运行日志均保存在本机目录： `%LocalAppData%\DB2Sheet`。
- >说明：该目录仅存放本地配置与日志，不会上传数据库账号、查询数据至外部服务器。
+  > 说明：该目录仅存放本地配置与日志，不会上传数据库账号、查询数据至外部服务器。
 
