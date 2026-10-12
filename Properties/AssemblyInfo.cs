@@ -26,6 +26,6 @@ using System.Security;
 
 // 产品版本用三段：主版本.次版本.修订号。Ribbon「关于」读取 AssemblyFileVersion。
 // AssemblyVersion 由 CLR 补成四段，源码不要再写第四段。
-[assembly: AssemblyVersion("1.0.2")]
-[assembly: AssemblyFileVersion("1.0.2")]
+[assembly: AssemblyVersion("1.0.3")]
+[assembly: AssemblyFileVersion("1.0.3")]
 
