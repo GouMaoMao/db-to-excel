@@ -60,6 +60,10 @@ show_api_error() {
   jq -r '.message // .' "$tmp" 2>/dev/null || true
 }
 
+read_release_id() {
+  jq -r 'if type == "object" and (.id | type == "number") then .id else "" end' "$1"
+}
+
 require_release_id() {
   local release_id="$1"
   local tmp="$2"
@@ -103,15 +107,15 @@ sync_release() {
   if [[ -z "$title" || "$title" == "null" ]]; then
     title="$tag"
   fi
-  if [[ "$notes" == "null" ]]; then
-    notes=""
+  if [[ -z "${notes//[[:space:]]/}" || "$notes" == "null" ]]; then
+    notes="$title"
   fi
 
   code="$(gitee_request GET "${API}/releases/tags/${tag}" "$tmp" \
     --data-urlencode "access_token=${GITEE_TOKEN}")"
-  if [[ "$code" == "200" ]]; then
-    release_id="$(jq -r '.id' "$tmp")"
-    require_release_id "$release_id" "$tmp"
+  release_id="$(read_release_id "$tmp")"
+  # 没有发行版时 Gitee 返回 HTTP 200 和 JSON null，不返回 404。
+  if [[ "$release_id" =~ ^[0-9]+$ ]]; then
     delete_same_asset "$release_id" "$tmp"
     code="$(gitee_request PATCH "${API}/releases/${release_id}" "$tmp" \
       --data-urlencode "access_token=${GITEE_TOKEN}" \
@@ -125,7 +129,7 @@ sync_release() {
       show_api_error "$tmp"
       exit 1
     fi
-  elif [[ "$code" == "404" ]]; then
+  elif [[ "$code" == "200" || "$code" == "404" ]]; then
     release_id=""
     for attempt in 1 2 3; do
       code="$(gitee_request POST "${API}/releases" "$tmp" \
@@ -135,8 +139,8 @@ sync_release() {
         --data-urlencode "body=${notes}" \
         --data-urlencode "target_commitish=main" \
         --data-urlencode "prerelease=false")"
-      if [[ "$code" == "201" || "$code" == "200" ]]; then
-        release_id="$(jq -r '.id' "$tmp")"
+      release_id="$(read_release_id "$tmp")"
+      if [[ "$release_id" =~ ^[0-9]+$ ]]; then
         break
       fi
       if [[ "$attempt" -lt 3 ]]; then
