@@ -88,7 +88,7 @@ namespace DB2Sheet
             _operationRunner = new OperationRunner(_logger, _settings);
             _queryBuffer = new QueryBufferService(_executionService, _logger);
             _resultWriter = new ExcelResultWriter(_logger);
-            _taskReader = new SqlSheetTaskReader();
+            _taskReader = new SqlSheetTaskReader(_settings);
             _batchRefresh = new BatchRefreshService(_queryBuffer, _resultWriter, _logger);
         }
 
@@ -132,7 +132,8 @@ namespace DB2Sheet
                     }
                     _sheetRefreshForm = new SheetRefreshForm(
                         _connections, _providers, _executionService, _operationRunner, _settings,
-                        _taskReader, _batchRefresh, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
+                        _taskReader, _batchRefresh, workbook, _jdbcEnvironment, OpenJdbcEnvironment,
+                        OpenSqlSheetFormatSettings);
                     _sheetRefreshForm.FormClosed += (sender, args) => _sheetRefreshForm = null;
                     _sheetRefreshForm.Show();
                 }
@@ -171,9 +172,22 @@ namespace DB2Sheet
         /// <summary>以模态方式打开设置窗体。</summary>
         private void OpenSettings()
         {
+            ShowSettings(null);
+        }
+
+        /// <summary>以模态方式打开设置窗体，并停在 SQL 页格式。</summary>
+        private void OpenSqlSheetFormatSettings()
+        {
+            ShowSettings(CoreSettings.SqlSheetFormatCategory);
+        }
+
+        /// <summary>以模态方式打开设置窗体。</summary>
+        /// <param name="initialCategory">打开后选中的分类。为空时停在第一页。</param>
+        private void ShowSettings(string initialCategory)
+        {
             ExecuteUiAction(() =>
             {
-                using (SettingsForm form = new SettingsForm(_settingsRegistry, _settings))
+                using (SettingsForm form = new SettingsForm(_settingsRegistry, _settings, initialCategory))
                 {
                     form.ShowDialog();
                 }

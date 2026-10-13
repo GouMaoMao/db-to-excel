@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using DB2Sheet.Contracts;
 using DB2Sheet.Models;
+using DB2Sheet.Services;
 using ExcelInterop = Microsoft.Office.Interop.Excel;
 
 namespace DB2Sheet.Excel
@@ -15,6 +18,14 @@ namespace DB2Sheet.Excel
         public const string SqlSheetName = "SQL";
 
         private readonly SqlSheetTaskParser _parser = new SqlSheetTaskParser();
+        private readonly ISettingsStore _settings;
+
+        /// <summary>创建读取器，颜色从设置中读取。</summary>
+        /// <param name="settings">提供 SQL 页格式颜色。写入表名和美化都用调用当时的值。</param>
+        public SqlSheetTaskReader(ISettingsStore settings)
+        {
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        }
 
         /// <inheritdoc/>
         public bool Exists(ExcelInterop.Workbook workbook)
@@ -44,6 +55,7 @@ namespace DB2Sheet.Excel
                 cell = worksheet.Cells[1, sourceColumn] as ExcelInterop.Range;
                 if (cell == null) throw new InvalidOperationException("无法写入 SQL 页第 1 行。");
                 cell.Value2 = headerText ?? string.Empty;
+                SqlSheetFormatter.StyleHeader(cell, headerText ?? string.Empty, LoadPalette());
             }
             finally
             {
@@ -160,6 +172,54 @@ namespace DB2Sheet.Excel
                 if (usedRange != null) Marshal.FinalReleaseComObject(usedRange);
                 Marshal.FinalReleaseComObject(worksheet);
             }
+        }
+
+        /// <inheritdoc/>
+        public int CountStyleColumns(ExcelInterop.Workbook workbook)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            ExcelInterop.Worksheet worksheet = FindWorksheet(workbook, SqlSheetName);
+            if (worksheet == null)
+                throw new InvalidOperationException("当前工作簿中不存在名为“SQL”的工作表。");
+            try
+            {
+                return SqlSheetFormatter.CountColumns(worksheet);
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        /// <inheritdoc/>
+        public async Task<int> FormatSqlSheet(
+            ExcelInterop.Workbook workbook,
+            IProgress<OperationProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            ExcelInterop.Worksheet worksheet = FindWorksheet(workbook, SqlSheetName);
+            if (worksheet == null)
+                throw new InvalidOperationException("当前工作簿中不存在名为“SQL”的工作表。");
+            try
+            {
+                return await SqlSheetFormatter.FormatSheet(worksheet, LoadPalette(), progress, cancellationToken);
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        private SqlSheetPalette LoadPalette()
+        {
+            return new SqlSheetPalette(
+                _settings.Get(CoreSettings.SqlSheetHeaderColor),
+                _settings.Get(CoreSettings.SqlSheetCommentColor),
+                _settings.Get(CoreSettings.SqlSheetFormulaColor),
+                _settings.Get(CoreSettings.SqlSheetKeywordColor),
+                _settings.Get(CoreSettings.SqlSheetLiteralColor),
+                _settings.Get(CoreSettings.SqlSheetTabColor));
         }
 
         /// <summary>找到与目标表名相同的任务列；没有时用已用区域右侧的下一列。空表使用 A 列。</summary>

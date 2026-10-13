@@ -580,7 +580,10 @@ namespace DB2Sheet.UI
         }
 
         /// <summary>把当前 SQL 的结果写入用户确认的工作表。表已存在时先确认覆盖。</summary>
-        /// <remarks>勾选写入 SQL 时，结果写成功后才把 SQL 按列写入 SQL 页。取消或覆盖被拒绝时两者都不写。</remarks>
+        /// <remarks>
+        /// 勾选写入 SQL 时，结果写成功后才把 SQL 按列写入 SQL 页。取消或覆盖被拒绝时两者都不写。
+        /// 写入成功且「保存后美化」为开时，再走一遍美化进度窗。这次美化取消或失败不撤销已经写入的结果和 SQL。
+        /// </remarks>
         private void ExportQuery()
         {
             if (!ValidateInputs(out ConnectionProfileSnapshot connection)) return;
@@ -620,10 +623,40 @@ namespace DB2Sheet.UI
                 _status.Text = writeSql
                     ? string.Format("已向“{0}”写入 {1:N0} 行，并已把 SQL 写入工作表 SQL。", targetSheet, rows)
                     : string.Format("已向“{0}”写入 {1:N0} 行。", targetSheet, rows);
+                if (writeSql)
+                    BeautifySavedSql(targetSheet, rows);
             }
             catch (OperationCanceledException)
             {
                 _status.Text = "写入已取消。";
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception);
+            }
+        }
+
+        /// <summary>按「保存后美化」在写入成功后再美化整张 SQL 页。</summary>
+        /// <param name="targetSheet">刚写入的结果表名，只用于完成后的状态文字。</param>
+        /// <param name="rows">已写入的结果行数。</param>
+        /// <remarks>开关关闭、没有可美化的列、取消或失败时不把这次写入当成失败。取消和失败改写状态栏。</remarks>
+        private void BeautifySavedSql(string targetSheet, long rows)
+        {
+            if (!_settings.Get(CoreSettings.BeautifyAfterSave)) return;
+            try
+            {
+                int count = _taskReader.CountStyleColumns(_workbook);
+                if (count == 0) return;
+                _operationRunner.Run(
+                    this,
+                    "美化格式",
+                    true,
+                    (progress, token) => _taskReader.FormatSqlSheet(_workbook, progress, token));
+                _status.Text = string.Format("已向“{0}”写入 {1:N0} 行，并已美化 SQL 页。", targetSheet, rows);
+            }
+            catch (OperationCanceledException)
+            {
+                _status.Text = "SQL 已写入，美化已取消。";
             }
             catch (Exception exception)
             {

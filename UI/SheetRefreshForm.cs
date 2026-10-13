@@ -21,6 +21,7 @@ namespace DB2Sheet.UI
     /// 特殊参数按键分列，改完后写回 SQL 页首行，不改 SQL 正文。
     /// 点击摘要跳到 SQL 命令首行，点击目标表名打开该表。任务行右键可复制该行结果说明。
     /// 单击勾选框切换该行并记为连续勾选的起点。按住 Shift 点击时，把起点那次的勾选结果写到起点与该行之间，且不跳转。
+    /// 「格式」菜单美化 SQL 页，或打开参数设置的「sql页格式」。美化走进度窗，按列推进，可取消。
     /// 窗体尺寸沿用会话记忆；左右比例只在用户拖动分割条时写入。
     /// </remarks>
     public sealed class SheetRefreshForm : AppForm
@@ -52,6 +53,7 @@ namespace DB2Sheet.UI
         private readonly List<TaskRow> _rows = new List<TaskRow>();
         private readonly ContextMenuStrip _taskMenu;
         private readonly ToolStripMenuItem _copyResultItem;
+        private readonly Action _openSqlFormatSettings;
         private TaskRow _contextRow;
         private bool _applyingSplit;
         private bool _userDraggingSplit;
@@ -90,6 +92,7 @@ namespace DB2Sheet.UI
         /// <param name="workbook">当前操作的 Excel 工作簿。</param>
         /// <param name="jdbcEnvironment">本机 Java 路径，传给连接树里的编辑窗。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体；为空时连接编辑不显示该入口。</param>
+        /// <param name="openSqlFormatSettings">打开参数设置并停在「sql页格式」。为空时「格式设置」无动作。</param>
         public SheetRefreshForm(
             IConnectionProfileRepository connections,
             IProviderRegistry providers,
@@ -100,7 +103,8 @@ namespace DB2Sheet.UI
             IBatchRefreshService refreshService,
             ExcelInterop.Workbook workbook,
             IJdbcEnvironmentStore jdbcEnvironment,
-            Action openJdbcEnvironment = null)
+            Action openJdbcEnvironment = null,
+            Action openSqlFormatSettings = null)
         {
             if (executionService == null) throw new ArgumentNullException(nameof(executionService));
             if (jdbcEnvironment == null) throw new ArgumentNullException(nameof(jdbcEnvironment));
@@ -109,6 +113,7 @@ namespace DB2Sheet.UI
             _taskReader = taskReader ?? throw new ArgumentNullException(nameof(taskReader));
             _refreshService = refreshService ?? throw new ArgumentNullException(nameof(refreshService));
             _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
+            _openSqlFormatSettings = openSqlFormatSettings;
 
             Text = AppPresentation.WindowTitle("Sheet 批量刷新");
             Width = 1100;
@@ -214,6 +219,7 @@ namespace DB2Sheet.UI
             _workspace.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionTree));
             _workspace.Panel2.Controls.Add(SectionPanel("刷新任务", right));
             Controls.Add(_workspace);
+            Controls.Add(BuildFormatMenu());
 
             refreshButton.Click += (sender, args) => RefreshTasks();
             _connectionTree.NoticeChanged += (sender, args) => _status.Text = _connectionTree.Notice;
@@ -687,6 +693,9 @@ namespace DB2Sheet.UI
                 if (row != null) DecorateRow(gridRow, row);
             }
             _tasks.InvalidateColumn(_statusColumn);
+            if (_settings.Get(CoreSettings.BeautifyAfterRefresh))
+                BeautifySqlSheet();
+            _status.Text = _scanSummary;
             ShowRefreshSummary(result, succeeded, failed, truncated);
         }
 
@@ -1311,6 +1320,81 @@ namespace DB2Sheet.UI
             if (row.State == TaskVisualState.Success) return ExcelResultWriter.SuccessColor;
             if (row.State == TaskVisualState.Truncated) return ExcelResultWriter.TruncatedColor;
             return null;
+        }
+
+        /// <summary>格式菜单：美化整张 SQL 页，或打开参数设置里的格式页。</summary>
+        /// <returns>停靠在窗体顶部的菜单。调用方加入控件集合。</returns>
+        private MenuStrip BuildFormatMenu()
+        {
+            ToolStripMenuItem formatMenu = new ToolStripMenuItem("格式");
+            formatMenu.DropDownItems.Add(new ToolStripMenuItem("美化格式", null, (sender, args) => BeautifySqlSheet()));
+            formatMenu.DropDownItems.Add(new ToolStripMenuItem("格式设置", null, (sender, args) => OpenSqlFormatSettings()));
+
+            MenuStrip menu = new MenuStrip { Dock = DockStyle.Top };
+            menu.Items.Add(formatMenu);
+            MainMenuStrip = menu;
+            return menu;
+        }
+
+        /// <summary>打开参数设置并停在「sql页格式」。期间不因窗体重新激活而重扫任务。</summary>
+        private void OpenSqlFormatSettings()
+        {
+            if (_openSqlFormatSettings == null) return;
+            PushActivateSuppress();
+            try
+            {
+                _openSqlFormatSettings();
+            }
+            finally
+            {
+                PopActivateSuppress();
+            }
+        }
+
+        /// <summary>用进度窗美化当前工作簿的 SQL 页。没有可美化的列时不打开进度窗。</summary>
+        private void BeautifySqlSheet()
+        {
+            int count;
+            try
+            {
+                count = _taskReader.CountStyleColumns(_workbook);
+            }
+            catch (Exception exception)
+            {
+                _status.Text = exception.Message;
+                ShowOwnedError(exception);
+                return;
+            }
+
+            if (count == 0)
+            {
+                _status.Text = "没有可美化的列。";
+                return;
+            }
+
+            PushActivateSuppress();
+            try
+            {
+                int styled = _operationRunner.Run(
+                    this,
+                    "美化格式",
+                    true,
+                    (progress, token) => _taskReader.FormatSqlSheet(_workbook, progress, token));
+                _status.Text = string.Format("已美化 {0} 列。", styled);
+            }
+            catch (OperationCanceledException)
+            {
+                _status.Text = "美化已取消。";
+            }
+            catch (Exception exception)
+            {
+                _status.Text = exception.Message;
+                ShowOwnedError(exception);
+            }
+            finally
+            {
+                PopActivateSuppress();
+            }
         }
 
         private Button ButtonOf(string text, string iconFileName)

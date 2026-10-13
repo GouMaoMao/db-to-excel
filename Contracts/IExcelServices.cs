@@ -26,7 +26,7 @@ namespace DB2Sheet.Contracts
         /// <param name="workbook">包含 SQL 页的工作簿。</param>
         /// <param name="sourceColumn">任务所在列号，从 1 开始。</param>
         /// <param name="headerText">完整首行文本。没有参数时只有表名。</param>
-        /// <remarks>会修改 SQL 页第 1 行，不改 SQL 正文。应在 Excel UI 线程调用，并释放用到的 COM 引用。</remarks>
+        /// <remarks>会修改 SQL 页第 1 行，不改 SQL 正文。写完后只重套该格的表名色，不改工作表标签。应在 Excel UI 线程调用，并释放用到的 COM 引用。</remarks>
         void WriteColumnHeader(ExcelInterop.Workbook workbook, int sourceColumn, string headerText);
 
         /// <summary>激活 SQL 页并选中某一列的命令单元格。</summary>
@@ -51,9 +51,31 @@ namespace DB2Sheet.Contracts
         /// 没有名为 SQL 的工作表时创建，已有则使用那一张。第 1 行只写目标表名，第 2 行留空。
         /// 同一目标表更新原列并清掉该列旧内容；没有同名列时追加到已用区域右侧。
         /// 以 <c>--</c> 开头的行前面加一个空格，避免 Excel 把减号当成公式。
+        /// 不给这一列上色。整页美化由调用方按设置另走进度窗。
         /// 应在 Excel UI 线程调用，并释放用到的 COM 引用。
         /// </remarks>
         void WriteTaskColumn(ExcelInterop.Workbook workbook, string targetSheetName, string queryText);
+
+        /// <summary>统计 SQL 页里第 1 行有表名、可以美化的列数。</summary>
+        /// <param name="workbook">包含 SQL 页的工作簿。</param>
+        /// <returns>列数。没有表名时为 0。</returns>
+        /// <remarks>应在 Excel UI 线程调用。没有 SQL 工作表时抛出 <see cref="InvalidOperationException"/>。</remarks>
+        int CountStyleColumns(ExcelInterop.Workbook workbook);
+
+        /// <summary>按当前颜色设置美化 SQL 页里每一个有表名的列。</summary>
+        /// <param name="workbook">包含 SQL 页的工作簿。</param>
+        /// <param name="progress">单条进度。不使用读取个数和写入百分比。</param>
+        /// <param name="cancellationToken">每列开始前检查。当前列做完才停。</param>
+        /// <returns>已美化的列数。没有可美化的列时为 0，且不改工作表。</returns>
+        /// <remarks>
+        /// 应在 Excel UI 线程调用。期间关闭 Excel 重画，结束、取消或出错时恢复。
+        /// 先清空整张表的格式，再按列上色，然后冻结首行并设置标签颜色。不画边框，不改文字和列宽。
+        /// 取消抛出 <see cref="OperationCanceledException"/>，已完成的列保留。冻结失败不让这次美化失败。
+        /// </remarks>
+        Task<int> FormatSqlSheet(
+            ExcelInterop.Workbook workbook,
+            IProgress<OperationProgress> progress,
+            CancellationToken cancellationToken);
     }
 
     /// <summary>将已缓冲的查询结果写入 Excel 工作表。</summary>

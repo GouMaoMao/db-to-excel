@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using DB2Sheet.Contracts;
@@ -8,7 +9,10 @@ using DB2Sheet.Models;
 namespace DB2Sheet.Services
 {
     /// <summary>注册并按键名查找应用支持的设置定义。</summary>
-    /// <remarks>注册通常只发生在启动阶段；该类型本身不提供并发注册保护。</remarks>
+    /// <remarks>
+    /// 注册通常只发生在启动阶段；该类型本身不提供并发注册保护。
+    /// <see cref="GetAll"/> 先按分类，再按 <see cref="SettingDefinition.SortOrder"/>，序号相同再按显示名。
+    /// </remarks>
     public sealed class SettingsRegistry : ISettingsRegistry
     {
         private readonly Dictionary<string, SettingDefinition> _definitions =
@@ -19,6 +23,7 @@ namespace DB2Sheet.Services
         {
             return _definitions.Values
                 .OrderBy(definition => definition.Category)
+                .ThenBy(definition => definition.SortOrder)
                 .ThenBy(definition => definition.DisplayName)
                 .ToList()
                 .AsReadOnly();
@@ -63,6 +68,14 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.WorkspaceSplitRatio);
             registry.Register(CoreSettings.RefreshSplitRatio);
             registry.Register(CoreSettings.FormBounds);
+            registry.Register(CoreSettings.SqlSheetHeaderColor);
+            registry.Register(CoreSettings.SqlSheetCommentColor);
+            registry.Register(CoreSettings.SqlSheetFormulaColor);
+            registry.Register(CoreSettings.SqlSheetKeywordColor);
+            registry.Register(CoreSettings.SqlSheetLiteralColor);
+            registry.Register(CoreSettings.SqlSheetTabColor);
+            registry.Register(CoreSettings.BeautifyAfterSave);
+            registry.Register(CoreSettings.BeautifyAfterRefresh);
             return registry;
         }
     }
@@ -119,6 +132,91 @@ namespace DB2Sheet.Services
             new SettingDefinition<string>(
                 "session.formBounds", "窗体尺寸", "会话", string.Empty,
                 value => Tuple.Create(true, value ?? string.Empty));
+
+        /// <summary>参数设置里 SQL 页格式这一页的分类名。批量刷新的「格式设置」也用它选中这一页。</summary>
+        public const string SqlSheetFormatCategory = "sql页格式";
+
+        /// <summary>第 1 行目标表名的颜色。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> SqlSheetHeaderColor = ColorSetting(
+            "excel.sqlSheetHeaderColor", "表名颜色", SqlSheetPalette.Default.Header, 1);
+
+        /// <summary>注释颜色。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> SqlSheetCommentColor = ColorSetting(
+            "excel.sqlSheetCommentColor", "注释颜色", SqlSheetPalette.Default.Comment, 2);
+
+        /// <summary>公式字体颜色。底色由其淡化，不单独保存。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> SqlSheetFormulaColor = ColorSetting(
+            "excel.sqlSheetFormulaColor", "公式颜色", SqlSheetPalette.Default.Formula, 3);
+
+        /// <summary>SQL 关键字颜色。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> SqlSheetKeywordColor = ColorSetting(
+            "excel.sqlSheetKeywordColor", "关键字颜色", SqlSheetPalette.Default.Keyword, 4);
+
+        /// <summary>单引号文本颜色。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> SqlSheetLiteralColor = ColorSetting(
+            "excel.sqlSheetLiteralColor", "引号颜色", SqlSheetPalette.Default.Literal, 5);
+
+        /// <summary>SQL 工作表底部标签的颜色。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> SqlSheetTabColor = ColorSetting(
+            "excel.sqlSheetTabColor", "标签颜色", SqlSheetPalette.Default.Tab, 6);
+
+        /// <summary>查询把 SQL 保存进 Excel 之后是否自动美化整张 SQL 页。默认开启。</summary>
+        public static readonly SettingDefinition<bool> BeautifyAfterSave = Flag(
+            "excel.beautifyAfterSave", "保存后美化", true, 7);
+
+        /// <summary>批量刷新正常结束后是否自动美化整张 SQL 页。列多时较慢，默认关闭。</summary>
+        public static readonly SettingDefinition<bool> BeautifyAfterRefresh = Flag(
+            "batch.beautifyAfterRefresh", "刷新后美化", false, 8);
+
+        private static SettingDefinition<Color> ColorSetting(string key, string displayName, Color defaultColor, int sortOrder)
+        {
+            return new SettingDefinition<Color>(
+                key,
+                displayName,
+                SqlSheetFormatCategory,
+                defaultColor,
+                value =>
+                {
+                    if (!TryParseColor(value, out Color parsed))
+                        return Tuple.Create(false, defaultColor);
+                    return Tuple.Create(true, parsed);
+                },
+                sortOrder: sortOrder);
+        }
+
+        private static SettingDefinition<bool> Flag(string key, string displayName, bool defaultValue, int sortOrder)
+        {
+            return new SettingDefinition<bool>(
+                key,
+                displayName,
+                SqlSheetFormatCategory,
+                defaultValue,
+                value =>
+                {
+                    if (!bool.TryParse(value, out bool parsed))
+                        return Tuple.Create(false, defaultValue);
+                    return Tuple.Create(true, parsed);
+                },
+                sortOrder: sortOrder);
+        }
+
+        private static bool TryParseColor(string text, out Color color)
+        {
+            color = Color.Empty;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string[] channels = text.Split(',');
+            if (channels.Length != 3) return false;
+            if (!int.TryParse(channels[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int red)
+                || !int.TryParse(channels[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int green)
+                || !int.TryParse(channels[2].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int blue))
+            {
+                return false;
+            }
+
+            if (red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255) return false;
+            color = Color.FromArgb(red, green, blue);
+            return true;
+        }
 
         private static SettingDefinition<int> Integer(
             string key, string displayName, string category, int defaultValue, int minimum, int maximum)

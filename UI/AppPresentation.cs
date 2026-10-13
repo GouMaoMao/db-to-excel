@@ -22,6 +22,12 @@ namespace DB2Sheet.UI
         public const string CodeFontName = "Microsoft YaHei UI Light";
         public const float CodeFontSize = 9.5F;
 
+        /// <summary>SQL 工作表单元格使用的等宽字体。编辑器仍用 <see cref="CodeFontName"/>。</summary>
+        public const string SqlSheetFontName = "Consolas";
+
+        /// <summary>SQL 工作表单元格的字号。</summary>
+        public const float SqlSheetFontSize = 10F;
+
         /// <summary>连接编辑窗下拉的固定顺序。新建默认取第一项 SQL Server。</summary>
         public static readonly string[] ConnectionProviderOrder =
         {
@@ -245,6 +251,22 @@ namespace DB2Sheet.UI
                     return "从数据库读取结果时每次取回的行数。只影响读取节奏，不改变最终行数。";
                 case "logging.level":
                     return "进度窗口只显示不低于所选级别的日志。Debug 最详细，Error 只显示错误。写入文件的日志仍保留全部级别。";
+                case "excel.sqlSheetHeaderColor":
+                    return "第 1 行目标表名的字体颜色，并加粗显示。// 之后的参数保持灰色。";
+                case "excel.sqlSheetCommentColor":
+                    return "以 -- 或 /* */ 书写的注释文本。";
+                case "excel.sqlSheetFormulaColor":
+                    return "Excel 公式单元格的字体颜色。底色按该颜色向白色淡化。";
+                case "excel.sqlSheetKeywordColor":
+                    return "SELECT、FROM、WHERE 等 SQL 关键字。";
+                case "excel.sqlSheetLiteralColor":
+                    return "单引号字符串的字体颜色，包括两侧引号。双引号、反引号和方括号中的标识符保持黑色。";
+                case "excel.sqlSheetTabColor":
+                    return "SQL 工作表标签的颜色。";
+                case "excel.beautifyAfterSave":
+                    return "SQL 查询将语句保存到 Excel 后，自动美化整张 SQL 页。";
+                case "batch.beautifyAfterRefresh":
+                    return "批量刷新正常结束后，自动美化整张 SQL 页。列数较多时耗时较长，默认关闭。";
                 default:
                     return string.Empty;
             }

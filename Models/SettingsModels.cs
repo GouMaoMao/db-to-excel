@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Globalization;
 
 namespace DB2Sheet.Models
@@ -19,13 +20,16 @@ namespace DB2Sheet.Models
         /// <param name="category">设置界面分类。</param>
         /// <param name="scope">设置范围。</param>
         /// <param name="requiresRestart">更改后是否需要重启生效。</param>
-        protected SettingDefinition(string key, string displayName, string category, SettingScope scope, bool requiresRestart)
+        /// <param name="sortOrder">同一分类内的排列序号。0 表示仍按显示名排。</param>
+        protected SettingDefinition(
+            string key, string displayName, string category, SettingScope scope, bool requiresRestart, int sortOrder)
         {
             Key = key ?? throw new ArgumentNullException(nameof(key));
             DisplayName = displayName ?? throw new ArgumentNullException(nameof(displayName));
             Category = category ?? string.Empty;
             Scope = scope;
             RequiresRestart = requiresRestart;
+            SortOrder = sortOrder;
         }
 
         /// <summary>获取稳定键名。</summary>
@@ -38,6 +42,9 @@ namespace DB2Sheet.Models
         public SettingScope Scope { get; }
         /// <summary>获取更改后是否需要重启。</summary>
         public bool RequiresRestart { get; }
+
+        /// <summary>获取同一分类内的排列序号。小号在前；同为 0 时仍按显示名排。</summary>
+        public int SortOrder { get; }
         /// <summary>获取设置值的 CLR 类型。</summary>
         public abstract Type ValueType { get; }
         /// <summary>获取装箱后的默认值。</summary>
@@ -73,6 +80,7 @@ namespace DB2Sheet.Models
         /// <param name="validator">可选的业务校验函数。</param>
         /// <param name="scope">设置范围。</param>
         /// <param name="requiresRestart">更改后是否需要重启。</param>
+        /// <param name="sortOrder">同一分类内的排列序号。0 表示仍按显示名排。</param>
         public SettingDefinition(
             string key,
             string displayName,
@@ -81,8 +89,9 @@ namespace DB2Sheet.Models
             Func<string, Tuple<bool, T>> parser,
             Func<T, bool> validator = null,
             SettingScope scope = SettingScope.User,
-            bool requiresRestart = false)
-            : base(key, displayName, category, scope, requiresRestart)
+            bool requiresRestart = false,
+            int sortOrder = 0)
+            : base(key, displayName, category, scope, requiresRestart, sortOrder)
         {
             Default = defaultValue;
             _parser = parser ?? throw new ArgumentNullException(nameof(parser));
@@ -116,6 +125,11 @@ namespace DB2Sheet.Models
             if (!(value is T typed))
             {
                 throw new ArgumentException("设置值类型不匹配：" + Key, nameof(value));
+            }
+
+            if (typed is Color color)
+            {
+                return string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", color.R, color.G, color.B);
             }
 
             return Convert.ToString(typed, CultureInfo.InvariantCulture);
