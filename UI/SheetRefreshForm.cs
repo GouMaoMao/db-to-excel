@@ -704,8 +704,8 @@ namespace DB2Sheet.UI
         {
             string summary = string.Format("刷新完成：成功 {0}，失败 {1}，截断 {2}。", succeeded, failed, truncated);
             StringBuilder details = new StringBuilder();
-            AppendDetailSection(details, "失败", result.Tasks, item => !item.Succeeded && !item.Skipped);
-            AppendDetailSection(details, "截断", result.Tasks, item => item.Succeeded && item.IsTruncated);
+            AppendDetailSection(details, "× [失败]", result.Tasks, item => !item.Succeeded && !item.Skipped);
+            AppendDetailSection(details, "△ [截断]", result.Tasks, item => item.Succeeded && item.IsTruncated);
 
             PushActivateSuppress();
             try
@@ -723,38 +723,41 @@ namespace DB2Sheet.UI
             }
         }
 
-        /// <summary>把一类结果写成一段：标题单独一行，下面每行是目标表和说明。没有条目时不写。</summary>
-        /// <param name="details">正在组装的明细。</param>
-        /// <param name="heading">段标题，例如「失败」或「截断」。</param>
+        /// <summary>把一类结果接进明细列表。每条是标记、表名和说明，写在同一行。没有条目时不写，也不留空行。</summary>
+        /// <param name="details">正在组装的明细。失败写完后再写截断，中间不插标题。</param>
+        /// <param name="marker">条目前缀，例如「× [失败]」或「△ [截断]」。</param>
         /// <param name="tasks">本次刷新的全部任务结果。</param>
-        /// <param name="include">为 true 时该任务写入这一段。</param>
+        /// <param name="include">为 true 时该任务写入列表。</param>
         private static void AppendDetailSection(
             StringBuilder details,
-            string heading,
+            string marker,
             IReadOnlyList<RefreshTaskResult> tasks,
             Func<RefreshTaskResult, bool> include)
         {
-            bool started = false;
             foreach (RefreshTaskResult item in tasks)
             {
                 if (!include(item)) continue;
-                if (!started)
-                {
-                    if (details.Length > 0)
-                    {
-                        details.AppendLine();
-                        details.AppendLine();
-                    }
+                if (details.Length > 0)
+                    details.AppendLine();
 
-                    details.Append(heading);
-                    started = true;
-                }
-
-                details.AppendLine();
+                details.Append(marker);
+                details.Append(" 「");
                 details.Append(item.Task.TargetSheetName);
+                details.Append("」");
+                string message = SingleLine(item.Message);
+                if (message.Length == 0) continue;
                 details.Append("：");
-                details.Append(item.Message);
+                details.Append(message);
             }
+        }
+
+        /// <summary>把说明收成一行，避免条目被说明里的换行拆开。</summary>
+        /// <param name="message">该条的说明。空白时返回空字符串。</param>
+        /// <returns>去掉首尾空白，并把换行换成空格后的说明。</returns>
+        private static string SingleLine(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+            return message.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Trim();
         }
 
         /// <summary>表头复选框：未全选时全选，已全选时全不选。没有任务时不改变勾选。</summary>

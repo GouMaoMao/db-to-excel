@@ -94,7 +94,7 @@ namespace DB2Sheet.Services
                         continue;
                     }
                     results.Add(WriteOnContext(
-                        excelContext, workbook, item.Task, item.Result, progress,
+                        excelContext, workbook, item.Task, item.Result, rowLimit, progress,
                         results, tasks.Count, stopwatch, operationId, cancellationToken, false));
                 }
             }
@@ -110,7 +110,7 @@ namespace DB2Sheet.Services
                             connection, task, rowLimit, blockSize, timeoutSeconds, operationId,
                             progress, () => results.Count, tasks.Count, stopwatch,                             cancellationToken).ConfigureAwait(false);
                         results.Add(WriteOnContext(
-                            excelContext, workbook, task, buffered, progress,
+                            excelContext, workbook, task, buffered, rowLimit, progress,
                             results, tasks.Count, stopwatch, operationId, cancellationToken, true));
                     }
                     catch (OperationCanceledException)
@@ -229,12 +229,14 @@ namespace DB2Sheet.Services
         }
 
         /// <summary>在 Excel UI 线程写入一个已缓冲的任务，并只推进写入进度条。</summary>
-        /// <remarks>不填写读取百分比。串行时同一次 Send 先报告这条查询已结束，画出读取条，再阻塞写表。个数不到总数时不画成已读完。</remarks>
+        /// <param name="rowLimit">本次导出的最大行数。结果被截断时写进该任务的说明。</param>
+        /// <remarks>不填写读取百分比。串行时同一次 Send 先报告这条查询已结束，画出读取条，再阻塞写表。个数不到总数时不画成已读完。截断时说明写出已读取行数和上限，多出来的行数读不到。</remarks>
         private RefreshTaskResult WriteOnContext(
             SynchronizationContext context,
             ExcelInterop.Workbook workbook,
             RefreshTaskDefinition task,
             BufferedQueryResult buffered,
+            int rowLimit,
             IProgress<OperationProgress> progress,
             IReadOnlyList<RefreshTaskResult> completed,
             int totalTasks,
@@ -276,7 +278,12 @@ namespace DB2Sheet.Services
                         operationId + "-" + task.Id);
                     result = new RefreshTaskResult(
                         task, true, false, rows, buffered.IsTruncated,
-                        buffered.IsTruncated ? "刷新成功，结果已截断。" : "刷新成功。");
+                        buffered.IsTruncated
+                            ? string.Format(
+                                "已读取 {0:N0} 行，达到上限 {1:N0} 行，结果已截断。",
+                                buffered.RowCount,
+                                rowLimit)
+                            : "刷新成功。");
                 }
                 catch (Exception exception)
                 {
