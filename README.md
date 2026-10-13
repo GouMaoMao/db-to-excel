@@ -5,6 +5,7 @@
 数分和报表岗日常最枯燥的重复劳动：打开 DBeaver/Navicat → 跑 SQL → 导出结果 → 复制粘贴进 Excel，当Excel底稿涉及多个 Sheet更新时，搬运数据的耗时尤其巨大。
 
 **⚡ db-to-excel 是什么**
+
 ```mermaid
 flowchart LR
     db[(数据库)] -->|"1. db-to-excel 插件写入"| sheet[Excel / WPS 工作表]
@@ -14,22 +15,25 @@ flowchart LR
     style sheet fill:#f0f9ff,stroke:#0284c7
     style present fill:#ecfdf5,stroke:#10b981
 ```
-db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直接执行 SQL，把数据库查询结果写入工作表。插件只负责【数据库到工作表的数据同步】，保留原有的 Excel 生态：公式、透视表、图表、看板不需重构。定期报表更新不再依靠手工搬运数据。
 
+
+
+db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直接执行 SQL，把数据库查询结果写入工作表。插件只负责【数据库到工作表的数据同步】，保留原有的 Excel 生态：公式、透视表、图表、看板不需重构。定期报表更新不再依靠手工搬运数据。
 
 **🎬 批量更新功能演示**
 
 ![批量刷新](docs/images/批量刷新.gif)
 
-# 如何使用
+# 快速开始
 
 
 
 ## 1、安装
 
 - 先关闭并退出 Excel 和 WPS。
-- 下载并运行安装包： [db-to-excel.exe](https://github.com/GouMaoMao/db-to-excel/releases/latest/download/db-to-excel.exe)。
-- 源码和各版本安装包也在 Gitee：[仓库](https://gitee.com/GouMaoMao/db-to-excel)，[Releases](https://gitee.com/GouMaoMao/db-to-excel/releases)。
+- 下载并运行安装包（2选1，国内选Gitee）：
+  - GitHub：[db-to-excel.exe](https://github.com/GouMaoMao/db-to-excel/releases/latest/download/db-to-excel.exe)
+  - Gitee：打开 [Releases](https://gitee.com/GouMaoMao/db-to-excel/releases)，下载安装 `db-to-excel.exe`。
 - 打开 Excel 或 WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
 
 > 安装包未签名，Windows 可能提示未知发布者，点击信任即可。
