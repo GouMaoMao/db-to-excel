@@ -64,7 +64,6 @@ namespace DB2Sheet.Models
             ProviderId = string.Empty;
             ConnectionProfileId = string.Empty;
             QueryText = string.Empty;
-            TargetSheetName = string.Empty;
             Description = string.Empty;
             CreatedUtc = DateTime.UtcNow;
             UpdatedUtc = DateTime.UtcNow;
@@ -81,16 +80,14 @@ namespace DB2Sheet.Models
         [DataMember(Order = 4)] public string ConnectionProfileId { get; set; }
         /// <summary>获取或设置 SQL 文本。</summary>
         [DataMember(Order = 5)] public string QueryText { get; set; }
-        /// <summary>获取或设置默认目标工作表名称。</summary>
-        [DataMember(Order = 6)] public string TargetSheetName { get; set; }
         /// <summary>获取或设置方案说明。</summary>
-        [DataMember(Order = 7)] public string Description { get; set; }
+        [DataMember(Order = 6)] public string Description { get; set; }
         /// <summary>获取或设置创建时间（UTC）。</summary>
-        [DataMember(Order = 8)] public DateTime CreatedUtc { get; set; }
+        [DataMember(Order = 7)] public DateTime CreatedUtc { get; set; }
         /// <summary>获取或设置最后更新时间（UTC）。</summary>
-        [DataMember(Order = 9)] public DateTime UpdatedUtc { get; set; }
+        [DataMember(Order = 8)] public DateTime UpdatedUtc { get; set; }
         /// <summary>获取或设置提供程序专用选项。</summary>
-        [DataMember(Order = 10)] public Dictionary<string, string> ProviderOptions { get; set; }
+        [DataMember(Order = 9)] public Dictionary<string, string> ProviderOptions { get; set; }
     }
 
     /// <summary>表示从 SQL Sheet 单元格解析出的一个批量刷新任务。</summary>

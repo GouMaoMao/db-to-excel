@@ -102,7 +102,7 @@ namespace DB2Sheet
                 {
                     _queryEditorForm = new QueryEditorForm(
                         _queries, _connections, _providers, _executionService, _queryBuffer,
-                        _resultWriter, _operationRunner, _settings, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
+                        _resultWriter, _taskReader, _operationRunner, _settings, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
                     _queryEditorForm.FormClosed += (sender, args) => _queryEditorForm = null;
                     _queryEditorForm.Show();
                 }

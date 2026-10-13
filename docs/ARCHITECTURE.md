@@ -120,7 +120,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 1. UI 选择共享连接并生成 `DataSourceRequest`。
 2. Provider 校验连接和只读 SQL。
 3. ADO.NET 提供程序打开连接并配置只读会话，用 `SequentialAccess` 执行 Reader，由 `DatabaseResultStream` 按块读取。JDBC 不走 ADO.NET，由进程外的 `java.exe` 执行，结果经 `JdbcResultStream` 按块读取。
-4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。
+4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。写入前弹出目标表名，默认当前方案名，用户可改；表已存在时确认覆盖。勾选时把 SQL 按列写入 SQL 页，供批量刷新读取。
 5. 进度通过 `IProgress<OperationProgress>` 上报；取消令牌触发命令取消。
 
 ## 批量刷新流程

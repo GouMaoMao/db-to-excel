@@ -100,6 +100,31 @@ namespace DB2Sheet.Excel
         }
 
         /// <inheritdoc/>
+        public void WriteTaskColumn(ExcelInterop.Workbook workbook, string targetSheetName, string queryText)
+        {
+            if (workbook == null) throw new ArgumentNullException(nameof(workbook));
+            if (string.IsNullOrWhiteSpace(targetSheetName))
+                throw new ArgumentException("目标 Sheet 名称不能为空。", nameof(targetSheetName));
+
+            string target = targetSheetName.Trim();
+            string[] lines = SplitSqlLines(queryText);
+            ExcelInterop.Worksheet worksheet = GetOrCreateSqlSheet(workbook);
+            try
+            {
+                int column;
+                int clearThroughRow;
+                LocateTaskColumn(worksheet, target, out column, out clearThroughRow);
+                if (clearThroughRow >= 2)
+                    ClearColumn(worksheet, column, 2, clearThroughRow);
+                WriteTaskCells(worksheet, column, target, lines);
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(worksheet);
+            }
+        }
+
+        /// <inheritdoc/>
         public IReadOnlyList<RefreshTaskDefinition> ReadTasks(ExcelInterop.Workbook workbook)
         {
             if (workbook == null) throw new ArgumentNullException(nameof(workbook));
@@ -135,6 +160,176 @@ namespace DB2Sheet.Excel
                 if (usedRange != null) Marshal.FinalReleaseComObject(usedRange);
                 Marshal.FinalReleaseComObject(worksheet);
             }
+        }
+
+        /// <summary>找到与目标表名相同的任务列；没有时用已用区域右侧的下一列。空表使用 A 列。</summary>
+        /// <param name="worksheet">SQL 工作表。</param>
+        /// <param name="targetSheetName">要比对的目标表名。</param>
+        /// <param name="column">要写入的列号，从 1 开始。</param>
+        /// <param name="clearThroughRow">更新已有列时需要清到的行号。新列不需要清理时为 1。</param>
+        private static void LocateTaskColumn(
+            ExcelInterop.Worksheet worksheet,
+            string targetSheetName,
+            out int column,
+            out int clearThroughRow)
+        {
+            ExcelInterop.Range usedRange = null;
+            try
+            {
+                usedRange = worksheet.UsedRange;
+                int firstColumn = usedRange.Column;
+                int lastColumn = firstColumn + usedRange.Columns.Count - 1;
+                int lastRow = usedRange.Row + usedRange.Rows.Count - 1;
+                int matched = 0;
+                int lastOccupied = 0;
+                for (int candidate = firstColumn; candidate <= lastColumn; candidate++)
+                {
+                    bool occupied = false;
+                    for (int row = 1; row <= lastRow; row++)
+                    {
+                        string text = Convert.ToString(ReadCellValue(worksheet, row, candidate)) ?? string.Empty;
+                        if (row == 1)
+                        {
+                            string sheetName = SqlSheetHeader.Parse(text).SheetName;
+                            if (matched == 0
+                                && !string.IsNullOrWhiteSpace(sheetName)
+                                && string.Equals(sheetName, targetSheetName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                matched = candidate;
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(text)) occupied = true;
+                    }
+
+                    if (occupied) lastOccupied = candidate;
+                }
+
+                if (matched > 0)
+                {
+                    column = matched;
+                    clearThroughRow = lastRow;
+                    return;
+                }
+
+                column = lastOccupied == 0 ? 1 : lastOccupied + 1;
+                clearThroughRow = 1;
+            }
+            finally
+            {
+                if (usedRange != null) Marshal.FinalReleaseComObject(usedRange);
+            }
+        }
+
+        /// <summary>取得已有的 SQL 工作表；没有时在工作簿末尾新建。</summary>
+        /// <param name="workbook">当前工作簿。</param>
+        /// <returns>调用方负责释放的工作表引用。</returns>
+        private static ExcelInterop.Worksheet GetOrCreateSqlSheet(ExcelInterop.Workbook workbook)
+        {
+            ExcelInterop.Worksheet existing = FindWorksheet(workbook, SqlSheetName);
+            if (existing != null) return existing;
+
+            ExcelInterop.Worksheet last = workbook.Worksheets[workbook.Worksheets.Count] as ExcelInterop.Worksheet;
+            try
+            {
+                ExcelInterop.Worksheet created = workbook.Worksheets.Add(After: last) as ExcelInterop.Worksheet;
+                if (created == null) throw new InvalidOperationException("无法创建 SQL 工作表。");
+                try
+                {
+                    created.Name = SqlSheetName;
+                    return created;
+                }
+                catch
+                {
+                    Marshal.FinalReleaseComObject(created);
+                    throw;
+                }
+            }
+            finally
+            {
+                if (last != null) Marshal.FinalReleaseComObject(last);
+            }
+        }
+
+        /// <summary>清掉一列里的旧 SQL。只清值，保留单元格格式。</summary>
+        /// <param name="worksheet">SQL 工作表。</param>
+        /// <param name="column">列号，从 1 开始。</param>
+        /// <param name="firstRow">起始行，从 1 开始。</param>
+        /// <param name="lastRow">结束行，含本行。</param>
+        private static void ClearColumn(ExcelInterop.Worksheet worksheet, int column, int firstRow, int lastRow)
+        {
+            ExcelInterop.Range start = null;
+            ExcelInterop.Range end = null;
+            ExcelInterop.Range range = null;
+            try
+            {
+                start = worksheet.Cells[firstRow, column] as ExcelInterop.Range;
+                end = worksheet.Cells[lastRow, column] as ExcelInterop.Range;
+                range = worksheet.Range[start, end];
+                range.ClearContents();
+            }
+            finally
+            {
+                if (range != null) Marshal.FinalReleaseComObject(range);
+                if (end != null) Marshal.FinalReleaseComObject(end);
+                if (start != null) Marshal.FinalReleaseComObject(start);
+            }
+        }
+
+        /// <summary>把目标表名和 SQL 行写入同一列。第 2 行留空，SQL 从第 3 行开始。</summary>
+        /// <param name="worksheet">SQL 工作表。</param>
+        /// <param name="column">列号，从 1 开始。</param>
+        /// <param name="targetSheetName">第 1 行文本。</param>
+        /// <param name="lines">按换行拆开的 SQL。可含空行。</param>
+        private static void WriteTaskCells(
+            ExcelInterop.Worksheet worksheet,
+            int column,
+            string targetSheetName,
+            string[] lines)
+        {
+            int rowCount = 2 + lines.Length;
+            object[,] values = new object[rowCount, 1];
+            values[0, 0] = targetSheetName;
+            values[1, 0] = string.Empty;
+            for (int index = 0; index < lines.Length; index++)
+                values[index + 2, 0] = ExcelText(lines[index]);
+
+            ExcelInterop.Range start = null;
+            ExcelInterop.Range end = null;
+            ExcelInterop.Range range = null;
+            try
+            {
+                start = worksheet.Cells[1, column] as ExcelInterop.Range;
+                end = worksheet.Cells[rowCount, column] as ExcelInterop.Range;
+                range = worksheet.Range[start, end];
+                range.Value2 = values;
+            }
+            finally
+            {
+                if (range != null) Marshal.FinalReleaseComObject(range);
+                if (end != null) Marshal.FinalReleaseComObject(end);
+                if (start != null) Marshal.FinalReleaseComObject(start);
+            }
+        }
+
+        /// <summary>按换行拆开 SQL，保留空行。Windows、Unix 和旧 Mac 换行都分开。</summary>
+        /// <param name="queryText">编辑器中的 SQL。</param>
+        /// <returns>每个元素对应一个单元格。</returns>
+        private static string[] SplitSqlLines(string queryText)
+        {
+            string text = queryText ?? string.Empty;
+            return text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        }
+
+        /// <summary>把会让 Excel 当成公式的注释行改成文本。</summary>
+        /// <param name="line">一行 SQL。</param>
+        /// <returns>以 <c>--</c> 开头时前面加一个空格。行首已有其他字符时原样返回。</returns>
+        /// <remarks>加空格后仍是合法 SQL 注释。批量刷新会先跳过空白再识别 <c>--</c>。</remarks>
+        private static string ExcelText(string line)
+        {
+            if (line != null && line.StartsWith("--", StringComparison.Ordinal))
+                return " " + line;
+            return line ?? string.Empty;
         }
 
         private static ExcelInterop.Worksheet FindWorksheet(ExcelInterop.Workbook workbook, string name)

@@ -124,7 +124,6 @@ namespace DB2Sheet.Storage
                 ProviderId = source.ProviderId,
                 ConnectionProfileId = source.ConnectionProfileId,
                 QueryText = source.QueryText,
-                TargetSheetName = source.TargetSheetName,
                 Description = source.Description,
                 CreatedUtc = source.CreatedUtc,
                 UpdatedUtc = source.UpdatedUtc,

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
@@ -13,7 +14,8 @@ namespace DB2Sheet.UI
 {
     /// <summary>提供 SQL 方案编辑、只读查询预览以及结果写入 Excel 的主界面。</summary>
     /// <remarks>
-    /// 用户输入包括连接方案、SQL、方案名称和目标 Sheet；输出副作用包括保存查询方案和修改当前工作簿。
+    /// 用户输入包括连接方案、SQL 和方案名称。写入时另问目标工作表，并可把 SQL 写入 SQL 页。
+    /// 输出副作用包括保存查询方案和修改当前工作簿。
     /// </remarks>
     public sealed class QueryEditorForm : AppForm
     {
@@ -23,6 +25,7 @@ namespace DB2Sheet.UI
         private readonly IDataSourceExecutionService _executionService;
         private readonly IQueryBufferService _queryBuffer;
         private readonly IExcelResultWriter _writer;
+        private readonly ISqlSheetTaskReader _taskReader;
         private readonly IOperationRunner _operationRunner;
         private readonly ISettingsStore _settings;
         private readonly IJdbcEnvironmentStore _jdbcEnvironment;
@@ -49,7 +52,6 @@ namespace DB2Sheet.UI
         private readonly ToolStripMenuItem _setCurrentConnectionMenuItem;
         private string _currentQueryId;
         private string _currentQueryName;
-        private string _currentTargetSheet = "查询结果";
         private DateTime _currentCreatedUtc;
         private DateTime? _currentSavedUtc;
         private bool _hasPreview;
@@ -63,6 +65,7 @@ namespace DB2Sheet.UI
         /// <param name="executionService">查询执行和连接测试服务。</param>
         /// <param name="queryBuffer">用于预览和写入前缓冲查询结果。</param>
         /// <param name="writer">Excel 结果写入器。</param>
+        /// <param name="taskReader">SQL 页读写器。勾选写入 SQL 时用来追加或更新任务列。</param>
         /// <param name="operationRunner">进度窗体运行器。</param>
         /// <param name="settings">查询行数、超时和分块大小设置。</param>
         /// <param name="workbook">当前操作的 Excel 工作簿。</param>
@@ -75,6 +78,7 @@ namespace DB2Sheet.UI
             IDataSourceExecutionService executionService,
             IQueryBufferService queryBuffer,
             IExcelResultWriter writer,
+            ISqlSheetTaskReader taskReader,
             IOperationRunner operationRunner,
             ISettingsStore settings,
             ExcelInterop.Workbook workbook,
@@ -87,6 +91,7 @@ namespace DB2Sheet.UI
             _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
             _queryBuffer = queryBuffer ?? throw new ArgumentNullException(nameof(queryBuffer));
             _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+            _taskReader = taskReader ?? throw new ArgumentNullException(nameof(taskReader));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
@@ -353,7 +358,6 @@ namespace DB2Sheet.UI
             _currentQueryId = Guid.NewGuid().ToString("N");
             _currentCreatedUtc = DateTime.UtcNow;
             _currentQueryName = string.Empty;
-            _currentTargetSheet = "查询结果";
             _currentSavedUtc = null;
             _sql.ClearAndFocus();
             ClearPreviewGrid();
@@ -371,7 +375,6 @@ namespace DB2Sheet.UI
             _currentCreatedUtc = profile.CreatedUtc;
             _currentQueryName = profile.Name;
             _sql.SqlText = profile.QueryText;
-            _currentTargetSheet = string.IsNullOrWhiteSpace(profile.TargetSheetName) ? "查询结果" : profile.TargetSheetName;
             _currentSavedUtc = profile.UpdatedUtc;
             ClearPreviewGrid();
             _hasPreview = false;
@@ -382,7 +385,7 @@ namespace DB2Sheet.UI
 
         private void SaveQuery()
         {
-            if (!ValidateInputs(false, out ConnectionProfileSnapshot connection)) return;
+            if (!ValidateInputs(out ConnectionProfileSnapshot connection)) return;
             if (!TextPromptDialog.TryShow(
                 this,
                 "保存查询方案",
@@ -426,7 +429,6 @@ namespace DB2Sheet.UI
                 ProviderId = connection.ProviderId,
                 ConnectionProfileId = connection.Id,
                 QueryText = _sql.SqlText,
-                TargetSheetName = _currentTargetSheet,
                 CreatedUtc = _currentCreatedUtc == default(DateTime) ? DateTime.UtcNow : _currentCreatedUtc,
                 UpdatedUtc = DateTime.UtcNow
             };
@@ -535,7 +537,7 @@ namespace DB2Sheet.UI
         private void ExecutePreview(bool selectedOnly)
         {
             string sqlText = selectedOnly ? _sql.SelectedSql : _sql.SqlText;
-            if (!ValidateInputs(false, out ConnectionProfileSnapshot connection, sqlText)) return;
+            if (!ValidateInputs(out ConnectionProfileSnapshot connection, sqlText)) return;
             bool hadPreview = _hasPreview;
             try
             {
@@ -577,33 +579,47 @@ namespace DB2Sheet.UI
             }
         }
 
+        /// <summary>把当前 SQL 的结果写入用户确认的工作表。表已存在时先确认覆盖。</summary>
+        /// <remarks>勾选写入 SQL 时，结果写成功后才把 SQL 按列写入 SQL 页。取消或覆盖被拒绝时两者都不写。</remarks>
         private void ExportQuery()
         {
-            if (!TextPromptDialog.TryShow(
-                this,
-                "写入 Sheet",
-                "请输入目标 Sheet 名称",
-                string.IsNullOrWhiteSpace(_currentTargetSheet) ? "查询结果" : _currentTargetSheet,
-                out string targetSheet))
+            if (!ValidateInputs(out ConnectionProfileSnapshot connection)) return;
+            if (!ExportSheetDialog.TryShow(this, _currentQueryName, out string targetSheet, out bool writeSql))
             {
                 _status.Text = "已取消写入。";
                 return;
             }
 
-            _currentTargetSheet = targetSheet;
-            if (!ValidateInputs(true, out ConnectionProfileSnapshot connection)) return;
             try
             {
-                DataSourceRequest request = CreateRequest(connection, _sql.SqlText, ExecutionPurpose.Export, _settings.Get(CoreSettings.MaxExportRows));
-                string target = _currentTargetSheet;
+                if (WorksheetExists(_workbook, targetSheet)
+                    && MessageBox.Show(
+                        this,
+                        string.Format("工作表“{0}”已存在，是否覆盖？", targetSheet),
+                        "写入 Sheet",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question,
+                        MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                {
+                    _status.Text = "已取消写入。";
+                    return;
+                }
+
+                string sqlText = _sql.SqlText;
+                DataSourceRequest request = CreateRequest(connection, sqlText, ExecutionPurpose.Export, _settings.Get(CoreSettings.MaxExportRows));
                 long rows = _operationRunner.Run(this, "写入 Excel", true, async (progress, token) =>
                 {
                     string operationId = Guid.NewGuid().ToString("N");
                     BufferedQueryResult result = await _queryBuffer.ExecuteAsync(
                         request, operationId, progress, token);
-                    return _writer.WriteResult(_workbook, target, result, progress, token, operationId);
+                    long written = _writer.WriteResult(_workbook, targetSheet, result, progress, token, operationId);
+                    if (writeSql)
+                        _taskReader.WriteTaskColumn(_workbook, targetSheet, sqlText);
+                    return written;
                 });
-                _status.Text = string.Format("已向“{0}”写入 {1:N0} 行。", target, rows);
+                _status.Text = writeSql
+                    ? string.Format("已向“{0}”写入 {1:N0} 行，并已把 SQL 写入工作表 SQL。", targetSheet, rows)
+                    : string.Format("已向“{0}”写入 {1:N0} 行。", targetSheet, rows);
             }
             catch (OperationCanceledException)
             {
@@ -613,6 +629,24 @@ namespace DB2Sheet.UI
             {
                 ShowError(exception);
             }
+        }
+
+        /// <summary>判断当前工作簿是否已有同名工作表。比较时忽略大小写，不激活工作表。</summary>
+        /// <param name="workbook">当前工作簿。</param>
+        /// <param name="name">要查找的工作表名称。</param>
+        /// <returns>存在时为 true。会释放枚举到的 COM 引用。</returns>
+        private static bool WorksheetExists(ExcelInterop.Workbook workbook, string name)
+        {
+            foreach (object item in workbook.Worksheets)
+            {
+                ExcelInterop.Worksheet worksheet = item as ExcelInterop.Worksheet;
+                if (worksheet == null) continue;
+                bool match = string.Equals(worksheet.Name, name, StringComparison.OrdinalIgnoreCase);
+                Marshal.FinalReleaseComObject(worksheet);
+                if (match) return true;
+            }
+
+            return false;
         }
 
         private DataSourceRequest CreateRequest(ConnectionProfileSnapshot connection, string sqlText, ExecutionPurpose purpose, int rowLimit)
@@ -776,14 +810,17 @@ namespace DB2Sheet.UI
         }
 
 
-        private bool ValidateInputs(bool requireTarget, out ConnectionProfileSnapshot connection, string sqlText = null)
+        /// <summary>检查已选择连接并且 SQL 非空。失败时弹出说明并返回 false。</summary>
+        /// <param name="connection">当前要执行的连接。检查失败时为 null。</param>
+        /// <param name="sqlText">要检查的 SQL。为空时使用编辑器全文。</param>
+        /// <returns>可以继续预览、保存或写入时为 true。</returns>
+        private bool ValidateInputs(out ConnectionProfileSnapshot connection, string sqlText = null)
         {
             connection = _connectionTree.ExecutionConnection();
             string sql = sqlText ?? _sql.SqlText;
             string message = null;
             if (connection == null) message = "请选择连接方案。";
             else if (string.IsNullOrWhiteSpace(sql)) message = "请输入 SQL。";
-            else if (requireTarget && string.IsNullOrWhiteSpace(_currentTargetSheet)) message = "请输入目标 Sheet 名称。";
             if (message == null) return true;
             MessageBox.Show(this, message, "SQL 查询", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;

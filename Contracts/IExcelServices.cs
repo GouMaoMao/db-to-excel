@@ -42,6 +42,18 @@ namespace DB2Sheet.Contracts
         /// <returns>找到并激活时为 true。表不存在时为 false，不创建工作表。</returns>
         /// <remarks>应在 Excel UI 线程调用，并释放用到的 COM 引用。</remarks>
         bool TryActivateWorksheet(ExcelInterop.Workbook workbook, string sheetName);
+
+        /// <summary>在 SQL 页写入或更新一列任务，供批量刷新读取。</summary>
+        /// <param name="workbook">当前工作簿。</param>
+        /// <param name="targetSheetName">第 1 行的目标表名。调用方已确认它可以作为结果工作表名。</param>
+        /// <param name="queryText">要保存的 SQL。按换行拆到第 3 行起，每个单元格一行。</param>
+        /// <remarks>
+        /// 没有名为 SQL 的工作表时创建，已有则使用那一张。第 1 行只写目标表名，第 2 行留空。
+        /// 同一目标表更新原列并清掉该列旧内容；没有同名列时追加到已用区域右侧。
+        /// 以 <c>--</c> 开头的行前面加一个空格，避免 Excel 把减号当成公式。
+        /// 应在 Excel UI 线程调用，并释放用到的 COM 引用。
+        /// </remarks>
+        void WriteTaskColumn(ExcelInterop.Workbook workbook, string targetSheetName, string queryText);
     }
 
     /// <summary>将已缓冲的查询结果写入 Excel 工作表。</summary>

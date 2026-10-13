@@ -249,6 +249,9 @@
     <Compile Include="UI\TextPromptDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UI\ExportSheetDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="UI\ConnectionProfileEditForm.cs">
       <SubType>Form</SubType>
     </Compile>
