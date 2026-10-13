@@ -23,7 +23,7 @@ namespace DB2Sheet.UI
         public const float CodeFontSize = 9.5F;
 
         /// <summary>SQL 工作表单元格使用的等宽字体。编辑器仍用 <see cref="CodeFontName"/>。</summary>
-        public const string SqlSheetFontName = "Consolas";
+        public const string SqlSheetFontName = "Cascadia Code Light";
 
         /// <summary>SQL 工作表单元格的字号。</summary>
         public const float SqlSheetFontSize = 10F;
