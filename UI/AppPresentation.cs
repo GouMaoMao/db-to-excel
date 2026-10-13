@@ -241,6 +241,14 @@ namespace DB2Sheet.UI
                     return "SQL 查询窗预览时最多读取并显示的行数。";
                 case "excel.maxExportRows":
                     return "写入 Excel 的结果数据行上限，不含标题行。超出的行被截断。";
+                case "excel.resultSuccessColor":
+                    return "批量刷新的成功状态，以及结果完整时标题行的底色。标题为黑字，宜用较浅的颜色。";
+                case "excel.resultTruncatedColor":
+                    return "批量刷新的截断状态，以及结果达到最大导出行数被截断时标题行的底色。";
+                case "excel.resultPendingColor":
+                    return "已勾选、尚未刷新的状态圆点。";
+                case "excel.resultErrorColor":
+                    return "刷新失败，或参数、重名有误时的状态圆点。";
                 case "batch.mode":
                     return "Serial 为串行，一项查询结束后再查下一项。Parallel 为并行，多项同时查询。";
                 case "batch.maxParallelism":

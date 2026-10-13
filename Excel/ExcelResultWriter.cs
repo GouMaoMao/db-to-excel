@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using DB2Sheet.Contracts;
 using DB2Sheet.Models;
+using DB2Sheet.Services;
 using ExcelInterop = Microsoft.Office.Interop.Excel;
 
 namespace DB2Sheet.Excel
@@ -15,7 +16,7 @@ namespace DB2Sheet.Excel
     /// 交互式写入只清空目标工作表已用区域的值，并从 A1 开始。原先单元格上的数值格式、字体、对齐和填充保留；本次多出来的行不继承这些格式。
     /// 批量刷新按起始单元格锚定：结果所占列从锚点清掉值到原数据末行，右侧多余列仅在参数要求时清空值。
     /// 清空范围内的边框会去掉，避免结果变短后留下空网格。写完后只在标题和数据组成的区域重新画灰色细网格线。
-    /// 标题只占一行字段编码，编码行加粗，底色表示成功或截断。这一步只改标题行的加粗和底色。成功时标题底为深绿，结果被截断时为橙色，与批量刷新状态圆点相同。数据从标题的下一行开始。
+    /// 标题只占一行字段编码，编码行加粗，底色表示成功或截断。这一步只改标题行的加粗和底色。成功和截断的底色来自参数设置，与批量刷新状态圆点相同。数据从标题的下一行开始。
     /// 每写完一块向进度接收器报告已写行数和块序号；总块数来自已缓冲结果，进度条按该比例填充。
     /// 批量刷新会在写入前激活目标表并滚到锚点，写入期间关闭 Excel 重画，结束时恢复。交互式写入不跳表，也不改重画。
     /// 文件日志只在写入完成或失败时各记一条汇总。
@@ -25,19 +26,28 @@ namespace DB2Sheet.Excel
     {
         private const int HeaderRowCount = 1;
 
-        /// <summary>成功写入时标题行和状态圆点使用的深绿色。</summary>
-        public static readonly Color SuccessColor = Color.FromArgb(46, 160, 67);
+        /// <summary>成功写入时标题行和状态圆点的默认浅绿色。黑字在该底色上可以辨认。</summary>
+        public static readonly Color SuccessColor = Color.FromArgb(101, 219, 91);
 
-        /// <summary>结果被截断时标题行和状态圆点使用的橙色。</summary>
-        public static readonly Color TruncatedColor = Color.DarkOrange;
+        /// <summary>结果被截断时标题行和状态圆点的默认橙色。</summary>
+        public static readonly Color TruncatedColor = Color.FromArgb(255, 184, 98);
+
+        /// <summary>已勾选、尚未刷新时状态圆点的默认灰色。不用于标题行。</summary>
+        public static readonly Color PendingColor = Color.FromArgb(162, 162, 162);
+
+        /// <summary>失败或参数、重名有误时状态圆点的默认砖红色。不用于标题行。</summary>
+        public static readonly Color ErrorColor = Color.FromArgb(217, 57, 57);
 
         private readonly ILogger _logger;
+        private readonly ISettingsStore _settings;
 
         /// <summary>创建 Excel 结果写入器。</summary>
         /// <param name="logger">写入阶段的文件日志。不按进度日志级别过滤。</param>
-        public ExcelResultWriter(ILogger logger)
+        /// <param name="settings">提供成功色和截断色。每次写入标题行时读取当时的值。</param>
+        public ExcelResultWriter(ILogger logger, ISettingsStore settings)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }
 
         /// <inheritdoc/>
@@ -118,7 +128,9 @@ namespace DB2Sheet.Excel
                     result,
                     options.AnchorRow,
                     options.AnchorColumn,
-                    result.IsTruncated ? TruncatedColor : SuccessColor);
+                    result.IsTruncated
+                        ? _settings.Get(CoreSettings.ResultTruncatedColor)
+                        : _settings.Get(CoreSettings.ResultSuccessColor));
 
                 int targetRow = options.AnchorRow + HeaderRowCount;
                 int writtenBlocks = 0;
@@ -375,7 +387,7 @@ namespace DB2Sheet.Excel
         }
 
         /// <summary>写入一行字段编码标题。编码加粗，底色表示成功或截断。数据从下一行开始。</summary>
-        /// <param name="headerColor">标题行底色。成功为深绿，截断为橙色。</param>
+        /// <param name="headerColor">标题行底色。来自当时的成功色或截断色设置。</param>
         /// <remarks>只改标题行的加粗和底色。该行原有的数值格式、字体名称和对齐保留。</remarks>
         private static void WriteHeaders(
             ExcelInterop.Worksheet worksheet,

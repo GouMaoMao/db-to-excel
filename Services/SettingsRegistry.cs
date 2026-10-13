@@ -59,6 +59,10 @@ namespace DB2Sheet.Services
             SettingsRegistry registry = new SettingsRegistry();
             registry.Register(CoreSettings.MaxPreviewRows);
             registry.Register(CoreSettings.MaxExportRows);
+            registry.Register(CoreSettings.ResultSuccessColor);
+            registry.Register(CoreSettings.ResultTruncatedColor);
+            registry.Register(CoreSettings.ResultPendingColor);
+            registry.Register(CoreSettings.ResultErrorColor);
             registry.Register(CoreSettings.BatchMode);
             registry.Register(CoreSettings.MaxParallelism);
             registry.Register(CoreSettings.QueryTimeoutSeconds);
@@ -91,6 +95,22 @@ namespace DB2Sheet.Services
 
         public static readonly SettingDefinition<int> MaxExportRows = Integer(
             "excel.maxExportRows", "最大导出数据行数", "Excel", ExcelMaximumDataRows, 1, ExcelMaximumDataRows);
+
+        /// <summary>结果完整时的状态圆点和标题行底色。默认较浅，便于黑字辨认。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> ResultSuccessColor = ColorSetting(
+            "excel.resultSuccessColor", "成功颜色", Color.FromArgb(101, 219, 91), 1, "Excel");
+
+        /// <summary>结果被截断时的状态圆点和标题行底色。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> ResultTruncatedColor = ColorSetting(
+            "excel.resultTruncatedColor", "截断颜色", Color.FromArgb(255, 184, 98), 2, "Excel");
+
+        /// <summary>已勾选、尚未刷新的状态圆点颜色。不用于标题行。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> ResultPendingColor = ColorSetting(
+            "excel.resultPendingColor", "待刷新颜色", Color.FromArgb(162, 162, 162), 1, "批量");
+
+        /// <summary>刷新失败或参数、重名有误时的状态圆点颜色。不用于标题行。保存为 <c>R,G,B</c>。</summary>
+        public static readonly SettingDefinition<Color> ResultErrorColor = ColorSetting(
+            "excel.resultErrorColor", "失败颜色", Color.FromArgb(217, 57, 57), 2, "批量");
 
         public static readonly SettingDefinition<BatchExecutionMode> BatchMode =
             new SettingDefinition<BatchExecutionMode>(
@@ -168,12 +188,13 @@ namespace DB2Sheet.Services
         public static readonly SettingDefinition<bool> BeautifyAfterRefresh = Flag(
             "batch.beautifyAfterRefresh", "刷新后美化", false, 8);
 
-        private static SettingDefinition<Color> ColorSetting(string key, string displayName, Color defaultColor, int sortOrder)
+        private static SettingDefinition<Color> ColorSetting(
+            string key, string displayName, Color defaultColor, int sortOrder, string category = null)
         {
             return new SettingDefinition<Color>(
                 key,
                 displayName,
-                SqlSheetFormatCategory,
+                category ?? SqlSheetFormatCategory,
                 defaultColor,
                 value =>
                 {

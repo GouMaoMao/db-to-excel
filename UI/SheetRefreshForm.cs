@@ -710,7 +710,12 @@ namespace DB2Sheet.UI
             PushActivateSuppress();
             try
             {
-                RefreshSummaryForm.Show(this, summary, details.ToString());
+                RefreshSummaryForm.Show(
+                    this,
+                    summary,
+                    details.ToString(),
+                    _settings.Get(CoreSettings.ResultSuccessColor),
+                    _settings.Get(CoreSettings.ResultTruncatedColor));
             }
             finally
             {
@@ -1311,14 +1316,17 @@ namespace DB2Sheet.UI
             _taskMenu.Dispose();
         }
 
-        private static Color? StatusColor(TaskRow row)
+        /// <summary>按当前设置给出该行状态圆点的颜色。未勾选时不着色。</summary>
+        /// <param name="row">任务行。为空时不着色。</param>
+        /// <returns>圆点颜色。不着色时为空。</returns>
+        private Color? StatusColor(TaskRow row)
         {
             if (row == null) return null;
-            if (row.State == TaskVisualState.Error) return Color.Firebrick;
+            if (row.State == TaskVisualState.Error) return _settings.Get(CoreSettings.ResultErrorColor);
             if (!row.Checked) return null;
-            if (row.State == TaskVisualState.Pending) return Color.Gray;
-            if (row.State == TaskVisualState.Success) return ExcelResultWriter.SuccessColor;
-            if (row.State == TaskVisualState.Truncated) return ExcelResultWriter.TruncatedColor;
+            if (row.State == TaskVisualState.Pending) return _settings.Get(CoreSettings.ResultPendingColor);
+            if (row.State == TaskVisualState.Success) return _settings.Get(CoreSettings.ResultSuccessColor);
+            if (row.State == TaskVisualState.Truncated) return _settings.Get(CoreSettings.ResultTruncatedColor);
             return null;
         }
 

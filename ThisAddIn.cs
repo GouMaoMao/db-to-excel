@@ -87,7 +87,7 @@ namespace DB2Sheet
             _executionService = new DataSourceExecutionService(_providers, _logger);
             _operationRunner = new OperationRunner(_logger, _settings);
             _queryBuffer = new QueryBufferService(_executionService, _logger);
-            _resultWriter = new ExcelResultWriter(_logger);
+            _resultWriter = new ExcelResultWriter(_logger, _settings);
             _taskReader = new SqlSheetTaskReader(_settings);
             _batchRefresh = new BatchRefreshService(_queryBuffer, _resultWriter, _logger);
         }

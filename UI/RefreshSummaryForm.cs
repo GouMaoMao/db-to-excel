@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Windows.Forms;
-using DB2Sheet.Excel;
 
 namespace DB2Sheet.UI
 {
@@ -19,7 +18,9 @@ namespace DB2Sheet.UI
         /// <summary>创建完成说明窗。</summary>
         /// <param name="summary">成功、失败、截断计数。</param>
         /// <param name="details">失败和截断明细。空白时不显示明细区。</param>
-        private RefreshSummaryForm(string summary, string details)
+        /// <param name="successColor">结果完整时标题行和成功图例的颜色。</param>
+        /// <param name="truncatedColor">结果被截断时标题行和截断图例的颜色。</param>
+        private RefreshSummaryForm(string summary, string details, Color successColor, Color truncatedColor)
         {
             bool hasDetails = !string.IsNullOrWhiteSpace(details);
             Text = AppPresentation.WindowTitle("批量刷新");
@@ -67,7 +68,7 @@ namespace DB2Sheet.UI
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.Controls.Add(CreateBody(summary, details, hasDetails), 0, 0);
-            root.Controls.Add(CreateLegend(_legendFont), 0, 1);
+            root.Controls.Add(CreateLegend(_legendFont, successColor, truncatedColor), 0, 1);
             root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
 
@@ -81,10 +82,13 @@ namespace DB2Sheet.UI
         /// <param name="owner">所属窗口。</param>
         /// <param name="summary">成功、失败、截断计数。</param>
         /// <param name="details">失败和截断明细。空白时不显示明细区。</param>
+        /// <param name="successColor">结果完整时的标题行底色。与状态圆点相同。</param>
+        /// <param name="truncatedColor">结果被截断时的标题行底色。与状态圆点相同。</param>
         /// <remarks>在调用方的 UI 线程上以模态方式显示。不因文本为空而拒绝关闭。</remarks>
-        public static void Show(IWin32Window owner, string summary, string details)
+        public static void Show(
+            IWin32Window owner, string summary, string details, Color successColor, Color truncatedColor)
         {
-            using (RefreshSummaryForm dialog = new RefreshSummaryForm(summary, details))
+            using (RefreshSummaryForm dialog = new RefreshSummaryForm(summary, details, successColor, truncatedColor))
             {
                 dialog.ShowDialog(owner);
             }
@@ -144,8 +148,10 @@ namespace DB2Sheet.UI
 
         /// <summary>底部图例用窗体底色，两行色块各占一行字高，不随明细滚动。说明文字用较小的灰色斜体。</summary>
         /// <param name="legendFont">图例文字字体。由窗体持有，关闭时释放。</param>
+        /// <param name="successColor">结果完整时的色块。</param>
+        /// <param name="truncatedColor">结果被截断时的色块。</param>
         /// <returns>按内容撑开的图例。</returns>
-        private static Control CreateLegend(Font legendFont)
+        private static Control CreateLegend(Font legendFont, Color successColor, Color truncatedColor)
         {
             TableLayoutPanel legend = new TableLayoutPanel
             {
@@ -175,8 +181,8 @@ namespace DB2Sheet.UI
             };
             legend.SetColumnSpan(caption, 2);
             legend.Controls.Add(caption, 0, 0);
-            AddSwatchRow(legend, legendFont, 1, ExcelResultWriter.SuccessColor, "本次写入成功，结果完整");
-            AddSwatchRow(legend, legendFont, 2, ExcelResultWriter.TruncatedColor, "写入成功，但结果达到「最大导出行数」后被截断");
+            AddSwatchRow(legend, legendFont, 1, successColor, "本次写入成功，结果完整");
+            AddSwatchRow(legend, legendFont, 2, truncatedColor, "写入成功，但结果达到「最大导出行数」后被截断");
             return legend;
         }
 
