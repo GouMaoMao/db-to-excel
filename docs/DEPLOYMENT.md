@@ -17,6 +17,8 @@
 
 通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。
 
+推送到 GitHub 之后，`.github/workflows/mirror-gitee.yml` 把 `main` 和 `v` 三段版本标签快进推到 Gitee，并在 Release 发布或更新后把同一个 `db-to-excel.exe` 挂到对应的 Gitee Release。令牌和仓库路径放在 GitHub Actions 的 Secret `GITEE_TOKEN` 与 Variable `GITEE_REPO` 里，不入库。Gitee 上若出现分叉提交，镜像会失败而不是覆盖。
+
 ## 目标环境
 
 - Windows 桌面系统

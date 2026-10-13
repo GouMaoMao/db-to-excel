@@ -18,6 +18,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1
 
 脚本会做完这些事：检查干净的 `main`、Release 构建、核对安装工程引用的文件、对齐低于程序集的产品版本并生成新的 ProductCode、用 Advanced Installer 22.9 生成 exe、打标签 `v` 加版本号、推送，再用 `gh` 把 exe 挂到对应 Release。同一版本再次打包不会更换 ProductCode。
 
+脚本成功后，`.github/workflows/mirror-gitee.yml` 把同一次提交、标签和安装包同步到 Gitee。不要在脚本里再写一套 Gitee 步骤。
+
 不要提交 `installer/`、`bin/` 或 `*.pfx`。脚本不签名。
 
 若脚本因 `bin\Release\x64\SQLite.Interop.dll` 没有进入安装工程而停止，让用户在 Advanced Installer 里把该文件加进安装目录，然后重新运行脚本。不要用脚本改文件表。

@@ -1,0 +1,2 @@
+scripts/mirror-gitee.sh text eol=lf
+.github/workflows/mirror-gitee.yml text eol=lf
