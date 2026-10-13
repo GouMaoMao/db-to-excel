@@ -25,9 +25,14 @@ flowchart LR
 
 ## 1、安装
 
-从Releases下载 `db-to-excel.exe`，并运行这个安装包。点开Excel或WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
+先关闭并退出 Excel 和 WPS。
+
+下载并运行 [db-to-excel.exe](https://github.com/GouMaoMao/db-to-excel/releases/latest/download/db-to-excel.exe)。
+
+打开 Excel 或 WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
 
 > 安装包未签名，Windows 可能提示未知发布者，点击信任即可。
+> 菜单栏没有「SQL查询」时，先完全退出 Excel 或 WPS（含后台进程），再重新打开。
 
 
 
@@ -53,6 +58,7 @@ flowchart LR
   - 第 1 行填写目标输出工作表名称
   - 从第 2 行开始，编写完整 SQL 查询语句，一列对应一个独立查询。
 
+> 工作表名忽略大小写。
 > 效果：每一列的 SQL 执行完成后，查询结果自动写入对应Sheet。
 > ![SQL页](docs/images/SQL页.png)
 
@@ -61,7 +67,7 @@ flowchart LR
 ### 3.2、 刷新步骤
 
 打开功能区「批量刷新」，在左边设置刚保存的连接为当前连接，勾上要更新的列，点窗口里的「批量刷新」。
-![SQL页](docs/images/批量刷新_6.gif)
+![批量刷新](docs/images/批量刷新_6.gif)
 
 ## 4、单次查询
 
