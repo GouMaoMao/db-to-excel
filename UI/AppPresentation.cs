@@ -13,7 +13,7 @@ namespace DB2Sheet.UI
     /// </remarks>
     internal static class AppPresentation
     {
-        public const string DisplayName = "SQL查询";
+        public const string DisplayName = "db-to-excel";
         public const string IconResourceName = "DB2Sheet.Resources.rocket.ico";
         public const string DefaultFontName = "Microsoft YaHei UI";
         public const float DefaultFontSize = 9F;

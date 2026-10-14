@@ -50,7 +50,7 @@
 ### 加载和 Ribbon
 
 - [ ] 从 Visual Studio 启动 Excel，无加载异常。
-- [ ] 显示 Ribbon 标签，文字为「SQL查询」（`AppPresentation.DisplayName`）。
+- [ ] 显示 Ribbon 标签，文字为「db-to-excel」（`AppPresentation.DisplayName`）。
 - [ ] 「SQL 查询」打开查询窗体。再次点击只激活已打开的窗体。
 - [ ] 「批量刷新」在存在 `SQL` 工作表时打开刷新窗体。再次点击只激活已打开的窗体。没有该工作表时提示错误，不打开窗体。
 - [ ] 「连接管理」打开连接管理窗体。

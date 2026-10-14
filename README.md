@@ -34,17 +34,17 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
 - 下载并运行安装包（2选1，国内选Gitee）：
   - GitHub：[db-to-excel.exe](https://github.com/GouMaoMao/db-to-excel/releases/latest/download/db-to-excel.exe)
   - Gitee：打开 [Releases](https://gitee.com/GouMaoMao/db-to-excel/releases)，下载安装 `db-to-excel.exe`。
-- 打开 Excel 或 WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
+- 打开 Excel 或 WPS，菜单栏出现「db-to-excel」选项卡即表示安装成功。
 
 > 安装包未签名，Windows 可能提示不安全，请放心放行。（可以让AI审查代码安全性） 
-> 如果菜单栏没出现「SQL查询」，设置下信任加载项： 
+> 如果菜单栏没出现「db-to-excel」，设置下信任加载项： 
 <img src="docs/images/wps_信任加载项.png" width="500">
 
 
 
 ## 2、新建连接
 
-- 打开 Excel 或 WPS 表格，顶部菜单—>「SQL查询」—>「连接管理」—>「新建」
+- 打开 Excel 或 WPS 表格，顶部菜单—>「db-to-excel」—>「连接管理」—>「新建」
 - 选择数据源类型。
   > 内置支持 SQL Server、MySQL、PostgreSQL、SQLite、DuckDB。 也可选用 JDBC 通用连接，需本机装Java环境，并准备对应数据库的 `.jar` 驱动文件。针对阿里云MaxCompute数仓，使用JDBC连接，详见：[阿里云 MaxCompute JDBC 连接配置](docs/JDBC_MAXCOMPUTE.md)
 - 根据选中的数据源类型，依次填写服务地址、数据库（或文件路径）、账号密码等连接信息。
@@ -79,7 +79,8 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
 - 点击顶部功能区「SQL 查询」，打开查询面板。
 - 输入 SQL 查询语句，支持先预览结果，确认无误后写入指定工作表。
   > 查询方案可保存复用
-  > ![SQL 查询](docs/images/SQL查询.gif)
+  
+![SQL 查询](docs/images/SQL查询.gif)
 
 
 
