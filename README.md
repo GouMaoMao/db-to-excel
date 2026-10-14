@@ -37,8 +37,8 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
 - 打开 Excel 或 WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
 
 > 安装包未签名，Windows 可能提示不安全，请放心放行。（可以让AI审查代码安全性） 
->
-> 如果菜单栏没出现「SQL查询」，设置下信任加载项： ![信任加载项](docs/images/wps_信任加载项.png)
+> 如果菜单栏没出现「SQL查询」，设置下信任加载项： 
+<img src="docs/images/wps_信任加载项.png" width="500">
 
 
 
@@ -50,8 +50,7 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
 - 根据选中的数据源类型，依次填写服务地址、数据库（或文件路径）、账号密码等连接信息。
 - 点击「测试连接」验证连通性；测试成功后，填写显示名称（自定义备注，方便后续识别）。
 - 测试通过后点「保存」。
-![新建连接](docs/images/新建连接_holo.png)
-
+<img src="docs/images/新建连接_holo.png" width="500">
 
 
 ## 3、批量刷新（多 SQL 批量拉取数据）
@@ -66,7 +65,7 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
 
 > 效果：每一列的 SQL 执行完成后，查询结果自动写入对应Sheet。
 > SQL代码随工作簿一起保存和复用，适合需要定期更新的底稿或报表。
-> ![SQL页](docs/images/SQL页.png)
+<img src="docs/images/SQL页.png" width="500">
 
 
 
