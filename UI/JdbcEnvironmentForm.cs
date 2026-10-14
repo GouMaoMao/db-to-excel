@@ -15,6 +15,7 @@ namespace DB2Sheet.UI
     /// <remarks>
     /// 厂商驱动不在此配置，而在连接方案中选择。窗体记住宽高。
     /// 「检测 Java」通过进度窗搜索本机；常见位置没有时继续扫描 C 盘。不提供一键下载安装。
+    /// 说明高出可见区域时，分组内出现纵向滚动条；保存和关闭固定在底部。
     /// </remarks>
     public sealed class JdbcEnvironmentForm : AppForm
     {
@@ -59,10 +60,11 @@ namespace DB2Sheet.UI
             };
             TableLayoutPanel javaLayout = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 ColumnCount = 1,
                 RowCount = 6,
-                AutoSize = true
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
             javaLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             for (int index = 0; index < 6; index++)
@@ -81,7 +83,15 @@ namespace DB2Sheet.UI
             downloadActions.Controls.Add(_openDownloadButton);
             javaLayout.Controls.Add(downloadActions, 0, 3);
             javaLayout.Controls.Add(_javaStatus, 0, 4);
-            javaGroup.Controls.Add(javaLayout);
+
+            Panel scrollHost = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true
+            };
+            scrollHost.Controls.Add(javaLayout);
+            scrollHost.Resize += (sender, args) => FitScrollContent(scrollHost, javaLayout);
+            javaGroup.Controls.Add(scrollHost);
 
             Button saveButton = new Button { Text = "保存", AutoSize = true };
             Button closeButton = new Button { Text = "关闭", AutoSize = true, DialogResult = DialogResult.Cancel };
@@ -341,6 +351,25 @@ namespace DB2Sheet.UI
                 if (label.MaximumSize.Width == width) continue;
                 label.MaximumSize = new Size(width, 0);
             }
+        }
+
+        /// <summary>让说明区与滚动区域同宽。即将超出时先留出滚动条宽度，避免出现滚动条后宽度再跳一次。</summary>
+        /// <param name="scroll">Java 分组里的滚动容器。</param>
+        /// <param name="content">其中的说明表格。高度随内容增长，超出可见区域时由容器显示纵向滚动条。</param>
+        private static void FitScrollContent(Panel scroll, TableLayoutPanel content)
+        {
+            int width = scroll.ClientSize.Width;
+            if (width <= 1) return;
+            int fitted = width;
+            if (!scroll.VerticalScroll.Visible
+                && content.GetPreferredSize(new Size(width, 0)).Height > scroll.ClientSize.Height)
+            {
+                fitted = Math.Max(1, width - SystemInformation.VerticalScrollBarWidth);
+            }
+
+            if (content.MaximumSize.Width == fitted && content.Width == fitted) return;
+            content.MinimumSize = new Size(fitted, 0);
+            content.MaximumSize = new Size(fitted, 0);
         }
 
         private static Control CreatePathRow(Control editor, params Button[] buttons)

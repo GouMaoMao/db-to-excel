@@ -9,9 +9,14 @@ using DB2Sheet.Models;
 namespace DB2Sheet.UI
 {
     /// <summary>列出连接方案，并提供新建、编辑、复制和删除操作。</summary>
-    /// <remarks>编辑与复制结果会保存到仓储；关闭后调用方可通过 <see cref="SelectedProfileId"/> 读取最终选择。</remarks>
+    /// <remarks>
+    /// 编辑与复制结果会保存到仓储；关闭后调用方可通过 <see cref="SelectedProfileId"/> 读取最终选择。
+    /// 列表标题行用灰色底和加粗字，与白色数据行区分。
+    /// </remarks>
     public sealed class ConnectionProfilesForm : AppForm
     {
+        private static readonly Color HeaderBackColor = Color.FromArgb(217, 217, 217);
+
         private readonly IConnectionProfileRepository _repository;
         private readonly IProviderRegistry _providers;
         private readonly IDataSourceExecutionService _executionService;
@@ -19,6 +24,7 @@ namespace DB2Sheet.UI
         private readonly IJdbcEnvironmentStore _jdbcEnvironment;
         private readonly Action _openJdbcEnvironment;
         private readonly ListView _profiles;
+        private readonly Font _headerFont;
         private readonly Button _editButton;
         private readonly Button _copyButton;
         private readonly Button _deleteButton;
@@ -56,6 +62,7 @@ namespace DB2Sheet.UI
             MinimumSize = new Size(560, 360);
             StartPosition = FormStartPosition.Manual;
             FormSizeMemory.Attach(this, settings, "Connections");
+            _headerFont = new Font(Font, FontStyle.Bold);
 
             _profiles = new ListView
             {
@@ -63,7 +70,9 @@ namespace DB2Sheet.UI
                 View = View.Details,
                 FullRowSelect = true,
                 HideSelection = false,
-                MultiSelect = false
+                MultiSelect = false,
+                OwnerDraw = true,
+                BackColor = Color.White
             };
             _profiles.Columns.Add("名称", 280);
             _profiles.Columns.Add("数据源类型", 180);
@@ -115,7 +124,14 @@ namespace DB2Sheet.UI
             _deleteButton.Click += DeleteSelected;
             _profiles.DoubleClick += (sender, args) => EditSelected();
             _profiles.SelectedIndexChanged += (sender, args) => UpdateActions();
-            FormClosed += (sender, args) => _repository.Changed -= RepositoryChanged;
+            _profiles.DrawColumnHeader += ProfilesDrawColumnHeader;
+            _profiles.DrawItem += (sender, args) => args.DrawDefault = true;
+            _profiles.DrawSubItem += (sender, args) => args.DrawDefault = true;
+            FormClosed += (sender, args) =>
+            {
+                _repository.Changed -= RepositoryChanged;
+                _headerFont.Dispose();
+            };
             _repository.Changed += RepositoryChanged;
             AcceptButton = closeButton;
             CancelButton = closeButton;
@@ -130,6 +146,34 @@ namespace DB2Sheet.UI
             _profiles.SelectedItems.Count == 1
                 ? _profiles.SelectedItems[0].Tag as ConnectionProfileSnapshot
                 : null;
+
+        /// <summary>把列标题画成灰色加粗，并铺满标题行右侧空白，与白色数据行区分。</summary>
+        /// <param name="sender">连接方案列表。</param>
+        /// <param name="e">当前列标题的绘制参数。数据行不走这里。</param>
+        private void ProfilesDrawColumnHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            Rectangle bounds = e.Bounds;
+            if (e.ColumnIndex == _profiles.Columns.Count - 1)
+                bounds.Width = Math.Max(bounds.Width, _profiles.ClientSize.Width - bounds.Left);
+
+            using (SolidBrush brush = new SolidBrush(HeaderBackColor))
+                e.Graphics.FillRectangle(brush, bounds);
+            using (Pen border = new Pen(SystemColors.ControlDark))
+            {
+                e.Graphics.DrawLine(border, bounds.Right - 1, bounds.Top, bounds.Right - 1, bounds.Bottom - 1);
+                e.Graphics.DrawLine(border, bounds.Left, bounds.Bottom - 1, bounds.Right - 1, bounds.Bottom - 1);
+            }
+
+            Rectangle textBounds = e.Bounds;
+            textBounds.Inflate(-6, 0);
+            TextRenderer.DrawText(
+                e.Graphics,
+                e.Header.Text,
+                _headerFont,
+                textBounds,
+                SystemColors.ControlText,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
 
         private void ReloadProfiles(string selectedProfileId = null)
         {

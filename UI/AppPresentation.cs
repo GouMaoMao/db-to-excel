@@ -71,7 +71,15 @@ namespace DB2Sheet.UI
 
         /// <summary>选中 JDBC 且未找到 Java 时的横幅文案。</summary>
         public const string JdbcJavaBanner =
-            "其他数据库（JDBC）需要本机 Java（JDK 8 或更高）。请先配置 JDBC 环境，再测试连接。";
+            "通用连接（JDBC）需要本机 Java（JDK 8 或更高）。请先配置 JDBC 环境，再测试连接。";
+
+        /// <summary>一个连接方案都没有时的说明。用于阻止打开查询或批量刷新，以及执行时列表已经为空。</summary>
+        public const string NoConnectionPrompt =
+            "还没有数据库连接。请先点击功能区「连接管理」，再点「新建」。";
+
+        /// <summary>已有连接但未设为当前连接时，预览、写入或批量刷新前的说明。</summary>
+        public const string SetCurrentConnectionPrompt =
+            "请在左侧「数据库连接」列表中选中一个连接，右键选择「设置为当前连接」。";
 
         private const int EmSetCueBanner = 0x1501;
 
@@ -121,7 +129,7 @@ namespace DB2Sheet.UI
                 : DisplayName + " - " + featureName;
         }
 
-        /// <summary>连接类型在界面上的标题。JDBC 显示为「其他数据库（JDBC）」。</summary>
+        /// <summary>连接类型在界面上的标题。JDBC 显示为「通用连接（JDBC）」。</summary>
         /// <param name="providerId">Provider 标识。</param>
         /// <returns>用户可见标题；未知标识时回退原值。</returns>
         public static string ConnectionProviderTitle(string providerId)
@@ -134,7 +142,7 @@ namespace DB2Sheet.UI
                 case "postgresql": return "PostgreSQL";
                 case "sqlite": return "SQLite";
                 case "duckdb": return "DuckDB";
-                case "jdbc": return "其他数据库（JDBC）";
+                case "jdbc": return "通用连接（JDBC）";
                 default: return providerId;
             }
         }

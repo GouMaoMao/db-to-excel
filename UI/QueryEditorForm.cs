@@ -843,16 +843,22 @@ namespace DB2Sheet.UI
         }
 
 
-        /// <summary>检查已选择连接并且 SQL 非空。失败时弹出说明并返回 false。</summary>
+        /// <summary>检查已选择当前连接并且 SQL 非空。失败时弹出说明并返回 false。</summary>
         /// <param name="connection">当前要执行的连接。检查失败时为 null。</param>
         /// <param name="sqlText">要检查的 SQL。为空时使用编辑器全文。</param>
         /// <returns>可以继续预览、保存或写入时为 true。</returns>
+        /// <remarks>没有连接方案时指向连接管理新建；有方案但未设当前连接时指向左侧列表右键。</remarks>
         private bool ValidateInputs(out ConnectionProfileSnapshot connection, string sqlText = null)
         {
             connection = _connectionTree.ExecutionConnection();
             string sql = sqlText ?? _sql.SqlText;
             string message = null;
-            if (connection == null) message = "请选择连接方案。";
+            if (connection == null)
+            {
+                message = _connectionTree.HasConnectionProfiles
+                    ? AppPresentation.SetCurrentConnectionPrompt
+                    : AppPresentation.NoConnectionPrompt;
+            }
             else if (string.IsNullOrWhiteSpace(sql)) message = "请输入 SQL。";
             if (message == null) return true;
             MessageBox.Show(this, message, "SQL 查询", MessageBoxButtons.OK, MessageBoxIcon.Warning);

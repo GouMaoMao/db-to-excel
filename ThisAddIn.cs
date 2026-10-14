@@ -93,6 +93,7 @@ namespace DB2Sheet
         }
 
         /// <summary>打开或激活 SQL 查询单实例窗体。</summary>
+        /// <remarks>还没有连接方案时不创建窗体，提示先到连接管理新建。已经打开时只激活。</remarks>
         private void OpenQueryEditor()
         {
             ExecuteUiAction(() =>
@@ -100,6 +101,7 @@ namespace DB2Sheet
                 ExcelInterop.Workbook workbook = RequireActiveWorkbook();
                 if (_queryEditorForm == null || _queryEditorForm.IsDisposed)
                 {
+                    if (!EnsureConnectionProfile("SQL 查询")) return;
                     _queryEditorForm = new QueryEditorForm(
                         _queries, _connections, _providers, _executionService, _queryBuffer,
                         _resultWriter, _taskReader, _operationRunner, _settings, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
@@ -114,6 +116,7 @@ namespace DB2Sheet
         }
 
         /// <summary>打开或激活批量刷新单实例窗体。</summary>
+        /// <remarks>先确认有 SQL 工作表，再确认至少有一个连接方案。任一不满足都不创建窗体。已经打开时只激活。</remarks>
         private void OpenSheetRefresh()
         {
             ExecuteUiAction(() =>
@@ -130,6 +133,8 @@ namespace DB2Sheet
                             MessageBoxIcon.Warning);
                         return;
                     }
+
+                    if (!EnsureConnectionProfile("Sheet 批量刷新")) return;
                     _sheetRefreshForm = new SheetRefreshForm(
                         _connections, _providers, _executionService, _operationRunner, _settings,
                         _taskReader, _batchRefresh, workbook, _jdbcEnvironment, OpenJdbcEnvironment,
@@ -142,6 +147,20 @@ namespace DB2Sheet
                     ActivateForm(_sheetRefreshForm);
                 }
             });
+        }
+
+        /// <summary>没有连接方案时提示先去连接管理新建。</summary>
+        /// <param name="featureName">提示窗口标题中的功能名，与对应功能窗体标题一致。</param>
+        /// <returns>至少有一个连接方案时为 true。没有时已弹出说明，调用方不要打开窗体。</returns>
+        private bool EnsureConnectionProfile(string featureName)
+        {
+            if (_connections.GetAll().Count > 0) return true;
+            MessageBox.Show(
+                AppPresentation.NoConnectionPrompt,
+                AppPresentation.WindowTitle(featureName),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
         }
 
         /// <summary>以模态方式打开连接方案管理窗体。</summary>

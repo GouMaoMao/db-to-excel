@@ -533,12 +533,21 @@ namespace DB2Sheet.UI
             return string.Empty;
         }
 
+        /// <summary>按勾选任务批量刷新。没有当前连接时先说明如何设置，不开始刷新。</summary>
+        /// <remarks>没有连接方案时指向连接管理新建；有方案但未设当前连接时指向左侧列表右键。</remarks>
         private void RefreshTasks()
         {
             ConnectionProfileSnapshot connection = _connectionTree.ExecutionConnection();
             if (connection == null)
             {
-                MessageBox.Show(this, "请选择连接方案。", "批量刷新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(
+                    this,
+                    _connectionTree.HasConnectionProfiles
+                        ? AppPresentation.SetCurrentConnectionPrompt
+                        : AppPresentation.NoConnectionPrompt,
+                    "批量刷新",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return;
             }
 

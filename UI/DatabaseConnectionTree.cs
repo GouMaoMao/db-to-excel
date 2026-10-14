@@ -112,6 +112,10 @@ namespace DB2Sheet.UI
         /// <summary>获取当前连接方案。没有当前连接时为空。</summary>
         public ConnectionProfileSnapshot ActiveConnection => _activeConnection;
 
+        /// <summary>获取是否至少保存了一个连接方案。</summary>
+        /// <remarks>执行前用来区分提示：没有方案时指向连接管理新建，有方案但未设当前连接时指向左侧列表右键。</remarks>
+        public bool HasConnectionProfiles => _connections.GetAll().Count > 0;
+
         /// <summary>获取是否选中了连接根节点。</summary>
         public bool HasSelectedConnection => SelectedConnectionNode != null;
 
