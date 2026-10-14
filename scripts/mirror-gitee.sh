@@ -44,13 +44,15 @@ ensure_tag() {
 }
 
 # 单次请求无响应时按这次调用的时限失败，再试两次。上传安装包给更长的时限。
-# 诊断写到标准错误，标准输出只留 HTTP 状态码，避免调用方把重试说明当成状态码。
+# 100 是 Expect 的中间状态，不是上传结果。诊断写到标准错误，标准输出只留 HTTP 状态码。
 gitee_request() {
   local method="$1"
   local url="$2"
   local out="$3"
   shift 3
   local query=()
+  local extra=()
+  local speed=()
   local timeout=60
   local attempt code arg
   if [[ "$method" == "GET" || "$method" == "DELETE" ]]; then
@@ -58,24 +60,33 @@ gitee_request() {
   fi
   for arg in "$@"; do
     if [[ "$arg" == file=@* ]]; then
-      timeout=300
+      timeout=600
+      extra=(-H "Expect:")
+      speed=(--speed-limit 1024 --speed-time 45)
       break
     fi
   done
   for attempt in 1 2 3; do
-    code="$(curl -sS --connect-timeout 20 --max-time "$timeout" -o "$out" -w "%{http_code}" \
-      -X "$method" "${query[@]}" "$url" "$@" || true)"
+    : > "$out"
+    code="$(curl -sS --connect-timeout 20 --max-time "$timeout" "${speed[@]}" \
+      -o "$out" -w "%{http_code}" \
+      -X "$method" "${extra[@]}" "${query[@]}" "$url" "$@" || true)"
     if [[ ! "$code" =~ ^[0-9]{3}$ ]]; then
       code="000"
     fi
-    if [[ "$code" != "000" && "$code" != "408" && "$code" != "429" && "$code" != "500" && "$code" != "502" && "$code" != "503" && "$code" != "504" ]]; then
-      printf '%s' "$code"
-      return 0
-    fi
-    if [[ "$attempt" -lt 3 ]]; then
-      echo "Gitee 接口暂时没有响应（HTTP ${code}），5 秒后重试。" >&2
-      sleep 5
-    fi
+    case "$code" in
+      100|000|408|429|500|502|503|504)
+        if [[ "$attempt" -lt 3 ]]; then
+          echo "Gitee 接口暂时没有响应（HTTP ${code}），5 秒后重试。" >&2
+          sleep 5
+          continue
+        fi
+        ;;
+      *)
+        printf '%s' "$code"
+        return 0
+        ;;
+    esac
   done
   printf '%s' "$code"
 }
