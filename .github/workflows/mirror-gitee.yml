@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 只同步这个版本标签的安装包，例如 v1.0.6。留空则同步全部。
+        description: 只补推这个版本标签，例如 v1.0.6。留空则补推 main 和全部三段版本标签。不上传安装包。
         required: false
         type: string
 
@@ -37,14 +37,11 @@ jobs:
 
       - name: 镜像到 Gitee
         env:
-          GH_TOKEN: ${{ github.token }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_BODY: ${{ github.event.release.body }}
           MIRROR_TAG: ${{ inputs.tag }}
         run: bash scripts/mirror-gitee.sh
