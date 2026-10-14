@@ -11,6 +11,11 @@ on:
       - published
       - edited
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 只同步这个版本标签的安装包，例如 v1.0.6。留空则同步全部。
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -41,4 +46,5 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_NAME: ${{ github.event.release.name }}
           RELEASE_BODY: ${{ github.event.release.body }}
+          MIRROR_TAG: ${{ inputs.tag }}
         run: bash scripts/mirror-gitee.sh

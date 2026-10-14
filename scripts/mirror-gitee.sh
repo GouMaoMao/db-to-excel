@@ -61,7 +61,7 @@ gitee_request() {
   for arg in "$@"; do
     if [[ "$arg" == file=@* ]]; then
       timeout=600
-      extra=(-H "Expect:")
+      extra=(--http1.1 -H "Expect:")
       speed=(--speed-limit 1024 --speed-time 45)
       break
     fi
@@ -264,6 +264,18 @@ on_release() {
 
 on_backfill() {
   local tag meta title notes has dir
+  if [[ -n "${MIRROR_TAG:-}" ]]; then
+    if [[ ! "$MIRROR_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "MIRROR_TAG 必须是 v主.次.修订，当前是：${MIRROR_TAG}"
+      exit 1
+    fi
+    meta="$(gh release view "$MIRROR_TAG" --json name,body)"
+    RELEASE_TAG="$MIRROR_TAG"
+    RELEASE_NAME="$(jq -r '.name // ""' <<<"$meta")"
+    RELEASE_BODY="$(jq -r '.body // ""' <<<"$meta")"
+    on_release
+    return
+  fi
   push_ref HEAD refs/heads/main
   while IFS= read -r tag; do
     [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
