@@ -43,7 +43,8 @@ ensure_tag() {
   fi
 }
 
-# 单次请求无响应时按这次调用的时限失败，再试两次。上传安装包给更长的时限。
+# 单次请求无响应时失败后再试。查询最多三次，每次一分钟。
+# 上传安装包最多两次，每次最多三十分钟，并记下已发送字节，便于判断是卡住还是链路太慢。
 # 100 是 Expect 的中间状态，不是上传结果。诊断写到标准错误，标准输出只留 HTTP 状态码。
 gitee_request() {
   local method="$1"
@@ -54,33 +55,38 @@ gitee_request() {
   local extra=()
   local speed=()
   local timeout=60
-  local attempt code arg
+  local tries=3
+  local attempt code arg result sent
   if [[ "$method" == "GET" || "$method" == "DELETE" ]]; then
     query=(-G)
   fi
   for arg in "$@"; do
     if [[ "$arg" == file=@* ]]; then
-      timeout=600
+      timeout=1800
+      tries=2
       extra=(--http1.1 -H "Expect:")
       speed=(--speed-limit 1024 --speed-time 45)
       break
     fi
   done
-  for attempt in 1 2 3; do
+  for ((attempt = 1; attempt <= tries; attempt++)); do
     : > "$out"
-    code="$(curl -sS --connect-timeout 20 --max-time "$timeout" "${speed[@]}" \
-      -o "$out" -w "%{http_code}" \
+    result="$(curl -sS --connect-timeout 20 --max-time "$timeout" "${speed[@]}" \
+      -o "$out" -w "%{http_code} %{size_upload}" \
       -X "$method" "${extra[@]}" "${query[@]}" "$url" "$@" || true)"
+    code="${result%% *}"
+    sent="${result##* }"
     if [[ ! "$code" =~ ^[0-9]{3}$ ]]; then
       code="000"
     fi
     case "$code" in
       100|000|408|429|500|502|503|504)
-        if [[ "$attempt" -lt 3 ]]; then
-          echo "Gitee 接口暂时没有响应（HTTP ${code}），5 秒后重试。" >&2
+        if [[ "$attempt" -lt "$tries" ]]; then
+          echo "Gitee 接口暂时没有响应（HTTP ${code}，已发送 ${sent} 字节），5 秒后重试。" >&2
           sleep 5
           continue
         fi
+        echo "Gitee 接口没有完成（HTTP ${code}，已发送 ${sent} 字节）。" >&2
         ;;
       *)
         printf '%s' "$code"
