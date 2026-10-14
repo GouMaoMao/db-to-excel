@@ -36,8 +36,9 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
   - Gitee：打开 [Releases](https://gitee.com/GouMaoMao/db-to-excel/releases)，下载安装 `db-to-excel.exe`。
 - 打开 Excel 或 WPS，菜单栏出现「SQL查询」选项卡即表示安装成功。
 
-> 安装包未签名，Windows 可能提示未知发布者，点击信任即可。
-> 菜单栏没有「SQL查询」时，先完全退出 Excel 或 WPS（含后台进程），再重新打开。
+> 安装包未签名，Windows 可能提示不安全，请放心放行。（可以让AI审查代码安全性） 
+>
+> 如果菜单栏没出现「SQL查询」，设置下信任加载项： ![信任加载项](docs/images/wps_信任加载项.png)
 
 
 
