@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using DB2Sheet.Models;
+using DB2Sheet.Services;
 
 namespace DB2Sheet.Excel
 {
@@ -193,7 +194,7 @@ namespace DB2Sheet.Excel
 
         /// <summary>取出 SQL 命令开始前的注释，作为列表摘要。</summary>
         /// <param name="queryText">第 2 行起拼接后的 SQL，可含前置注释。</param>
-        /// <returns>去掉注释记号后的文本。没有前置注释时为空。命令开始后的注释不计入。</returns>
+        /// <returns>去掉注释记号后的文本。没有前置注释时为空。命令开始后的注释不计入。查询方案开头的说明块也不计入。</returns>
         public static string ExtractLeadingComment(string queryText)
         {
             List<string> parts = new List<string>();
@@ -356,11 +357,14 @@ namespace DB2Sheet.Excel
                     int end = query.IndexOf("*/", index, StringComparison.Ordinal);
                     if (end < 0)
                     {
-                        AddComment(parts, query.Substring(index));
+                        if (!QuerySchemeNote.IsNoteBody(query.Substring(index)))
+                            AddComment(parts, query.Substring(index));
                         return query.Length;
                     }
 
-                    AddComment(parts, query.Substring(index, end - index));
+                    string body = query.Substring(index, end - index);
+                    if (!QuerySchemeNote.IsNoteBody(body))
+                        AddComment(parts, body);
                     index = end + 2;
                     continue;
                 }

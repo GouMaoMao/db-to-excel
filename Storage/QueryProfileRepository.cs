@@ -60,7 +60,11 @@ namespace DB2Sheet.Storage
             lock (_syncRoot)
             {
                 QueryProfile copy = Copy(profile);
-                copy.UpdatedUtc = DateTime.UtcNow;
+                // 调用方刚刚指定的修改时间保留，使 SQL 说明和悬停用同一次时钟。
+                // 更早的时间仍在这里刷新，因此重命名会更新修改时间，但不会改写 SQL。
+                DateTime now = DateTime.UtcNow;
+                if (copy.UpdatedUtc == default(DateTime) || now - copy.UpdatedUtc > TimeSpan.FromSeconds(2))
+                    copy.UpdatedUtc = now;
                 int index = _profiles.FindIndex(item =>
                     string.Equals(item.Id, copy.Id, StringComparison.OrdinalIgnoreCase));
                 if (index >= 0) _profiles[index] = copy;
@@ -127,6 +131,8 @@ namespace DB2Sheet.Storage
                 Description = source.Description,
                 CreatedUtc = source.CreatedUtc,
                 UpdatedUtc = source.UpdatedUtc,
+                CreatedBy = source.CreatedBy,
+                UpdatedBy = source.UpdatedBy,
                 ProviderOptions = new Dictionary<string, string>(source.ProviderOptions ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)
             };
         }

@@ -88,6 +88,10 @@ namespace DB2Sheet.Models
         [DataMember(Order = 8)] public DateTime UpdatedUtc { get; set; }
         /// <summary>获取或设置提供程序专用选项。</summary>
         [DataMember(Order = 9)] public Dictionary<string, string> ProviderOptions { get; set; }
+        /// <summary>获取或设置创建人。只在方案第一次落盘时写入，旧方案没有记录时为空。</summary>
+        [DataMember(Order = 10)] public string CreatedBy { get; set; }
+        /// <summary>获取或设置最后一次保存的修改人。还没有记录时为空。</summary>
+        [DataMember(Order = 11)] public string UpdatedBy { get; set; }
     }
 
     /// <summary>表示从 SQL Sheet 单元格解析出的一个批量刷新任务。</summary>

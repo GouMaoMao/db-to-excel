@@ -38,8 +38,11 @@ namespace DB2Sheet.UI
         private readonly TabControl _queryTabs;
         private readonly Label _emptyEditorHint;
         private readonly DataGridView _preview;
-        private readonly Label _queryInfoLabel;
         private readonly Label _sqlQueryNameLabel;
+        private readonly ToolTip _profileTip = new ToolTip();
+        private readonly Timer _profileTipTimer = new Timer();
+        private int _profileTipIndex = -1;
+        private string _profileTipText = string.Empty;
         private readonly Label _sqlLimitHint;
         private readonly Font _sqlLimitHintFont;
         private readonly ToolStripStatusLabel _status;
@@ -157,16 +160,6 @@ namespace DB2Sheet.UI
                     WrapMode = DataGridViewTriState.True
                 }
             };
-            _queryInfoLabel = new Label
-            {
-                Dock = DockStyle.Bottom,
-                Height = 70,
-                Padding = new Padding(8, 8, 8, 6),
-                ForeColor = SystemColors.GrayText,
-                BorderStyle = BorderStyle.FixedSingle,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Text = "查询方案名称：未保存" + Environment.NewLine + "连接方案：未选择" + Environment.NewLine + "保存时间：未保存"
-            };
             _sqlQueryNameLabel = new Label
             {
                 Dock = DockStyle.Fill,
@@ -283,7 +276,7 @@ namespace DB2Sheet.UI
                 Orientation = Orientation.Horizontal
             };
             _leftSplit.Panel1.Controls.Add(SectionPanel("数据库连接", _connectionTree));
-            _leftSplit.Panel2.Controls.Add(SectionPanel("查询方案", BuildQueryProfilesPanel()));
+            _leftSplit.Panel2.Controls.Add(SectionPanel("查询方案", _queryProfiles));
 
             _workspace = new SplitContainer
             {
@@ -310,16 +303,15 @@ namespace DB2Sheet.UI
             _emptyEditorHint.MouseUp += EmptyEditorMouseUp;
             _queryProfiles.SelectedIndexChanged += QueryProfilesSelectedIndexChanged;
             _queryProfiles.MouseUp += QueryProfilesMouseUp;
+            _queryProfiles.MouseMove += QueryProfilesMouseMove;
+            _queryProfiles.MouseLeave += QueryProfilesMouseLeave;
             _queryProfiles.DrawItem += QueryProfilesDrawItem;
+            _profileTipTimer.Interval = 500;
+            _profileTipTimer.Tick += ProfileTipTimerTick;
             _preview.RowPostPaint += PreviewRowPostPaint;
             _preview.CellPainting += PreviewCellPainting;
-            _connectionTree.NoticeChanged += (sender, args) =>
-            {
-                _status.Text = _connectionTree.Notice;
-                UpdateQueryInfo();
-            };
+            _connectionTree.NoticeChanged += (sender, args) => _status.Text = _connectionTree.Notice;
             _connectionTree.SelectionChanged += (sender, args) => UpdateConnectionMenuState();
-            _connectionTree.ActiveConnectionChanged += (sender, args) => UpdateQueryInfo();
             FormClosing += QueryEditorFormFormClosing;
             FormClosed += QueryEditorFormFormClosed;
             Activated += (sender, args) => UpdateSqlLimitHint();
@@ -370,7 +362,7 @@ namespace DB2Sheet.UI
         /// <summary>新开一个空白页签，标题用尚未占用的「新建查询」序号。</summary>
         private void NewQuery()
         {
-            AddTab(NextNewQueryName(), string.Empty, Guid.NewGuid().ToString("N"), DateTime.UtcNow, null, false);
+            AddTab(NextNewQueryName(), string.Empty, Guid.NewGuid().ToString("N"), DateTime.UtcNow, null, false, null);
             _status.Text = "新查询方案。";
         }
 
@@ -398,7 +390,7 @@ namespace DB2Sheet.UI
                 return;
             }
 
-            AddTab(profile.Name, profile.QueryText, profile.Id, profile.CreatedUtc, profile.UpdatedUtc, true);
+            AddTab(profile.Name, profile.QueryText, profile.Id, profile.CreatedUtc, profile.UpdatedUtc, true, profile.CreatedBy);
             _status.Text = "已打开查询方案。";
         }
 
@@ -455,26 +447,44 @@ namespace DB2Sheet.UI
                 CloseTabs(duplicate.Id, false, tab);
                 tab.Id = duplicate.Id;
                 tab.CreatedUtc = duplicate.CreatedUtc;
+                tab.CreatedBy = duplicate.CreatedBy;
                 overwritten = true;
             }
 
+            string person = CurrentPerson();
+            string createdBy = overwritten || tab.IsPersisted ? tab.CreatedBy : person;
+            DateTime createdUtc = tab.CreatedUtc == default(DateTime) ? DateTime.UtcNow : tab.CreatedUtc;
+            DateTime updatedUtc = DateTime.UtcNow;
+            string connectionName = string.IsNullOrWhiteSpace(connection.Name) ? "未选择" : connection.Name;
+            tab.Editor.SqlText = QuerySchemeNote.Apply(
+                tab.Editor.SqlText,
+                queryName,
+                connectionName,
+                createdBy,
+                createdUtc,
+                person,
+                updatedUtc);
+            string sql = tab.Editor.SqlText;
             QueryProfile profile = new QueryProfile
             {
                 Id = string.IsNullOrWhiteSpace(tab.Id) ? Guid.NewGuid().ToString("N") : tab.Id,
                 Name = queryName,
                 ProviderId = connection.ProviderId,
                 ConnectionProfileId = connection.Id,
-                QueryText = tab.Editor.SqlText,
-                CreatedUtc = tab.CreatedUtc == default(DateTime) ? DateTime.UtcNow : tab.CreatedUtc,
-                UpdatedUtc = DateTime.UtcNow
+                QueryText = sql,
+                CreatedUtc = createdUtc,
+                UpdatedUtc = updatedUtc,
+                CreatedBy = createdBy,
+                UpdatedBy = person
             };
             _queries.Save(profile);
             QueryProfile stored = _queries.GetById(profile.Id);
             tab.Id = profile.Id;
             tab.Name = queryName;
             tab.CreatedUtc = profile.CreatedUtc;
+            tab.CreatedBy = createdBy;
             tab.SavedUtc = stored != null ? stored.UpdatedUtc : profile.UpdatedUtc;
-            tab.SavedSql = tab.Editor.SqlText;
+            tab.SavedSql = sql;
             tab.IsPersisted = true;
             RefreshTabTitle(tab);
             ReloadQueries(profile.Id);
@@ -584,47 +594,41 @@ namespace DB2Sheet.UI
             _status.Text = "查询方案已删除。";
         }
 
-        /// <summary>按当前页签刷新左下角方案信息和标题栏上的当前方案。没有页签时三项都回到未保存。</summary>
+        /// <summary>按当前页签刷新标题栏上的当前方案。没有页签时显示未保存。</summary>
         private void UpdateQueryInfo()
         {
             QueryTab tab = ActiveTab;
-            string name = "未保存";
-            string connectionName = "未选择";
-            string savedTime = "未保存";
-            if (tab != null)
-            {
-                name = string.IsNullOrWhiteSpace(tab.Name) ? "未保存" : tab.Name;
-                if (tab.IsPersisted)
-                {
-                    QueryProfile profile = _queries.GetById(tab.Id);
-                    if (profile != null)
-                    {
-                        ConnectionProfileSnapshot connection = _connections.GetById(profile.ConnectionProfileId);
-                        if (!string.IsNullOrWhiteSpace(connection?.Name)) connectionName = connection.Name;
-                    }
-                }
-
-                if (connectionName == "未选择" && !string.IsNullOrWhiteSpace(_connectionTree.ActiveConnection?.Name))
-                    connectionName = _connectionTree.ActiveConnection.Name;
-                if (tab.SavedUtc.HasValue)
-                    savedTime = tab.SavedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-            }
-
-            _queryInfoLabel.Text = string.Format(
-                "查询方案名称：{0}{3}连接方案：{1}{3}保存时间：{2}",
-                name,
-                connectionName,
-                savedTime,
-                Environment.NewLine);
+            string name = tab == null || string.IsNullOrWhiteSpace(tab.Name) ? "未保存" : tab.Name;
             _sqlQueryNameLabel.Text = "当前方案：" + name;
         }
 
-        private Control BuildQueryProfilesPanel()
+        /// <summary>读取当前 Windows 用户名，以及 Excel 或 WPS 选项里的用户名。</summary>
+        /// <returns>拼好的修改人。表格用户名读不出来时只保留 Windows 用户名，不中断保存。</returns>
+        private string CurrentPerson()
         {
-            Panel panel = new Panel { Dock = DockStyle.Fill };
-            panel.Controls.Add(_queryProfiles);
-            panel.Controls.Add(_queryInfoLabel);
-            return panel;
+            string spreadsheet = string.Empty;
+            try
+            {
+                if (_workbook != null && _workbook.Application != null)
+                    spreadsheet = _workbook.Application.UserName;
+            }
+            catch (Exception)
+            {
+                // 表格进程读不出用户名时仍继续保存，修改人只保留 Windows 用户名。
+            }
+
+            return QuerySchemeNote.FormatPerson(Environment.UserName, spreadsheet);
+        }
+
+        /// <summary>把连接标识换成悬停里要显示的名称。</summary>
+        /// <param name="connectionId">方案记录的连接标识。</param>
+        /// <returns>连接名称。没有标识时为「未选择」，标识已不存在时为「连接已删除」。</returns>
+        private string ConnectionDisplayName(string connectionId)
+        {
+            if (string.IsNullOrWhiteSpace(connectionId)) return "未选择";
+            ConnectionProfileSnapshot connection = _connections.GetById(connectionId);
+            if (connection == null || string.IsNullOrWhiteSpace(connection.Name)) return "连接已删除";
+            return connection.Name;
         }
 
         private Panel BuildSqlHeader(Control actions)
@@ -1013,7 +1017,7 @@ namespace DB2Sheet.UI
                     ? AppPresentation.SetCurrentConnectionPrompt
                     : AppPresentation.NoConnectionPrompt;
             }
-            else if (string.IsNullOrWhiteSpace(sql)) message = "请输入 SQL。";
+            else if (QuerySchemeNote.LacksStatement(sql)) message = "请输入 SQL。";
             if (message == null) return true;
             MessageBox.Show(this, message, "SQL 查询", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
@@ -1043,7 +1047,13 @@ namespace DB2Sheet.UI
             _queryTabs.SelectedIndexChanged -= QueryTabsSelectedIndexChanged;
             _emptyEditorHint.MouseUp -= EmptyEditorMouseUp;
             _queryProfiles.MouseUp -= QueryProfilesMouseUp;
+            _queryProfiles.MouseMove -= QueryProfilesMouseMove;
+            _queryProfiles.MouseLeave -= QueryProfilesMouseLeave;
             _queryProfiles.DrawItem -= QueryProfilesDrawItem;
+            _profileTipTimer.Tick -= ProfileTipTimerTick;
+            _profileTipTimer.Stop();
+            _profileTipTimer.Dispose();
+            _profileTip.Dispose();
             _preview.RowPostPaint -= PreviewRowPostPaint;
             _preview.CellPainting -= PreviewCellPainting;
             _queryProfileMenu.Dispose();
@@ -1148,6 +1158,54 @@ namespace DB2Sheet.UI
             _queryProfileMenu.Show(_queryProfiles, e.Location);
         }
 
+        /// <summary>鼠标换到另一项时重新计时，停约半秒后显示该项的方案说明。</summary>
+        private void QueryProfilesMouseMove(object sender, MouseEventArgs e)
+        {
+            int index = _queryProfiles.IndexFromPoint(e.Location);
+            if (index == _profileTipIndex) return;
+
+            HideProfileTip();
+            _profileTipIndex = index;
+            if (index < 0 || index >= _queryProfiles.Items.Count) return;
+            QueryItem item = _queryProfiles.Items[index] as QueryItem;
+            if (item == null || item.Profile == null) return;
+
+            QueryProfile profile = item.Profile;
+            _profileTipText = QuerySchemeNote.FormatLines(
+                profile.Name,
+                ConnectionDisplayName(profile.ConnectionProfileId),
+                profile.CreatedBy,
+                profile.CreatedUtc,
+                profile.UpdatedBy,
+                profile.UpdatedUtc);
+            _profileTipTimer.Start();
+        }
+
+        /// <summary>离开方案列表时关掉悬停说明。</summary>
+        private void QueryProfilesMouseLeave(object sender, EventArgs e)
+        {
+            _profileTipIndex = -1;
+            _profileTipText = string.Empty;
+            HideProfileTip();
+        }
+
+        /// <summary>在当前项下方显示已经准备好的方案说明。</summary>
+        private void ProfileTipTimerTick(object sender, EventArgs e)
+        {
+            _profileTipTimer.Stop();
+            if (_profileTipIndex < 0 || _profileTipIndex >= _queryProfiles.Items.Count) return;
+            if (string.IsNullOrEmpty(_profileTipText)) return;
+            Rectangle bounds = _queryProfiles.GetItemRectangle(_profileTipIndex);
+            _profileTip.Show(_profileTipText, _queryProfiles, _queryProfiles.ClientSize.Width + 2, bounds.Top, 15000);
+        }
+
+        /// <summary>停掉悬停计时并隐藏说明。移到另一项或离开列表时调用。</summary>
+        private void HideProfileTip()
+        {
+            _profileTipTimer.Stop();
+            _profileTip.Hide(_queryProfiles);
+        }
+
         private void ShowError(Exception exception)
         {
             _status.Text = exception.Message;
@@ -1239,8 +1297,9 @@ namespace DB2Sheet.UI
         /// <param name="createdUtc">方案创建时间。</param>
         /// <param name="savedUtc">上次保存时间。尚未保存时为空。</param>
         /// <param name="persisted">该标识已经在查询方案仓储中时为 true。</param>
+        /// <param name="createdBy">创建人。新建或旧方案没有记录时为空，第一次保存才写入。</param>
         /// <returns>新建的页签。编辑器由页签持有，关闭页签时释放。</returns>
-        private QueryTab AddTab(string name, string sql, string id, DateTime createdUtc, DateTime? savedUtc, bool persisted)
+        private QueryTab AddTab(string name, string sql, string id, DateTime createdUtc, DateTime? savedUtc, bool persisted, string createdBy)
         {
             SqlEditorControl editor = new SqlEditorControl(_formatting) { Dock = DockStyle.Fill };
             editor.SqlText = sql ?? string.Empty;
@@ -1249,6 +1308,7 @@ namespace DB2Sheet.UI
                 Id = id,
                 Name = name,
                 CreatedUtc = createdUtc,
+                CreatedBy = createdBy,
                 SavedUtc = savedUtc,
                 SavedSql = editor.SqlText,
                 IsPersisted = persisted
@@ -1708,6 +1768,9 @@ namespace DB2Sheet.UI
 
             /// <summary>方案创建时间（UTC）。</summary>
             public DateTime CreatedUtc { get; set; }
+
+            /// <summary>创建人。第一次落盘前为空；旧方案没有记录时保持为空。</summary>
+            public string CreatedBy { get; set; }
 
             /// <summary>上次保存时间（UTC）。尚未保存时为空。</summary>
             public DateTime? SavedUtc { get; set; }
