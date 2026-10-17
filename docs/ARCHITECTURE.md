@@ -97,7 +97,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `ConnectionProfileEditForm`：由 Provider 参数元数据动态生成字段。
 - `ConnectionProfilesForm`：连接方案增删改。
 - `SettingsForm`：由设置注册表动态生成编辑界面。
-- `QueryEditorForm`：交互式 SQL 查询、方案复用、预览和导出。
+- `QueryEditorForm`：交互式 SQL 查询。一页签一份方案，可关闭和重命名；预览跟着当前页签。细则见 `.github/copilot-instructions.md`。
 - `SheetRefreshForm`：SQL Sheet 任务展示、批量刷新，以及「格式」菜单里的美化和格式设置。细则见 `.github/copilot-instructions.md`。
 - `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
 - `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」「JDBC 环境」。关于组显示版本。窗体和按钮的细则见 `.github/copilot-instructions.md`。

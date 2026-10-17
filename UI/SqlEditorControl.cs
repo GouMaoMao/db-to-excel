@@ -55,6 +55,7 @@ namespace DB2Sheet.UI
             Controls.Add(_editor);
 
             _editor.KeyDown += EditorKeyDown;
+            _editor.TextChanged += (sender, args) => SqlTextChanged?.Invoke(this, EventArgs.Empty);
             _copyItem.Click += (sender, args) => _editor.Copy();
             _executeSelectionItem.Click += (sender, args) => ExecuteSelectionRequested?.Invoke(this, EventArgs.Empty);
             _formatItem.Click += (sender, args) => FormatSelectionOrAll();
@@ -63,6 +64,10 @@ namespace DB2Sheet.UI
 
         /// <summary>用户请求预览当前非空选区时触发。</summary>
         public event EventHandler ExecuteSelectionRequested;
+
+        /// <summary>编辑器文本变化时触发，供页签刷新未保存标记。</summary>
+        /// <remarks>设置 <see cref="SqlText"/> 也会触发。调用方在写入基线文本后再订阅，避免把载入当成修改。</remarks>
+        public event EventHandler SqlTextChanged;
 
         /// <summary>获取或设置编辑器中的 SQL 文本。</summary>
         public string SqlText

@@ -37,7 +37,7 @@ DB2Sheet 是一个基于 .NET Framework 4.7.2 的 Excel VSTO 加载项。它面�
 - 可扩展设置注册表、未知键保留、动态设置界面和批量保存。
 - 滚动文件日志和关联 ID。查询日志写入 SQL 正文和哈希；文件日志对密码类键脱敏。
 - 动态连接参数编辑、连接测试、连接管理和共享连接选择控件。
-- `QueryEditorForm`：SQL 编辑、方案复用、结果预览、写入目标 Sheet。
+- `QueryEditorForm`：多页签 SQL 编辑、方案复用、结果预览、写入目标 Sheet。
 - `SheetRefreshForm`：扫描 SQL Sheet、展示任务、统一连接选择、批量刷新，以及「格式」菜单里的美化和格式设置。细则见 `.github/copilot-instructions.md`。
 - SQL 页协议的实现见 `Excel/SqlSheetTaskParser` 与 `Excel/SqlSheetHeader`。细则见 `.github/copilot-instructions.md`。
 - Excel 写入：交互查询只清空目标表已用区域的值并从 A1 写；批量刷新按起始单元格锚定，多余列仅在参数要求时清空值。原先单元格上的数值格式、字体、对齐和填充保留，多出来的行不继承。
