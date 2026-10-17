@@ -20,7 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1
 
 脚本会做完这些事：检查干净的 `main`、Release 构建、核对安装工程引用的文件、对齐低于程序集的产品版本并生成新的 ProductCode、用 Advanced Installer 22.9 生成 exe、打标签 `v` 加版本号、推送，再用 `gh` 把 exe 挂到对应 GitHub Release。同一版本再次打包不会更换 ProductCode。然后用本机 exe 上传到 Gitee。
 
-本机环境变量 `GITEE_TOKEN` 和 `GITEE_REPO`（`owner/repo`）必须已设置。脚本一开始就检查，缺了立刻停止。令牌不写入 git 配置，也不打到日志里。
+本机 `GITEE_TOKEN` 和 `GITEE_REPO`（`owner/repo`）写在 `.github/gitee.local`，该文件已加入 `.gitignore`。环境变量若已设置则优先于文件。脚本一开始就检查，缺了立刻停止。令牌不入库、不写入 git 配置，也不打到日志里。GitHub Actions 里的同名 Secret 和 Variable 只给定时镜像用。
 
 `.github/workflows/mirror-gitee.yml` 只把同一次提交和标签镜像到 Gitee，不传安装包。
 

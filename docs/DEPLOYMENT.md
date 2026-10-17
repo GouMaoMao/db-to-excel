@@ -15,7 +15,7 @@
 - 安装工程引用 `x64\SQLite.Interop.dll`。Release 已生成该文件但工程未引用时，脚本停止，并且不会改安装工程的文件表。
 - 安装工程的 `ProductVersion` 不高于程序集版本。低于程序集版本时，脚本调用 Advanced Installer 对齐版本并生成新的 `ProductCode`。
 
-通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。接着用本机刚生成的 exe 上传到 Gitee：先把 `main` 和该标签推到 Gitee，再创建或更新对应 Release，已有同名 `db-to-excel.exe` 会先删掉再上传。本机需要环境变量 `GITEE_TOKEN` 和 `GITEE_REPO`（`owner/repo`），脚本一开始就检查。
+通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。接着用本机刚生成的 exe 上传到 Gitee：先把 `main` 和该标签推到 Gitee，再创建或更新对应 Release，已有同名 `db-to-excel.exe` 会先删掉再上传。本机把 `GITEE_TOKEN` 和 `GITEE_REPO`（`owner/repo`）写在 `.github/gitee.local`，该文件不入库；环境变量若已设置则优先。脚本一开始就检查。
 
 `.github/workflows/mirror-gitee.yml` 只把 `main` 和 `v` 三段版本标签快进推到 Gitee，不下载、也不上传安装包。手动运行时可填写一个版本标签，只补推该标签。令牌和仓库路径仍放在 GitHub Actions 的 Secret `GITEE_TOKEN` 与 Variable `GITEE_REPO` 里，给定时 git 镜像用，不入库。Gitee 上若出现分叉提交，镜像会失败而不是覆盖。
 

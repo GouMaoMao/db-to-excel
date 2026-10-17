@@ -34,6 +34,7 @@ packages/
 # Signing and local secrets
 *.pfx
 *.snk
+.github/gitee.local
 
 # Logs and temporary files
 *.log

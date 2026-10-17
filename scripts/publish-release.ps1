@@ -253,10 +253,28 @@ function Publish-GiteeRelease {
 
 Set-Location $Root
 
+$giteeLocal = Join-Path $Root ".github\gitee.local"
+if (Test-Path -LiteralPath $giteeLocal) {
+    foreach ($line in Get-Content -LiteralPath $giteeLocal -Encoding UTF8) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -eq 0 -or $trimmed.StartsWith("#")) { continue }
+        $separator = $trimmed.IndexOf("=")
+        if ($separator -lt 1) { continue }
+        $name = $trimmed.Substring(0, $separator).Trim()
+        $value = $trimmed.Substring($separator + 1).Trim()
+        if ($name -eq "GITEE_TOKEN" -and [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN)) {
+            $env:GITEE_TOKEN = $value
+        }
+        elseif ($name -eq "GITEE_REPO" -and [string]::IsNullOrWhiteSpace($env:GITEE_REPO)) {
+            $env:GITEE_REPO = $value
+        }
+    }
+}
+
 $script:GiteeToken = $env:GITEE_TOKEN
 $script:GiteeRepo = $env:GITEE_REPO
 if ([string]::IsNullOrWhiteSpace($script:GiteeToken) -or [string]::IsNullOrWhiteSpace($script:GiteeRepo)) {
-    Stop-Release "缺少环境变量 GITEE_TOKEN 或 GITEE_REPO。GITEE_REPO 形如 owner/repo。先设置再发布，避免构建完才发现传不了安装包。"
+    Stop-Release "缺少 GITEE_TOKEN 或 GITEE_REPO。写在本机 .github\gitee.local，或设成环境变量。GITEE_REPO 形如 owner/repo。该文件已忽略，不要提交。"
 }
 if ($script:GiteeRepo -notmatch '^[^/\s]+/[^/\s]+$') {
     Stop-Release "GITEE_REPO 必须是 owner/repo，当前是：$($script:GiteeRepo)"
