@@ -3,7 +3,7 @@
 ## 技术基础
 
 - .NET Framework 4.7.2
-- Excel VSTO Add-in
+- Excel VSTO Add-in。宿主是 Excel 与 WPS 表格。
 - Windows Forms
 - Microsoft Office Interop Excel
 - ADO.NET 数据库 Provider
@@ -78,15 +78,15 @@
 
 仓储采用临时文件和替换方式写入；损坏的 JSON 会被重命名备份。
 
-当前连接密码仍保存在本地连接 JSON 中。生产发布前应评估 Windows DPAPI 或凭据管理器保护。
+连接密码明文写在 `connections.json`。保护方式见 `docs/DEPLOYMENT.md` 的「安全要求」。
 
 ### Excel
 
-- `SqlSheetTaskReader`：读取固定名称 `SQL` 的工作表，交给 `SqlSheetTaskParser` 解析。写入列不上色；改写首行只重套表名色。整表美化由批量刷新窗的「格式」菜单经进度窗按列执行。细则见 `.github/copilot-instructions.md`。
-- `SqlSheetHeader`：解析每列第 1 行的目标表名，以及 `//` 后的参数。当前会执行的键是「起始单元格」和「清空多余列」。
-- `ExcelResultWriter`：查找或创建目标 Sheet，写一行标题和数据块。交互查询只清空目标表已用区域的值并从 A1 写。批量刷新按起始单元格锚定，右侧多余列仅在参数要求时清空值。原先单元格上的数值格式、字体、对齐和填充保留，多出来的行不继承。
+- `SqlSheetTaskReader`：读取固定名称 `SQL` 的工作表，交给 `SqlSheetTaskParser` 解析。
+- `SqlSheetHeader`：解析每列第 1 行的目标表名，以及 `//` 后的参数。
+- `ExcelResultWriter`：查找或创建目标 Sheet，写一行标题和数据块。
 
-每列一个任务。第 2 行起的非空单元格拼成 SQL，前置注释留在 SQL 里并作为列表摘要。目标表名忽略大小写后必须唯一，否则整批不写。列协议的细则见 `.github/copilot-instructions.md`。
+列协议、写入区域和格式保留的细则见 `.github/copilot-instructions.md`。
 
 Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程直接操作 Workbook、Worksheet 或 Range。
 
@@ -97,10 +97,12 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `ConnectionProfileEditForm`：由 Provider 参数元数据动态生成字段。
 - `ConnectionProfilesForm`：连接方案增删改。
 - `SettingsForm`：由设置注册表动态生成编辑界面。
-- `QueryEditorForm`：交互式 SQL 查询。一页签一份方案，可关闭和重命名；预览跟着当前页签。细则见 `.github/copilot-instructions.md`。
-- `SheetRefreshForm`：SQL Sheet 任务展示、批量刷新，以及「格式」菜单里的美化和格式设置。细则见 `.github/copilot-instructions.md`。
+- `QueryEditorForm`：交互式 SQL 查询。
+- `SheetRefreshForm`：SQL Sheet 任务展示和批量刷新。
 - `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
-- `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」「JDBC 环境」。关于组显示版本。窗体和按钮的细则见 `.github/copilot-instructions.md`。
+- `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」「JDBC 环境」。关于组显示版本。
+
+窗体和按钮的细则见 `.github/copilot-instructions.md`。
 
 ## 应用组装
 
@@ -120,18 +122,17 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 1. UI 选择共享连接并生成 `DataSourceRequest`。
 2. Provider 校验连接和只读 SQL。
 3. ADO.NET 提供程序打开连接并配置只读会话，用 `SequentialAccess` 执行 Reader，由 `DatabaseResultStream` 按块读取。JDBC 不走 ADO.NET，由进程外的 `java.exe` 执行，结果经 `JdbcResultStream` 按块读取。
-4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。写入前弹出目标表名，默认当前方案名，用户可改；表已存在时确认覆盖。勾选时把 SQL 按列写入 SQL 页，供批量刷新读取。
+4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。写入和把 SQL 写入 SQL 页的细则见 `.github/copilot-instructions.md`。
 5. 进度通过 `IProgress<OperationProgress>` 上报；取消令牌触发命令取消。
 
 ## 批量刷新流程
 
-1. `SqlSheetTaskReader` 扫描 `SQL` 工作表的每个已用列。
-2. 第 1 行是目标表名和 `//` 参数，第 2 行起的非空单元格拼成 SQL。
-3. `SheetRefreshForm` 统一选择一个连接并读取批量设置。连接不写在 SQL 页里。
-4. 目标表名忽略大小写后有重复时，刷新开始前抛出异常，不写入任何表。
-5. 串行模式逐任务查询和写入。
-6. 并行模式仅并行数据库读取，且受最大并发数限制。
-7. Excel 写入始终回到启动刷新时的 UI 同步上下文并串行执行。每张目标表写入前的跳转和重画见 `.github/copilot-instructions.md` 的「批量刷新」。单个任务失败不终止其余任务；用户取消会终止整批。
+1. `SqlSheetTaskReader` 扫描 `SQL` 工作表的每个已用列，交给解析器得到任务。
+2. `SheetRefreshForm` 统一选择一个连接并读取批量设置。
+3. 串行模式逐任务查询和写入。并行模式仅并行数据库读取，且受最大并发数限制。
+4. Excel 写入回到启动刷新时的 UI 同步上下文并串行执行。
+
+列协议、重名、单任务失败和写入前跳转的细则见 `.github/copilot-instructions.md` 的「批量刷新」。
 
 ## 安全边界
 

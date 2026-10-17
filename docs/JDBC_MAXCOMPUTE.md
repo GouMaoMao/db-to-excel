@@ -7,12 +7,12 @@
 
 ## 2 新建连接
 
-1. 打开 Excel / WPS，顶部菜单「SQL 查询」→「连接管理」→「新建」
-2. 数据源类型选择：通用连接（JDBC）
+1. 打开 Excel 或 WPS，功能区「连接管理」→「新建」。
+2. 数据源类型选择：通用连接（JDBC）。
 
-> 如果提示缺少JDBC环境，按照提示一步步安装即可
+> 如果提示缺少 JDBC 环境，按照提示一步步安装即可。
 
-1. 填写连接参数：
+3. 填写连接参数：
 
 - **JDBC URL**。示例：`jdbc:odps:http://service.cn-beijing.maxcompute.aliyun.com/api?project=financial_dept&interactiveMode=true&enableLimit=false`
 
@@ -29,10 +29,10 @@
 > 不写 `enableLimit=false` 时，驱动在 10000 行处结束结果集，插件里的「最大导出数据行数」不会生效，导出仍显示成功。设为 `false` 后，这条 SQL 涉及的每张源表都需要 Download 权限，没有权限会报错。已保存的连接在「连接管理」里改 URL 后重新导出。`instanceTunnelMaxRecord` 同样只在 `enableLimit=false` 时生效，不写则不另加条数上限。项目开启数据保护时，行数还可能受 `READ_TABLE_MAX_ROW` 限制。公网 Endpoint 下载可能产生流量费。
 
 
-- **驱动jar**。下载[odps-jdbc-3.9.0.jar](https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250106/jgionw/odps-jdbc-3.9.0-rc4-jar-with-dependencies.jar?spm=a2c4g.11186623.0.0.739d70a2tkwLr8&file=odps-jdbc-3.9.0-rc4-jar-with-dependencies.jar)，然后[添加]
+- **驱动 jar**。下载 [odps-jdbc-3.9.0.jar](https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250106/jgionw/odps-jdbc-3.9.0-rc4-jar-with-dependencies.jar?spm=a2c4g.11186623.0.0.739d70a2tkwLr8&file=odps-jdbc-3.9.0-rc4-jar-with-dependencies.jar)，点「添加…」选择该 jar。
 - **驱动类**。点击「检测驱动类」，自动生成`com.aliyun.odps.jdbc.OdpsDriver`
 - **用户名**。AccessKey ID
-- **密   码**。AccessKey Secret
+- **密码**。AccessKey Secret
   > 此处的用户名、密码**不是阿里云登录邮箱 / 账号密码**，是专门为 API 访问单独申请的 AccessKey。
 - **显示名称**。自定义备注（例：`MaxCompute-杭州数仓-张三账号`）
 - **测试连接**，连通成功后，保存并关闭窗口。接下来，可正常使用SQL查询或批量刷新功能。

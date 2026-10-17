@@ -15,9 +15,7 @@
 - 安装工程引用 `x64\SQLite.Interop.dll`。Release 已生成该文件但工程未引用时，脚本停止，并且不会改安装工程的文件表。
 - 安装工程的 `ProductVersion` 不高于程序集版本。低于程序集版本时，脚本调用 Advanced Installer 对齐版本并生成新的 `ProductCode`。
 
-通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。GitHub Release 成功后执行 `scripts/mirror-gitee.ps1`。本机把 `GITEE_TOKEN`、`GITEE_REPO`（`owner/repo`）、`MIRROR_BRANCH` 和 `MIRROR_TAG_REGEX` 写在 `.github/gitee.local`，该文件不入库。脚本只读这个文件，不读环境变量。一开始就检查这四项，缺了立刻停止。
-
-本机执行 `bash scripts/mirror-gitee.sh`。脚本读 `.github/gitee.local`，以 GitHub 的 `origin` 为准，强制把 `main` 与三段版本标签对齐到 Gitee，并同步这些标签上的 Release。附件的文件名和字节大小与 GitHub 一致时不重新上传。Gitee 是从，该分支上的分叉提交会被覆盖。不符合该规则的分支、标签和 Release 不删除。安装包构建仍只在发布脚本里。复制到其他项目的步骤见 `docs/gitee-mirror.md`。
+通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。GitHub Release 成功后执行 `scripts/mirror-gitee.ps1`。行为与复制到其他项目的步骤见 `docs/gitee-mirror.md`。
 
 ## 目标环境
 
@@ -39,7 +37,7 @@
 
 本机安装工程不入库。发布脚本假定 `installer\db-to-excel.aip` 已经存在。安装包需要包含：
 
-- Release 输出、VSTO 清单和应用程序清单。不要只复制 `DB2Sheet.dll`。
+- Release 输出、VSTO 清单和应用程序清单。
 - Excel 加载项注册项，加载行为 `LoadBehavior=3`。
 - .NET Framework 4.7.2 与 VSTO Runtime 的先决条件检测。
 - MySQL、PostgreSQL、SQLite 和 DuckDB 的托管程序集，输出目录中的 `duckdb.dll`，以及 `x64\SQLite.Interop.dll`。
@@ -50,17 +48,7 @@
 
 ## 数据和日志
 
-用户配置不放在安装目录，而位于：
-
-`%LocalAppData%\DB2Sheet`
-
-包括：
-
-- `connections.json`：连接方案。密码仍与其他参数一起明文保存。
-- `settings.json`
-- `jdbc-environment.json`
-- `queries\`：每个查询方案一个文件。旧版 `queries.json` 只在首次加载时迁入该目录。
-- `Logs\db2sheet-yyyyMMdd.log`
+用户配置不放在安装目录。文件和目录见 `docs/ARCHITECTURE.md` 的「Storage」。连接密码仍明文保存在 `connections.json`。
 
 卸载时是否保留这些文件尚未决定，见下文。默认建议保留，避免误删用户配置。
 
