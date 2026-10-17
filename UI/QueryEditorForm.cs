@@ -38,7 +38,6 @@ namespace DB2Sheet.UI
         private readonly TabControl _queryTabs;
         private readonly Label _emptyEditorHint;
         private readonly DataGridView _preview;
-        private readonly Label _sqlQueryNameLabel;
         private readonly ToolTip _profileTip = new ToolTip();
         private readonly Timer _profileTipTimer = new Timer();
         private int _profileTipIndex = -1;
@@ -159,14 +158,6 @@ namespace DB2Sheet.UI
                     Font = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Bold),
                     WrapMode = DataGridViewTriState.True
                 }
-            };
-            _sqlQueryNameLabel = new Label
-            {
-                Dock = DockStyle.Fill,
-                AutoEllipsis = true,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(0, 0, 8, 0),
-                Text = "当前方案：未保存"
             };
             _status = new ToolStripStatusLabel { Text = "就绪。", ForeColor = SystemColors.GrayText, Spring = true, TextAlign = ContentAlignment.MiddleLeft };
             _queryProfileMenu = BuildQueryProfileMenu();
@@ -322,7 +313,6 @@ namespace DB2Sheet.UI
 
             ReloadQueries(null);
             NewQuery();
-            UpdateQueryInfo();
             UpdateConnectionMenuState();
         }
 
@@ -489,7 +479,6 @@ namespace DB2Sheet.UI
             RefreshTabTitle(tab);
             ReloadQueries(profile.Id);
             _status.Text = overwritten ? "查询方案已覆盖保存。" : "查询方案已保存。";
-            UpdateQueryInfo();
             return true;
         }
 
@@ -553,7 +542,6 @@ namespace DB2Sheet.UI
             if (!tab.IsPersisted)
             {
                 RefreshTabTitle(tab);
-                UpdateQueryInfo();
                 _status.Text = "查询方案已重命名。";
                 return;
             }
@@ -565,7 +553,6 @@ namespace DB2Sheet.UI
                 tab.SavedUtc = null;
                 RefreshTabTitle(tab);
                 ReloadQueries(null);
-                UpdateQueryInfo();
                 _status.Text = "查询方案已重命名。";
                 return;
             }
@@ -576,7 +563,6 @@ namespace DB2Sheet.UI
             tab.SavedUtc = refreshed != null ? refreshed.UpdatedUtc : tab.SavedUtc;
             RefreshTabTitle(tab);
             ReloadQueries(tab.Id);
-            UpdateQueryInfo();
             _status.Text = "查询方案已重命名。";
         }
 
@@ -592,14 +578,6 @@ namespace DB2Sheet.UI
             QueryTab active = ActiveTab;
             ReloadQueries(active != null && active.IsPersisted ? active.Id : null);
             _status.Text = "查询方案已删除。";
-        }
-
-        /// <summary>按当前页签刷新标题栏上的当前方案。没有页签时显示未保存。</summary>
-        private void UpdateQueryInfo()
-        {
-            QueryTab tab = ActiveTab;
-            string name = tab == null || string.IsNullOrWhiteSpace(tab.Name) ? "未保存" : tab.Name;
-            _sqlQueryNameLabel.Text = "当前方案：" + name;
         }
 
         /// <summary>读取当前 Windows 用户名，以及 Excel 或 WPS 选项里的用户名。</summary>
@@ -631,6 +609,9 @@ namespace DB2Sheet.UI
             return connection.Name;
         }
 
+        /// <summary>SQL 编辑区标题行。左侧是固定标题，右侧是操作按钮，中间百分比列把按钮留在右侧。</summary>
+        /// <param name="actions">标题行右侧的操作控件。</param>
+        /// <returns>已排好的标题行面板。</returns>
         private Panel BuildSqlHeader(Control actions)
         {
             Panel header = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = SystemColors.ControlLight };
@@ -648,17 +629,15 @@ namespace DB2Sheet.UI
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             Label title = new Label
             {
-                Text = "SQL编辑器（仅限查询）",
+                Text = "SQL编辑器（仅限只读查询）",
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Margin = new Padding(0, 6, 12, 0),
                 Font = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Bold)
             };
-            _sqlQueryNameLabel.Margin = new Padding(0, 6, 8, 0);
             actions.Margin = new Padding(0, 2, 0, 0);
             layout.Controls.Add(title, 0, 0);
-            layout.Controls.Add(_sqlQueryNameLabel, 1, 0);
             layout.Controls.Add(actions, 2, 0);
             header.Controls.Add(layout);
             return header;
@@ -1447,7 +1426,6 @@ namespace DB2Sheet.UI
             }
 
             SyncProfileSelection(tab);
-            UpdateQueryInfo();
         }
 
         /// <summary>隐藏页签条，在编辑区显示「请新建查询」，并折叠预览。</summary>
@@ -1458,7 +1436,6 @@ namespace DB2Sheet.UI
             ClearPreviewGrid();
             _resultsSplit.Panel2Collapsed = true;
             SyncProfileSelection(null);
-            UpdateQueryInfo();
             _status.Text = "请新建查询。";
         }
 
