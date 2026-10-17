@@ -313,7 +313,6 @@
     <Content Include=".gitignore" />
     <Content Include="docs\ARCHITECTURE.md" />
     <Content Include="docs\DEPLOYMENT.md" />
-    <Content Include="docs\PROJECT_STATUS.md" />
     <Content Include="docs\TESTING.md" />
     <EmbeddedResource Include="Java\db2sheet-jdbc-bridge.jar">
       <LogicalName>DB2Sheet.db2sheet-jdbc-bridge.jar</LogicalName>
