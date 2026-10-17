@@ -165,12 +165,13 @@ function Get-FileSize($File) {
     return $null
 }
 
-function Get-ReleaseFiles($Release) {
-    $files = @()
-    if ($null -eq $Release) { return $files }
-    if ($Release.assets) { $files += @($Release.assets) }
-    if ($Release.attach_files) { $files += @($Release.attach_files) }
-    return $files
+function Get-GiteeAttachFiles([string]$ReleaseId) {
+    $found = Invoke-GiteeCurl -Method GET -Url "$($script:GiteeApi)/releases/$ReleaseId/attach_files" -ArgumentList $script:GiteeTokenArg
+    if ($found.Code -ne "200") {
+        Show-GiteeFailure $found.Body
+        Stop-Mirror "查询 Gitee Release $ReleaseId 的附件失败，HTTP $($found.Code)。"
+    }
+    return Convert-JsonList (Read-GiteeBody $found.Body)
 }
 
 function Get-AssetMap($Files) {
@@ -181,7 +182,7 @@ function Get-AssetMap($Files) {
         if ([string]::IsNullOrEmpty($name)) { continue }
         $size = Get-FileSize $file
         if ($null -eq $size) { return $null }
-        if ($map.ContainsKey($name) -and $map[$name] -ne $size) { return $null }
+        if ($map.ContainsKey($name)) { return $null }
         $map[$name] = $size
     }
     return $map
@@ -453,18 +454,27 @@ function Send-GiteeAsset([string]$ReleaseId, [string]$Tag, [string]$FilePath, [s
     }
 }
 
-function Copy-GitHubAssets([string]$Tag, [string]$ReleaseId, $GitHubFiles) {
+function Copy-GitHubAssets([string]$Tag, [string]$ReleaseId, $GitHubFiles, $ExistingFiles) {
     $files = @($GitHubFiles)
     if ($files.Count -eq 0) { return }
     $dest = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-assets-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $dest | Out-Null
     try {
         Write-Host "正在下载 GitHub Release $Tag 的附件。"
-        $downloaded = Invoke-External -File "gh" -ArgumentList @("release", "download", $Tag, "--dir", $dest, "--clobber")
-        if ($downloaded.Code -ne 0) {
-            if (-not [string]::IsNullOrWhiteSpace($downloaded.Output)) { Write-Host $downloaded.Output.TrimEnd() }
+        $downloaded = $null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $downloaded = Invoke-External -File "gh" -ArgumentList @("release", "download", $Tag, "--dir", $dest, "--clobber")
+            if ($downloaded.Code -eq 0) { break }
+            if ($attempt -lt 3) {
+                Write-Host "下载 GitHub Release $Tag 的附件未成功，5 秒后重试。"
+                Start-Sleep -Seconds 5
+            }
+        }
+        if ($null -eq $downloaded -or $downloaded.Code -ne 0) {
+            if ($downloaded -and -not [string]::IsNullOrWhiteSpace($downloaded.Output)) { Write-Host $downloaded.Output.TrimEnd() }
             Stop-Mirror "下载 GitHub Release $Tag 的附件失败。"
         }
+        Remove-GiteeAssets -ReleaseId $ReleaseId -Files $ExistingFiles
         foreach ($file in $files) {
             $fileName = Get-FileName $file
             $path = Join-Path $dest $fileName
@@ -495,7 +505,7 @@ function Sync-OneRelease($GitHubRelease, $Existing) {
         if (-not $releaseId) {
             Write-Host "正在创建 Gitee Release $tag。"
             $releaseId = New-GiteeRelease -Tag $tag -Meta $meta
-            Copy-GitHubAssets -Tag $tag -ReleaseId $releaseId -GitHubFiles $githubFiles
+            Copy-GitHubAssets -Tag $tag -ReleaseId $releaseId -GitHubFiles $githubFiles -ExistingFiles @()
             return
         }
         $giteeTitle = [string]$Existing.name
@@ -504,7 +514,7 @@ function Sync-OneRelease($GitHubRelease, $Existing) {
         $sameText = (Get-NormalizedText $title) -eq (Get-NormalizedText $giteeTitle) -and
             (Get-NormalizedText $body) -eq (Get-NormalizedText $Existing.body) -and
             $prerelease -eq $giteePrerelease
-        $giteeFiles = Get-ReleaseFiles $Existing
+        $giteeFiles = @(Get-GiteeAttachFiles $releaseId)
         $sameAssets = Test-SameAssets $githubFiles $giteeFiles
         if ($sameText -and $sameAssets) {
             Write-Host "Release $tag 与 GitHub 一致，跳过。"
@@ -516,8 +526,11 @@ function Sync-OneRelease($GitHubRelease, $Existing) {
         }
         if ($sameAssets) { return }
         Write-Host "正在替换 Gitee Release $tag 的附件。"
-        Remove-GiteeAssets -ReleaseId $releaseId -Files $giteeFiles
-        Copy-GitHubAssets -Tag $tag -ReleaseId $releaseId -GitHubFiles $githubFiles
+        if (@($githubFiles).Count -eq 0) {
+            Remove-GiteeAssets -ReleaseId $releaseId -Files $giteeFiles
+            return
+        }
+        Copy-GitHubAssets -Tag $tag -ReleaseId $releaseId -GitHubFiles $githubFiles -ExistingFiles $giteeFiles
     }
     finally {
         Remove-Item -LiteralPath $bodyPath -Force -ErrorAction SilentlyContinue
