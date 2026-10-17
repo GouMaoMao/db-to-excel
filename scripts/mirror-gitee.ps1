@@ -43,6 +43,24 @@ function Show-GiteeFailure([string]$Path) {
     Write-Host (Hide-GiteeSecret $raw)
 }
 
+function Invoke-External {
+    param(
+        [Parameter(Mandatory = $true)][string]$File,
+        [string[]]$ArgumentList
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = & $File @ArgumentList 2>&1
+        $code = $LASTEXITCODE
+        $output = @($lines) | Out-String
+        return @{ Code = $code; Output = $output }
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Invoke-GiteeCurl {
     param(
         [Parameter(Mandatory = $true)][string]$Method,
@@ -62,8 +80,15 @@ function Invoke-GiteeCurl {
         }
         if ($ArgumentList) { $curlArgs += $ArgumentList }
         $curlArgs += $Url
-        $codeText = & curl.exe @curlArgs
-        $exit = $LASTEXITCODE
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $codeText = & curl.exe @curlArgs 2>$null
+            $exit = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previous
+        }
         $code = ""
         if ($null -ne $codeText) { $code = ([string]$codeText).Trim() }
         if ($code -notmatch '^[0-9]{3}$') { $code = "000" }
@@ -87,11 +112,13 @@ function Invoke-GiteeGitPush([string]$Refspec) {
     $previousPrompt = $env:GIT_TERMINAL_PROMPT
     $env:GIT_TERMINAL_PROMPT = "0"
     try {
-        $output = & git -c credential.helper= -c $instead push --force $remote $Refspec 2>&1 | Out-String
-        if (-not [string]::IsNullOrWhiteSpace($output)) {
-            Write-Host (Hide-GiteeSecret $output.TrimEnd())
+        $pushed = Invoke-External -File "git" -ArgumentList @(
+            "-c", "credential.helper=", "-c", $instead, "push", "--force", $remote, $Refspec
+        )
+        if (-not [string]::IsNullOrWhiteSpace($pushed.Output)) {
+            Write-Host (Hide-GiteeSecret $pushed.Output.TrimEnd())
         }
-        if ($LASTEXITCODE -ne 0) {
+        if ($pushed.Code -ne 0) {
             Stop-Mirror "推送到 Gitee 失败。"
         }
     }
@@ -226,17 +253,22 @@ function Read-GiteeConfig {
 
 function Sync-GitRefs {
     Write-Host "正在从 GitHub 读取 $($script:MirrorBranch)。"
-    & git fetch origin "+refs/heads/$($script:MirrorBranch):refs/remotes/origin/$($script:MirrorBranch)"
-    if ($LASTEXITCODE -ne 0) {
+    $fetched = Invoke-External -File "git" -ArgumentList @(
+        "fetch", "origin", "+refs/heads/$($script:MirrorBranch):refs/remotes/origin/$($script:MirrorBranch)"
+    )
+    if ($fetched.Code -ne 0) {
+        if (-not [string]::IsNullOrWhiteSpace($fetched.Output)) { Write-Host $fetched.Output.TrimEnd() }
         Stop-Mirror "无法从 GitHub 读取 $($script:MirrorBranch)。"
     }
     Invoke-GiteeGitPush "refs/remotes/origin/$($script:MirrorBranch):refs/heads/$($script:MirrorBranch)"
 
     Write-Host "正在读取 GitHub 上的标签。"
-    $remoteTags = & git ls-remote --tags origin
-    if ($LASTEXITCODE -ne 0) {
+    $listed = Invoke-External -File "git" -ArgumentList @("ls-remote", "--tags", "origin")
+    if ($listed.Code -ne 0) {
+        if (-not [string]::IsNullOrWhiteSpace($listed.Output)) { Write-Host $listed.Output.TrimEnd() }
         Stop-Mirror "无法读取 GitHub 标签。"
     }
+    $remoteTags = $listed.Output -split "`r?`n"
     $matched = $false
     foreach ($line in @($remoteTags)) {
         if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
@@ -248,8 +280,9 @@ function Sync-GitRefs {
         $name = $ref.Substring("refs/tags/".Length)
         if (-not [regex]::IsMatch($name, $script:MirrorTagRegex)) { continue }
         $matched = $true
-        & git fetch origin "+refs/tags/${name}:refs/tags/${name}"
-        if ($LASTEXITCODE -ne 0) {
+        $tagFetch = Invoke-External -File "git" -ArgumentList @("fetch", "origin", "+refs/tags/${name}:refs/tags/${name}")
+        if ($tagFetch.Code -ne 0) {
+            if (-not [string]::IsNullOrWhiteSpace($tagFetch.Output)) { Write-Host $tagFetch.Output.TrimEnd() }
             Stop-Mirror "无法从 GitHub 读取标签 $name。"
         }
         Invoke-GiteeGitPush "refs/tags/${name}:refs/tags/${name}"
@@ -260,10 +293,11 @@ function Sync-GitRefs {
 }
 
 function Get-GitHubRepo {
-    $url = (& git remote get-url origin).Trim()
-    if ($LASTEXITCODE -ne 0) {
+    $origin = Invoke-External -File "git" -ArgumentList @("remote", "get-url", "origin")
+    if ($origin.Code -ne 0) {
         Stop-Mirror "无法读取 origin。"
     }
+    $url = $origin.Output.Trim()
     if ($url -match 'github\.com[:/]([^/]+)/(.+?)(?:\.git)?$') {
         return "$($Matches[1])/$($Matches[2])"
     }
@@ -274,10 +308,12 @@ function Get-GitHubReleases([string]$GitHubRepo) {
     $page = 1
     $all = @()
     while ($page -le 20) {
-        $raw = & gh api "repos/$GitHubRepo/releases?per_page=100&page=$page" | Out-String
-        if ($LASTEXITCODE -ne 0) {
+        $rawResult = Invoke-External -File "gh" -ArgumentList @("api", "repos/$GitHubRepo/releases?per_page=100&page=$page")
+        if ($rawResult.Code -ne 0) {
+            if (-not [string]::IsNullOrWhiteSpace($rawResult.Output)) { Write-Host $rawResult.Output.TrimEnd() }
             Stop-Mirror "无法读取 GitHub Release。"
         }
+        $raw = $rawResult.Output
         $batch = Convert-JsonList $raw
         if ($batch.Count -eq 0) { break }
         $all += $batch
@@ -424,8 +460,9 @@ function Copy-GitHubAssets([string]$Tag, [string]$ReleaseId, $GitHubFiles) {
     New-Item -ItemType Directory -Path $dest | Out-Null
     try {
         Write-Host "正在下载 GitHub Release $Tag 的附件。"
-        & gh release download $Tag --dir $dest --clobber
-        if ($LASTEXITCODE -ne 0) {
+        $downloaded = Invoke-External -File "gh" -ArgumentList @("release", "download", $Tag, "--dir", $dest, "--clobber")
+        if ($downloaded.Code -ne 0) {
+            if (-not [string]::IsNullOrWhiteSpace($downloaded.Output)) { Write-Host $downloaded.Output.TrimEnd() }
             Stop-Mirror "下载 GitHub Release $Tag 的附件失败。"
         }
         foreach ($file in $files) {
@@ -491,8 +528,8 @@ function Sync-Releases {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         Stop-Mirror "找不到 GitHub CLI（gh）。安装并登录后再镜像。"
     }
-    & gh auth status | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $auth = Invoke-External -File "gh" -ArgumentList @("auth", "status")
+    if ($auth.Code -ne 0) {
         Stop-Mirror "gh 未登录。"
     }
     $gitHubRepo = Get-GitHubRepo
