@@ -15,9 +15,9 @@
 - 安装工程引用 `x64\SQLite.Interop.dll`。Release 已生成该文件但工程未引用时，脚本停止，并且不会改安装工程的文件表。
 - 安装工程的 `ProductVersion` 不高于程序集版本。低于程序集版本时，脚本调用 Advanced Installer 对齐版本并生成新的 `ProductCode`。
 
-通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。接着用本机刚生成的 exe 上传到 Gitee：先把 `main` 和该标签推到 Gitee，再创建或更新对应 Release，已有同名 `db-to-excel.exe` 会先删掉再上传。本机把 `GITEE_TOKEN` 和 `GITEE_REPO`（`owner/repo`）写在 `.github/gitee.local`，该文件不入库；环境变量若已设置则优先。脚本一开始就检查。
+通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。GitHub Release 成功后执行 `scripts/mirror-gitee.ps1`。本机把 `GITEE_TOKEN`、`GITEE_REPO`（`owner/repo`）、`MIRROR_BRANCH` 和 `MIRROR_TAG_REGEX` 写在 `.github/gitee.local`，该文件不入库。脚本只读这个文件，不读环境变量。一开始就检查这四项，缺了立刻停止。
 
-`.github/workflows/mirror-gitee.yml` 只把 `main` 和 `v` 三段版本标签快进推到 Gitee，不下载、也不上传安装包。手动运行时可填写一个版本标签，只补推该标签。令牌和仓库路径仍放在 GitHub Actions 的 Secret `GITEE_TOKEN` 与 Variable `GITEE_REPO` 里，给定时 git 镜像用，不入库。Gitee 上若出现分叉提交，镜像会失败而不是覆盖。
+本机执行 `bash scripts/mirror-gitee.sh`。脚本读 `.github/gitee.local`，以 GitHub 的 `origin` 为准，强制把 `main` 与三段版本标签对齐到 Gitee，并同步这些标签上的 Release。附件的文件名和字节大小与 GitHub 一致时不重新上传。Gitee 是从，该分支上的分叉提交会被覆盖。不符合该规则的分支、标签和 Release 不删除。安装包构建仍只在发布脚本里。复制到其他项目的步骤见 `docs/gitee-mirror.md`。
 
 ## 目标环境
 

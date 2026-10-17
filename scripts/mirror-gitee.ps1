@@ -1,0 +1,530 @@
+﻿# 把 GitHub origin 上的一个分支、符合规则的标签，以及这些标签的 Release 强制对齐到 Gitee。
+# GitHub 是主，Gitee 是从。配置只读 .github/gitee.local，不读环境变量，不接受参数。
+# 附件的文件名和字节大小与 GitHub 一致时不下载、不删除、不上传。
+# 令牌只通过当次 git -c url.insteadOf 和 Gitee 接口使用，不写入 git 配置，远程地址本身不含令牌。
+
+$ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+
+$Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+function Stop-Mirror([string]$Message) {
+    Write-Error $Message
+    exit 1
+}
+
+function Hide-GiteeSecret([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text) -or [string]::IsNullOrEmpty($script:GiteeToken)) {
+        return $Text
+    }
+    return $Text.Replace($script:GiteeToken, "***")
+}
+
+function Read-GiteeBody([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return "" }
+    return [System.IO.File]::ReadAllText($Path)
+}
+
+function Show-GiteeFailure([string]$Path) {
+    $raw = Read-GiteeBody $Path
+    if ([string]::IsNullOrWhiteSpace($raw)) { return }
+    try {
+        $obj = $raw | ConvertFrom-Json
+        if ($obj.message) {
+            Write-Host (Hide-GiteeSecret ([string]$obj.message))
+            return
+        }
+    }
+    catch {
+        # 不是 JSON 时打印原文，令牌已打码。
+    }
+    Write-Host (Hide-GiteeSecret $raw)
+}
+
+function Invoke-GiteeCurl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Url,
+        [string[]]$ArgumentList,
+        [int]$MaxTime = 180
+    )
+    $out = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-" + [guid]::NewGuid().ToString("N") + ".json")
+    $code = "000"
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $curlArgs = @(
+            "-sS", "--connect-timeout", "20", "--max-time", "$MaxTime",
+            "-o", $out, "-w", "%{http_code}", "-X", $Method
+        )
+        if ($Method -eq "GET" -or $Method -eq "DELETE") {
+            $curlArgs += "-G"
+        }
+        if ($ArgumentList) { $curlArgs += $ArgumentList }
+        $curlArgs += $Url
+        $codeText = & curl.exe @curlArgs
+        $exit = $LASTEXITCODE
+        $code = ""
+        if ($null -ne $codeText) { $code = ([string]$codeText).Trim() }
+        if ($code -notmatch '^[0-9]{3}$') { $code = "000" }
+        $retry = $exit -ne 0 -or $code -in @("000", "408", "429", "500", "502", "503", "504")
+        if (-not $retry) { return @{ Code = $code; Body = $out } }
+        if ($attempt -lt 3) {
+            Write-Host "Gitee 接口暂时没有响应（HTTP $code），5 秒后重试。"
+            Start-Sleep -Seconds 5
+        }
+    }
+    return @{ Code = $code; Body = $out }
+}
+
+function Invoke-GiteeGitPush([string]$Refspec) {
+    $instead = "url.https://oauth2:$($script:GiteeToken)@gitee.com/.insteadOf=https://gitee.com/"
+    $remote = "https://gitee.com/$($script:GiteeRepo).git"
+    $destination = $Refspec
+    $colon = $Refspec.IndexOf(":")
+    if ($colon -ge 0) { $destination = $Refspec.Substring($colon + 1) }
+    Write-Host "正在强制推送 $destination。"
+    $previousPrompt = $env:GIT_TERMINAL_PROMPT
+    $env:GIT_TERMINAL_PROMPT = "0"
+    try {
+        $output = & git -c credential.helper= -c $instead push --force $remote $Refspec 2>&1 | Out-String
+        if (-not [string]::IsNullOrWhiteSpace($output)) {
+            Write-Host (Hide-GiteeSecret $output.TrimEnd())
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Mirror "推送到 Gitee 失败。"
+        }
+    }
+    finally {
+        if ($null -eq $previousPrompt) {
+            Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:GIT_TERMINAL_PROMPT = $previousPrompt
+        }
+    }
+}
+
+function Get-GiteeReleaseId($Release) {
+    if ($null -eq $Release) { return "" }
+    if ($Release.id -match '^\d+$') { return [string]$Release.id }
+    return ""
+}
+
+function Convert-JsonList([string]$Raw) {
+    if ([string]::IsNullOrWhiteSpace($Raw) -or $Raw.Trim() -eq "[]" -or $Raw.Trim() -eq "null") {
+        return @()
+    }
+    $parsed = $Raw | ConvertFrom-Json
+    if ($null -eq $parsed) { return @() }
+    return @($parsed)
+}
+
+function Get-FileName($File) {
+    if ($null -eq $File) { return "" }
+    $name = [string]$File.name
+    if ([string]::IsNullOrEmpty($name)) { $name = [string]$File.file_name }
+    return $name
+}
+
+function Get-FileSize($File) {
+    if ($null -eq $File) { return $null }
+    foreach ($prop in @("size", "file_size")) {
+        $property = $File.PSObject.Properties[$prop]
+        if ($null -eq $property -or $null -eq $property.Value) { continue }
+        $text = [string]$property.Value
+        if ($text -match '^\d+$') { return [int64]$text }
+    }
+    return $null
+}
+
+function Get-ReleaseFiles($Release) {
+    $files = @()
+    if ($null -eq $Release) { return $files }
+    if ($Release.assets) { $files += @($Release.assets) }
+    if ($Release.attach_files) { $files += @($Release.attach_files) }
+    return $files
+}
+
+function Get-AssetMap($Files) {
+    $map = @{}
+    foreach ($file in @($Files)) {
+        if ($null -eq $file) { continue }
+        $name = Get-FileName $file
+        if ([string]::IsNullOrEmpty($name)) { continue }
+        $size = Get-FileSize $file
+        if ($null -eq $size) { return $null }
+        if ($map.ContainsKey($name) -and $map[$name] -ne $size) { return $null }
+        $map[$name] = $size
+    }
+    return $map
+}
+
+function Test-SameAssets($Left, $Right) {
+    $leftMap = Get-AssetMap $Left
+    $rightMap = Get-AssetMap $Right
+    if ($null -eq $leftMap -or $null -eq $rightMap) { return $false }
+    if ($leftMap.Count -ne $rightMap.Count) { return $false }
+    foreach ($key in $leftMap.Keys) {
+        if (-not $rightMap.ContainsKey($key) -or $rightMap[$key] -ne $leftMap[$key]) { return $false }
+    }
+    return $true
+}
+
+function Get-NormalizedText($Value) {
+    if ($null -eq $Value) { return "" }
+    return ([string]$Value).Replace("`r`n", "`n").Replace("`r", "`n").TrimEnd()
+}
+
+function Test-Flag($Value) {
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [bool]) { return [bool]$Value }
+    $text = ([string]$Value).Trim().ToLowerInvariant()
+    return $text -eq "true" -or $text -eq "1"
+}
+
+function Read-GiteeConfig {
+    $config = Join-Path $Root ".github\gitee.local"
+    $example = ".github/gitee.local.example"
+    if (-not (Test-Path -LiteralPath $config)) {
+        Stop-Mirror "缺少 .github\gitee.local。把 $example 复制为该文件并填上 GITEE_TOKEN、GITEE_REPO、MIRROR_BRANCH、MIRROR_TAG_REGEX。该文件已忽略，不要提交。"
+    }
+    $values = @{}
+    foreach ($line in Get-Content -LiteralPath $config -Encoding UTF8) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -eq 0 -or $trimmed.StartsWith("#")) { continue }
+        $separator = $trimmed.IndexOf("=")
+        if ($separator -lt 1) { continue }
+        $name = $trimmed.Substring(0, $separator).Trim()
+        $value = $trimmed.Substring($separator + 1).Trim()
+        $values[$name] = $value
+    }
+    $missing = @()
+    foreach ($key in @("GITEE_TOKEN", "GITEE_REPO", "MIRROR_BRANCH", "MIRROR_TAG_REGEX")) {
+        if ([string]::IsNullOrWhiteSpace($values[$key])) { $missing += $key }
+    }
+    if ($missing.Count -gt 0) {
+        Stop-Mirror ".github\gitee.local 缺少：$($missing -join '、')。对照 $example 填上这四项。该文件已忽略，不要提交。"
+    }
+    $script:GiteeToken = $values["GITEE_TOKEN"]
+    $script:GiteeRepo = $values["GITEE_REPO"]
+    $script:MirrorBranch = $values["MIRROR_BRANCH"]
+    $script:MirrorTagRegex = $values["MIRROR_TAG_REGEX"]
+    if ($script:GiteeRepo -notmatch '^[^/\s]+/[^/\s]+$') {
+        Stop-Mirror "GITEE_REPO 必须是 owner/repo，当前是：$($script:GiteeRepo)"
+    }
+    if ($script:MirrorBranch -match '\s|:' -or $script:MirrorBranch.StartsWith("-")) {
+        Stop-Mirror "MIRROR_BRANCH 不能含空白或冒号，也不能以减号开头，当前是：$($script:MirrorBranch)"
+    }
+    try {
+        [void][regex]::new($script:MirrorTagRegex)
+    }
+    catch {
+        Stop-Mirror "MIRROR_TAG_REGEX 不是合法的正则：$($script:MirrorTagRegex)"
+    }
+}
+
+function Sync-GitRefs {
+    Write-Host "正在从 GitHub 读取 $($script:MirrorBranch)。"
+    & git fetch origin "+refs/heads/$($script:MirrorBranch):refs/remotes/origin/$($script:MirrorBranch)"
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Mirror "无法从 GitHub 读取 $($script:MirrorBranch)。"
+    }
+    Invoke-GiteeGitPush "refs/remotes/origin/$($script:MirrorBranch):refs/heads/$($script:MirrorBranch)"
+
+    Write-Host "正在读取 GitHub 上的标签。"
+    $remoteTags = & git ls-remote --tags origin
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Mirror "无法读取 GitHub 标签。"
+    }
+    $matched = $false
+    foreach ($line in @($remoteTags)) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
+        $tab = ([string]$line).IndexOf("`t")
+        if ($tab -lt 0) { continue }
+        $ref = ([string]$line).Substring($tab + 1).Trim()
+        if ($ref.EndsWith("^{}")) { continue }
+        if (-not $ref.StartsWith("refs/tags/")) { continue }
+        $name = $ref.Substring("refs/tags/".Length)
+        if (-not [regex]::IsMatch($name, $script:MirrorTagRegex)) { continue }
+        $matched = $true
+        & git fetch origin "+refs/tags/${name}:refs/tags/${name}"
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Mirror "无法从 GitHub 读取标签 $name。"
+        }
+        Invoke-GiteeGitPush "refs/tags/${name}:refs/tags/${name}"
+    }
+    if (-not $matched) {
+        Write-Host "没有符合规则的标签。"
+    }
+}
+
+function Get-GitHubRepo {
+    $url = (& git remote get-url origin).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Mirror "无法读取 origin。"
+    }
+    if ($url -match 'github\.com[:/]([^/]+)/(.+?)(?:\.git)?$') {
+        return "$($Matches[1])/$($Matches[2])"
+    }
+    Stop-Mirror "无法从 origin 解析 GitHub 仓库：$url"
+}
+
+function Get-GitHubReleases([string]$GitHubRepo) {
+    $page = 1
+    $all = @()
+    while ($page -le 20) {
+        $raw = & gh api "repos/$GitHubRepo/releases?per_page=100&page=$page" | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Mirror "无法读取 GitHub Release。"
+        }
+        $batch = Convert-JsonList $raw
+        if ($batch.Count -eq 0) { break }
+        $all += $batch
+        if ($batch.Count -lt 100) { break }
+        $page++
+    }
+    $selected = @{}
+    foreach ($release in $all) {
+        if ($release.draft) { continue }
+        $tag = [string]$release.tag_name
+        if ([string]::IsNullOrWhiteSpace($tag)) { continue }
+        if (-not [regex]::IsMatch($tag, $script:MirrorTagRegex)) { continue }
+        $selected[$tag] = $release
+    }
+    return $selected
+}
+
+function Get-GiteeReleases {
+    $page = 1
+    $all = @()
+    while ($page -le 20) {
+        $found = Invoke-GiteeCurl -Method GET -Url "$($script:GiteeApi)/releases" -ArgumentList @(
+            "--data-urlencode", "access_token=$($script:GiteeToken)",
+            "--data-urlencode", "page=$page",
+            "--data-urlencode", "per_page=100"
+        )
+        if ($found.Code -ne "200") {
+            Show-GiteeFailure $found.Body
+            Stop-Mirror "查询 Gitee Release 列表失败，HTTP $($found.Code)。"
+        }
+        $batch = Convert-JsonList (Read-GiteeBody $found.Body)
+        if ($batch.Count -eq 0) { break }
+        $all += $batch
+        if ($batch.Count -lt 100) { break }
+        $page++
+    }
+    return $all
+}
+
+function Get-GiteeReleaseByTag([string]$Tag) {
+    $found = Invoke-GiteeCurl -Method GET -Url "$($script:GiteeApi)/releases/tags/$Tag" -ArgumentList $script:GiteeTokenArg
+    if ($found.Code -eq "404") { return $null }
+    if ($found.Code -ne "200") {
+        Show-GiteeFailure $found.Body
+        Stop-Mirror "查询 Gitee Release $Tag 失败，HTTP $($found.Code)。"
+    }
+    $raw = Read-GiteeBody $found.Body
+    if ([string]::IsNullOrWhiteSpace($raw) -or $raw.Trim() -eq "null") { return $null }
+    return $raw | ConvertFrom-Json
+}
+
+function Remove-GiteeRelease([string]$ReleaseId, [string]$Tag) {
+    Write-Host "正在删除 Gitee 上多出的 Release $Tag。"
+    $deleted = Invoke-GiteeCurl -Method DELETE -Url "$($script:GiteeApi)/releases/$ReleaseId" -ArgumentList $script:GiteeTokenArg
+    if ($deleted.Code -ne "204" -and $deleted.Code -ne "200") {
+        Show-GiteeFailure $deleted.Body
+        Stop-Mirror "删除 Gitee Release $Tag 失败，HTTP $($deleted.Code)。"
+    }
+}
+
+function Remove-GiteeAssets([string]$ReleaseId, $Files) {
+    $removed = @{}
+    foreach ($file in @($Files)) {
+        if ($null -eq $file) { continue }
+        if ($file.id -notmatch '^\d+$') { continue }
+        $fileId = [string]$file.id
+        if ($removed.ContainsKey($fileId)) { continue }
+        $removed[$fileId] = $true
+        $deleted = Invoke-GiteeCurl -Method DELETE -Url "$($script:GiteeApi)/releases/$ReleaseId/attach_files/$fileId" -ArgumentList $script:GiteeTokenArg
+        if ($deleted.Code -ne "204" -and $deleted.Code -ne "200") {
+            Show-GiteeFailure $deleted.Body
+            Stop-Mirror "删除 Gitee 附件 $fileId 失败，HTTP $($deleted.Code)。"
+        }
+    }
+}
+
+function Write-ReleaseBody([string]$Tag, [string]$Body) {
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-body-" + [guid]::NewGuid().ToString("N") + ".md")
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($path, $(if ($null -eq $Body) { "" } else { [string]$Body }), $utf8)
+    return $path
+}
+
+function Get-ReleaseMeta([string]$Tag, [string]$Title, [string]$BodyPath, [bool]$Prerelease) {
+    $flag = "false"
+    if ($Prerelease) { $flag = "true" }
+    return $script:GiteeTokenArg + @(
+        "--data-urlencode", "tag_name=$Tag",
+        "--data-urlencode", "name=$Title",
+        "--data-urlencode", "body@$BodyPath",
+        "--data-urlencode", "target_commitish=$($script:MirrorBranch)",
+        "--data-urlencode", "prerelease=$flag"
+    )
+}
+
+function New-GiteeRelease([string]$Tag, [string[]]$Meta) {
+    $releaseId = ""
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $created = Invoke-GiteeCurl -Method POST -Url "$($script:GiteeApi)/releases" -ArgumentList $Meta
+        $createdRelease = $null
+        $createdBody = Read-GiteeBody $created.Body
+        if (-not [string]::IsNullOrWhiteSpace($createdBody) -and $createdBody.Trim() -ne "null") {
+            $createdRelease = $createdBody | ConvertFrom-Json
+        }
+        $releaseId = Get-GiteeReleaseId $createdRelease
+        if ($releaseId) { return $releaseId }
+        if ($attempt -lt 3) {
+            Write-Host "创建 Gitee Release $Tag 未成功（HTTP $($created.Code)），5 秒后重试。"
+            Show-GiteeFailure $created.Body
+            Start-Sleep -Seconds 5
+            continue
+        }
+        Show-GiteeFailure $created.Body
+        Stop-Mirror "创建 Gitee Release $Tag 失败，HTTP $($created.Code)。"
+    }
+    return ""
+}
+
+function Update-GiteeRelease([string]$ReleaseId, [string]$Tag, [string[]]$Meta) {
+    $updated = Invoke-GiteeCurl -Method PATCH -Url "$($script:GiteeApi)/releases/$ReleaseId" -ArgumentList $Meta
+    if ($updated.Code -ne "200") {
+        Show-GiteeFailure $updated.Body
+        Stop-Mirror "更新 Gitee Release $Tag 失败，HTTP $($updated.Code)。"
+    }
+}
+
+function Send-GiteeAsset([string]$ReleaseId, [string]$Tag, [string]$FilePath, [string]$FileName) {
+    $packageForm = "file=@`"$($FilePath.Replace('\', '/'))`";filename=$FileName"
+    $uploaded = Invoke-GiteeCurl -Method POST -Url "$($script:GiteeApi)/releases/$ReleaseId/attach_files" -MaxTime 600 -ArgumentList @(
+        "--http1.1", "-H", "Expect:",
+        "-F", "access_token=$($script:GiteeToken)",
+        "-F", $packageForm
+    )
+    if ($uploaded.Code -ne "201" -and $uploaded.Code -ne "200") {
+        Show-GiteeFailure $uploaded.Body
+        Stop-Mirror "上传 $FileName 到 Gitee Release $Tag 失败，HTTP $($uploaded.Code)。"
+    }
+}
+
+function Copy-GitHubAssets([string]$Tag, [string]$ReleaseId, $GitHubFiles) {
+    $files = @($GitHubFiles)
+    if ($files.Count -eq 0) { return }
+    $dest = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-assets-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $dest | Out-Null
+    try {
+        Write-Host "正在下载 GitHub Release $Tag 的附件。"
+        & gh release download $Tag --dir $dest --clobber
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Mirror "下载 GitHub Release $Tag 的附件失败。"
+        }
+        foreach ($file in $files) {
+            $fileName = Get-FileName $file
+            $path = Join-Path $dest $fileName
+            if (-not (Test-Path -LiteralPath $path)) {
+                Stop-Mirror "GitHub Release $Tag 的附件 $fileName 没有下载到。"
+            }
+            Write-Host "正在上传 $fileName 到 Gitee Release $Tag。"
+            Send-GiteeAsset -ReleaseId $ReleaseId -Tag $Tag -FilePath $path -FileName $fileName
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Sync-OneRelease($GitHubRelease, $Existing) {
+    $tag = [string]$GitHubRelease.tag_name
+    $title = [string]$GitHubRelease.name
+    if ([string]::IsNullOrWhiteSpace($title)) { $title = $tag }
+    $body = [string]$GitHubRelease.body
+    $prerelease = Test-Flag $GitHubRelease.prerelease
+    $githubFiles = @()
+    if ($GitHubRelease.assets) { $githubFiles = @($GitHubRelease.assets) }
+    $bodyPath = Write-ReleaseBody -Tag $tag -Body $body
+    try {
+        $meta = Get-ReleaseMeta -Tag $tag -Title $title -BodyPath $bodyPath -Prerelease $prerelease
+        $releaseId = Get-GiteeReleaseId $Existing
+        if (-not $releaseId) {
+            Write-Host "正在创建 Gitee Release $tag。"
+            $releaseId = New-GiteeRelease -Tag $tag -Meta $meta
+            Copy-GitHubAssets -Tag $tag -ReleaseId $releaseId -GitHubFiles $githubFiles
+            return
+        }
+        $giteeTitle = [string]$Existing.name
+        if ([string]::IsNullOrWhiteSpace($giteeTitle)) { $giteeTitle = [string]$Existing.tag_name }
+        $giteePrerelease = Test-Flag $Existing.prerelease
+        $sameText = (Get-NormalizedText $title) -eq (Get-NormalizedText $giteeTitle) -and
+            (Get-NormalizedText $body) -eq (Get-NormalizedText $Existing.body) -and
+            $prerelease -eq $giteePrerelease
+        $giteeFiles = Get-ReleaseFiles $Existing
+        $sameAssets = Test-SameAssets $githubFiles $giteeFiles
+        if ($sameText -and $sameAssets) {
+            Write-Host "Release $tag 与 GitHub 一致，跳过。"
+            return
+        }
+        if (-not $sameText) {
+            Write-Host "正在更新 Gitee Release $tag 的说明。"
+            Update-GiteeRelease -ReleaseId $releaseId -Tag $tag -Meta $meta
+        }
+        if ($sameAssets) { return }
+        Write-Host "正在替换 Gitee Release $tag 的附件。"
+        Remove-GiteeAssets -ReleaseId $releaseId -Files $giteeFiles
+        Copy-GitHubAssets -Tag $tag -ReleaseId $releaseId -GitHubFiles $githubFiles
+    }
+    finally {
+        Remove-Item -LiteralPath $bodyPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Sync-Releases {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        Stop-Mirror "找不到 GitHub CLI（gh）。安装并登录后再镜像。"
+    }
+    & gh auth status | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Mirror "gh 未登录。"
+    }
+    $gitHubRepo = Get-GitHubRepo
+    $gitHubReleases = Get-GitHubReleases $gitHubRepo
+    foreach ($release in @(Get-GiteeReleases)) {
+        $tag = [string]$release.tag_name
+        if ([string]::IsNullOrWhiteSpace($tag)) { continue }
+        if (-not [regex]::IsMatch($tag, $script:MirrorTagRegex)) { continue }
+        if ($gitHubReleases.ContainsKey($tag)) { continue }
+        $releaseId = Get-GiteeReleaseId $release
+        if (-not $releaseId) { continue }
+        Remove-GiteeRelease -ReleaseId $releaseId -Tag $tag
+    }
+    foreach ($tag in @($gitHubReleases.Keys)) {
+        $existing = Get-GiteeReleaseByTag $tag
+        Sync-OneRelease -GitHubRelease $gitHubReleases[$tag] -Existing $existing
+    }
+}
+
+if ($args.Count -gt 0) {
+    Stop-Mirror "这个脚本不接受参数。配置写在 .github/gitee.local。"
+}
+
+Set-Location $Root
+Read-GiteeConfig
+if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+    Stop-Mirror "找不到 curl.exe，无法把 Release 同步到 Gitee。"
+}
+$repoParts = $script:GiteeRepo.Split("/")
+$script:GiteeApi = "https://gitee.com/api/v5/repos/$($repoParts[0])/$($repoParts[1])"
+$script:GiteeTokenArg = @("--data-urlencode", "access_token=$($script:GiteeToken)")
+
+Sync-GitRefs
+Sync-Releases
+Write-Host "已按 GitHub 把 $($script:MirrorBranch)、符合规则的标签和 Release 对齐到 Gitee。"

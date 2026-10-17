@@ -1,6 +1,6 @@
 ﻿# 按 AssemblyFileVersion 做 Release 构建，用 installer\db-to-excel.aip 生成 exe，并挂到 GitHub Release。
-# GitHub 发布成功后，用本机 exe 上传到 Gitee。不从 GitHub Actions 传这个大文件。
-# 不修改版本号，不签名，不提交 installer、证书或 bin。令牌不写入 git 配置，也不打到日志里。
+# GitHub 发布成功后执行 scripts\mirror-gitee.ps1，由它把分支、版本标签和 Release 对齐到 Gitee。
+# 不修改版本号，不签名，不提交 installer、证书或 bin。
 
 $ErrorActionPreference = "Stop"
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
@@ -65,196 +65,12 @@ function Get-ThreePartVersion([string]$Text, [string]$AttributeName) {
     return $value
 }
 
-function Hide-GiteeSecret([string]$Text) {
-    if ([string]::IsNullOrEmpty($Text) -or [string]::IsNullOrEmpty($script:GiteeToken)) {
-        return $Text
+function Assert-GiteeMirrorConfig {
+    $giteeLocal = Join-Path $Root ".github\gitee.local"
+    if (-not (Test-Path -LiteralPath $giteeLocal)) {
+        Stop-Release "缺少 .github\gitee.local。把 .github\gitee.local.example 复制为该文件并填上 GITEE_TOKEN、GITEE_REPO、MIRROR_BRANCH、MIRROR_TAG_REGEX。该文件已忽略，不要提交。"
     }
-    return $Text.Replace($script:GiteeToken, "***")
-}
-
-function Read-GiteeBody([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path)) { return "" }
-    return [System.IO.File]::ReadAllText($Path)
-}
-
-function Show-GiteeFailure([string]$Path) {
-    $raw = Read-GiteeBody $Path
-    if ([string]::IsNullOrWhiteSpace($raw)) { return }
-    try {
-        $obj = $raw | ConvertFrom-Json
-        if ($obj.message) {
-            Write-Host (Hide-GiteeSecret ([string]$obj.message))
-            return
-        }
-    }
-    catch {
-        # 不是 JSON 时打印原文，令牌已打码。
-    }
-    Write-Host (Hide-GiteeSecret $raw)
-}
-
-function Invoke-GiteeCurl {
-    param(
-        [Parameter(Mandatory = $true)][string]$Method,
-        [Parameter(Mandatory = $true)][string]$Url,
-        [string[]]$ArgumentList
-    )
-    $out = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-" + [guid]::NewGuid().ToString("N") + ".json")
-    $code = "000"
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $curlArgs = @(
-            "-sS", "--connect-timeout", "20", "--max-time", "180",
-            "-o", $out, "-w", "%{http_code}", "-X", $Method
-        )
-        if ($Method -eq "GET" -or $Method -eq "DELETE") {
-            $curlArgs += "-G"
-        }
-        if ($ArgumentList) { $curlArgs += $ArgumentList }
-        $curlArgs += $Url
-        $err = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-" + [guid]::NewGuid().ToString("N") + ".err")
-        $codeText = & curl.exe @curlArgs 2>$err
-        $exit = $LASTEXITCODE
-        $code = ""
-        if ($null -ne $codeText) { $code = ([string]$codeText).Trim() }
-        if ($code -notmatch '^[0-9]{3}$') { $code = "000" }
-        $retry = $exit -ne 0 -or $code -in @("000", "408", "429", "500", "502", "503", "504")
-        if (-not $retry) { return @{ Code = $code; Body = $out } }
-        if ($attempt -lt 3) {
-            Write-Host "Gitee 接口暂时没有响应（HTTP $code），5 秒后重试。"
-            Start-Sleep -Seconds 5
-        }
-    }
-    return @{ Code = $code; Body = $out }
-}
-
-function Invoke-GiteeGitPush([string]$Refspec) {
-    $remote = "https://oauth2:$($script:GiteeToken)@gitee.com/$($script:GiteeRepo).git"
-    $previousPrompt = $env:GIT_TERMINAL_PROMPT
-    $env:GIT_TERMINAL_PROMPT = "0"
-    try {
-        $output = & git -c credential.helper= push --quiet $remote $Refspec 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Stop-Release ("推送到 Gitee 失败。" + (Hide-GiteeSecret $output))
-        }
-    }
-    finally {
-        if ($null -eq $previousPrompt) {
-            Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:GIT_TERMINAL_PROMPT = $previousPrompt
-        }
-    }
-}
-
-function Get-GiteeReleaseId($Release) {
-    if ($null -eq $Release) { return "" }
-    if ($Release.id -match '^\d+$') { return [string]$Release.id }
-    return ""
-}
-
-function Publish-GiteeRelease {
-    param(
-        [Parameter(Mandatory = $true)][string]$Tag,
-        [Parameter(Mandatory = $true)][string]$Title,
-        [Parameter(Mandatory = $true)][string]$NotesPath,
-        [Parameter(Mandatory = $true)][string]$PackagePath
-    )
-    $parts = $script:GiteeRepo.Split("/")
-    $api = "https://gitee.com/api/v5/repos/$($parts[0])/$($parts[1])"
-    $tokenArg = @("--data-urlencode", "access_token=$($script:GiteeToken)")
-
-    Write-Host "正在把 $Tag 推到 Gitee。"
-    Invoke-GiteeGitPush "HEAD:refs/heads/main"
-    Invoke-GiteeGitPush "refs/tags/${Tag}:refs/tags/${Tag}"
-
-    $found = Invoke-GiteeCurl -Method GET -Url "$api/releases/tags/$Tag" -ArgumentList $tokenArg
-    $release = $null
-    if ($found.Code -eq "200") {
-        $raw = Read-GiteeBody $found.Body
-        if (-not [string]::IsNullOrWhiteSpace($raw) -and $raw.Trim() -ne "null") {
-            $release = $raw | ConvertFrom-Json
-        }
-    }
-    elseif ($found.Code -ne "404") {
-        Show-GiteeFailure $found.Body
-        Stop-Release "查询 Gitee Release $Tag 失败，HTTP $($found.Code)。"
-    }
-
-    $releaseId = Get-GiteeReleaseId $release
-    $meta = $tokenArg + @(
-        "--data-urlencode", "tag_name=$Tag",
-        "--data-urlencode", "name=$Title",
-        "--data-urlencode", "body@$NotesPath",
-        "--data-urlencode", "target_commitish=main",
-        "--data-urlencode", "prerelease=false"
-    )
-    if ($releaseId) {
-        $files = @()
-        if ($release.assets) { $files += @($release.assets) }
-        if ($release.attach_files) { $files += @($release.attach_files) }
-        $removed = @{}
-        foreach ($file in $files) {
-            $name = [string]$file.name
-            if ([string]::IsNullOrEmpty($name)) { $name = [string]$file.file_name }
-            if ($name -ne "db-to-excel.exe") { continue }
-            if ($file.id -notmatch '^\d+$') { continue }
-            $fileId = [string]$file.id
-            if ($removed.ContainsKey($fileId)) { continue }
-            $removed[$fileId] = $true
-            Write-Host "删除 Gitee 上的旧 db-to-excel.exe（$fileId）。"
-            $deleted = Invoke-GiteeCurl -Method DELETE -Url "$api/releases/$releaseId/attach_files/$($file.id)" -ArgumentList $tokenArg
-            if ($deleted.Code -ne "204" -and $deleted.Code -ne "200") {
-                Show-GiteeFailure $deleted.Body
-                Stop-Release "删除 Gitee 附件 $($file.id) 失败，HTTP $($deleted.Code)。"
-            }
-        }
-        $updated = Invoke-GiteeCurl -Method PATCH -Url "$api/releases/$releaseId" -ArgumentList $meta
-        if ($updated.Code -ne "200") {
-            Show-GiteeFailure $updated.Body
-            Stop-Release "更新 Gitee Release $Tag 失败，HTTP $($updated.Code)。"
-        }
-    }
-    else {
-        $releaseId = ""
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $created = Invoke-GiteeCurl -Method POST -Url "$api/releases" -ArgumentList $meta
-            $createdBody = Read-GiteeBody $created.Body
-            $createdRelease = $null
-            if (-not [string]::IsNullOrWhiteSpace($createdBody) -and $createdBody.Trim() -ne "null") {
-                $createdRelease = $createdBody | ConvertFrom-Json
-            }
-            $releaseId = Get-GiteeReleaseId $createdRelease
-            if ($releaseId) { break }
-            if ($attempt -lt 3) {
-                Write-Host "创建 Gitee Release $Tag 未成功（HTTP $($created.Code)），5 秒后重试。"
-                Show-GiteeFailure $created.Body
-                Start-Sleep -Seconds 5
-                continue
-            }
-            Show-GiteeFailure $created.Body
-            Stop-Release "创建 Gitee Release $Tag 失败，HTTP $($created.Code)。"
-        }
-    }
-
-    Write-Host "正在上传 db-to-excel.exe 到 Gitee。"
-    $packageForm = "file=@`"$($PackagePath.Replace('\', '/'))`";filename=db-to-excel.exe"
-    $uploaded = Invoke-GiteeCurl -Method POST -Url "$api/releases/$releaseId/attach_files" -ArgumentList @(
-        "--http1.1", "-H", "Expect:",
-        "-F", "access_token=$($script:GiteeToken)",
-        "-F", $packageForm
-    )
-    if ($uploaded.Code -ne "201" -and $uploaded.Code -ne "200") {
-        Show-GiteeFailure $uploaded.Body
-        Stop-Release "上传 db-to-excel.exe 到 Gitee Release $Tag 失败，HTTP $($uploaded.Code)。"
-    }
-    Write-Host "已把安装包上传到 Gitee Release $Tag。"
-}
-
-Set-Location $Root
-
-$giteeLocal = Join-Path $Root ".github\gitee.local"
-if (Test-Path -LiteralPath $giteeLocal) {
+    $values = @{}
     foreach ($line in Get-Content -LiteralPath $giteeLocal -Encoding UTF8) {
         $trimmed = $line.Trim()
         if ($trimmed.Length -eq 0 -or $trimmed.StartsWith("#")) { continue }
@@ -262,26 +78,19 @@ if (Test-Path -LiteralPath $giteeLocal) {
         if ($separator -lt 1) { continue }
         $name = $trimmed.Substring(0, $separator).Trim()
         $value = $trimmed.Substring($separator + 1).Trim()
-        if ($name -eq "GITEE_TOKEN" -and [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN)) {
-            $env:GITEE_TOKEN = $value
-        }
-        elseif ($name -eq "GITEE_REPO" -and [string]::IsNullOrWhiteSpace($env:GITEE_REPO)) {
-            $env:GITEE_REPO = $value
-        }
+        $values[$name] = $value
+    }
+    $missing = @()
+    foreach ($key in @("GITEE_TOKEN", "GITEE_REPO", "MIRROR_BRANCH", "MIRROR_TAG_REGEX")) {
+        if ([string]::IsNullOrWhiteSpace($values[$key])) { $missing += $key }
+    }
+    if ($missing.Count -gt 0) {
+        Stop-Release ".github\gitee.local 里缺少 $($missing -join '、')。对照 .github\gitee.local.example 填写。该文件已忽略，不要提交。"
     }
 }
 
-$script:GiteeToken = $env:GITEE_TOKEN
-$script:GiteeRepo = $env:GITEE_REPO
-if ([string]::IsNullOrWhiteSpace($script:GiteeToken) -or [string]::IsNullOrWhiteSpace($script:GiteeRepo)) {
-    Stop-Release "缺少 GITEE_TOKEN 或 GITEE_REPO。写在本机 .github\gitee.local，或设成环境变量。GITEE_REPO 形如 owner/repo。该文件已忽略，不要提交。"
-}
-if ($script:GiteeRepo -notmatch '^[^/\s]+/[^/\s]+$') {
-    Stop-Release "GITEE_REPO 必须是 owner/repo，当前是：$($script:GiteeRepo)"
-}
-if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
-    Stop-Release "找不到 curl.exe，无法把安装包上传到 Gitee。"
-}
+Set-Location $Root
+Assert-GiteeMirrorConfig
 
 $dirty = git status --porcelain
 if ($LASTEXITCODE -ne 0) { Stop-Release "无法读取 git 状态。" }
@@ -456,4 +265,9 @@ else {
 }
 
 Write-Host "已发布 $fileVersion：$($package.FullName)"
-Publish-GiteeRelease -Tag $tag -Title $fileVersion -NotesPath $notesFile -PackagePath $package.FullName
+Write-Host "正在把 GitHub 镜像到 Gitee。"
+$mirror = Join-Path $Root "scripts\mirror-gitee.ps1"
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $mirror
+if ($LASTEXITCODE -ne 0) {
+    Stop-Release "镜像到 Gitee 失败。"
+}
