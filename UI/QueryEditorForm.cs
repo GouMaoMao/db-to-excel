@@ -42,6 +42,7 @@ namespace DB2Sheet.UI
         private readonly ListBox _queryProfiles;
         private readonly ISqlFormattingService _formatting;
         private readonly TabControl _queryTabs;
+        private readonly ImageList _queryTabIcons;
         private readonly Panel _editorSurface;
         private readonly Button _emptyQueryButton;
         private readonly Button _addQueryButton;
@@ -158,6 +159,8 @@ namespace DB2Sheet.UI
             };
             _formatting = new SqlFormattingService();
             _queryTabs = CloseMark.CreateTabs();
+            _queryTabIcons = DatabaseTreeImageCatalog.CreateSingleIconList("icon_script.png");
+            _queryTabs.ImageList = _queryTabIcons;
             _queryTabs.Dock = DockStyle.Fill;
             _editorSurface = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
             _emptyQueryButton = HintButton.Create(AppPresentation.EmptyQueryCaption);
@@ -2247,6 +2250,8 @@ namespace DB2Sheet.UI
             foreach (Image icon in _actionIcons)
                 icon.Dispose();
             _actionIcons.Clear();
+            _queryTabs.ImageList = null;
+            _queryTabIcons.Dispose();
             _queryScriptIcon.Dispose();
             _previewHeaderTypeFont.Dispose();
             _sqlLimitHintFont.Dispose();
@@ -2500,7 +2505,8 @@ namespace DB2Sheet.UI
             {
                 Tag = tab,
                 Padding = Padding.Empty,
-                UseVisualStyleBackColor = true
+                UseVisualStyleBackColor = true,
+                ImageIndex = 0
             };
             tab.Page = page;
             RefreshTabTitle(tab);

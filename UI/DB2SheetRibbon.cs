@@ -202,12 +202,14 @@ namespace DB2Sheet.UI
                     return true;
                 case "DB2SheetSettingsMenu":
                 case "DB2SheetSettingsButton":
-                case "DB2SheetAiMenu":
-                case "DB2SheetAiModelsButton":
                     fileName = "icon_setting.png";
                     return true;
+                case "DB2SheetAiMenu":
+                case "DB2SheetAiModelsButton":
+                    fileName = "icon_robot.png";
+                    return true;
                 case "DB2SheetAiSkillsButton":
-                    fileName = "icon_script.png";
+                    fileName = "icon_skills.png";
                     return true;
                 case "DB2SheetJdbcEnvironmentButton":
                     fileName = "icon_java.png";

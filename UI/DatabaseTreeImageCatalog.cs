@@ -72,6 +72,31 @@ namespace DB2Sheet.UI
         /// <summary>获取视图节点的图像键。</summary>
         public static string View(bool active) => Key(ViewKey, active);
 
+        /// <summary>创建只含一张嵌入图标的图像列表，供页签在标题左侧显示。</summary>
+        /// <param name="fileName">Resources 目录下的文件名，例如 icon_script.png。</param>
+        /// <returns>调用方负责释放的 16 像素图像列表。释放列表时其中的图像一并释放。</returns>
+        /// <remarks>列表里的图是单独加载的，不要和按钮或列表已经持有的同一张图共用。</remarks>
+        /// <exception cref="InvalidOperationException">嵌入图片缺失或无法读取。</exception>
+        public static ImageList CreateSingleIconList(string fileName)
+        {
+            ImageList images = new ImageList
+            {
+                ColorDepth = ColorDepth.Depth32Bit,
+                ImageSize = new Size(16, 16),
+                TransparentColor = Color.Transparent
+            };
+            try
+            {
+                images.Images.Add(LoadActionIcon(fileName, 16));
+                return images;
+            }
+            catch
+            {
+                images.Dispose();
+                throw;
+            }
+        }
+
         /// <summary>读取嵌入图标并缩放到 16 像素，供窗体按钮显示在文字左侧。</summary>
         /// <param name="fileName">Resources 目录下的文件名，例如 icon_execute.png。</param>
         /// <returns>调用方负责释放的 16 像素位图。</returns>

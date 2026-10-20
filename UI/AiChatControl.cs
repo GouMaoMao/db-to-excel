@@ -29,6 +29,7 @@ namespace DB2Sheet.UI
         private readonly Func<AiMentionSource> _readMentions;
         private readonly Action _closePanel;
         private readonly TabControl _tabs = CloseMark.CreateTabs();
+        private readonly ImageList _conversationTabIcons = DatabaseTreeImageCatalog.CreateSingleIconList("icon_talk.png");
         private readonly Panel _empty = new Panel
         {
             Dock = DockStyle.Fill,
@@ -216,6 +217,7 @@ namespace DB2Sheet.UI
 
             Panel tabBar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = SystemColors.Control };
             // 纵向 11 把 9 磅标题撑满 40 像素条，页签页从 42 起，不会露在标题下面。
+            _tabs.ImageList = _conversationTabIcons;
             _tabs.Padding = new Point(6, 11);
             _tabs.Dock = DockStyle.Fill;
             tabBar.Controls.Add(_tabs);
@@ -337,6 +339,8 @@ namespace DB2Sheet.UI
                 foreach (Image icon in _mentionIcons.Values)
                     icon.Dispose();
                 _mentionIcons.Clear();
+                _tabs.ImageList = null;
+                _conversationTabIcons.Dispose();
                 _addIcon.Dispose();
                 _sendIcon.Dispose();
                 _sendIconGray.Dispose();
@@ -773,7 +777,11 @@ namespace DB2Sheet.UI
             foreach (AiConversation conversation in _assistant.Conversations.GetAll())
             {
                 if (conversation == null || conversation.Archived) continue;
-                _tabs.TabPages.Add(new TabPage(CloseMark.Caption(conversation.Title, _tabs.Font)) { Tag = conversation.Id });
+                _tabs.TabPages.Add(new TabPage(CloseMark.Caption(conversation.Title, _tabs.Font))
+                {
+                    Tag = conversation.Id,
+                    ImageIndex = 0
+                });
             }
 
             ApplyTranscriptVisibility();
