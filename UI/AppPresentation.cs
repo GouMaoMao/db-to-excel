@@ -188,7 +188,7 @@ namespace DB2Sheet.UI
 
         /// <summary>模型设置窗顶部的协议说明。不做成可选模板。</summary>
         public const string AiProtocolHelp =
-            "OpenAI 兼容：OpenAI、DeepSeek、MiniMax、Kimi、通义千问、智谱，以及大多数兼容网关。请求路径一般以 chat/completions 结尾。\r\n"
+            "OpenAI 兼容：OpenAI、DeepSeek、MiniMax、Kimi、通义千问、智谱，以及大多数兼容网关。\r\n"
             + "Claude：Anthropic 官方接口上的 Claude。\r\n"
             + "Gemini：Google 官方 generateContent 接口上的 Gemini。\r\n"
             + "Claude 或 Gemini 若通过 OpenAI 兼容网关接入，协议仍选 OpenAI 兼容。";
