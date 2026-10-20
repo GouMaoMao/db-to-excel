@@ -28,6 +28,9 @@ namespace DB2Sheet.UI
         /// <summary>SQL 工作表单元格的字号。</summary>
         public const float SqlSheetFontSize = 10F;
 
+        /// <summary>对话栏灰色说明、Skill、引用和模型芯片的字号。比正文小一档。</summary>
+        public const float AiComposerFontSize = 8.25F;
+
         /// <summary>连接编辑窗下拉的固定顺序。新建默认取第一项 SQL Server。</summary>
         public static readonly string[] ConnectionProviderOrder =
         {
@@ -72,6 +75,359 @@ namespace DB2Sheet.UI
         /// <summary>选中 JDBC 且未找到 Java 时的横幅文案。</summary>
         public const string JdbcJavaBanner =
             "通用连接（JDBC）需要本机 Java（JDK 8 或更高）。请先配置 JDBC 环境，再测试连接。";
+
+        /// <summary>本地数据窗顶部说明。只查看路径，不改保存位置。</summary>
+        public const string LocalDataIntro =
+            "下面是当前用户本机上的配置和日志路径。这里只查看，不改保存位置。";
+
+        /// <summary>本地数据窗「复制路径」的悬浮提示。</summary>
+        public const string LocalDataCopyTip =
+            "复制路径\r\n"
+            + "把选中项的完整路径放进剪贴板。文件或目录还没生成时也可以复制。";
+
+        /// <summary>本地数据窗「打开位置」的悬浮提示。</summary>
+        public const string LocalDataOpenTip =
+            "打开位置\r\n"
+            + "在资源管理器中定位选中的文件，或打开选中的目录。还没生成时只说明，不新建。";
+
+        /// <summary>本地数据窗「关闭」的悬浮提示。</summary>
+        public const string LocalDataCloseTip =
+            "关闭\r\n"
+            + "关掉这个窗口。不改任何文件，也不改保存位置。";
+
+        /// <summary>数据目录一行的悬浮提示。</summary>
+        public const string LocalDataRootTip =
+            "数据目录\r\n"
+            + "当前 Windows 用户的本地数据根目录。下面各项都在这里。";
+
+        /// <summary>连接方案一行的悬浮提示。</summary>
+        public const string LocalDataConnectionsTip =
+            "连接方案\r\n"
+            + "全部连接方案写在这个文件里，含地址和登录信息。";
+
+        /// <summary>查询方案一行的悬浮提示。</summary>
+        public const string LocalDataQueriesTip =
+            "查询方案\r\n"
+            + "已保存的查询方案。一个方案一个文件。";
+
+        /// <summary>参数设置一行的悬浮提示。会话状态也在同一文件，不单列。</summary>
+        public const string LocalDataSettingsTip =
+            "参数设置\r\n"
+            + "参数设置里保存的项，以及不出现在设置界面的会话状态，都在这个文件里。";
+
+        /// <summary>JDBC 环境一行的悬浮提示。</summary>
+        public const string LocalDataJdbcTip =
+            "JDBC 环境\r\n"
+            + "本机 java.exe 的路径。厂商驱动 jar 写在连接方案里，不在这个文件。";
+
+        /// <summary>模型配置一行的悬浮提示。</summary>
+        public const string LocalDataModelsTip =
+            "模型配置\r\n"
+            + "模型的显示名、协议和接口地址。密钥是当前 Windows 用户的 DPAPI 密文。";
+
+        /// <summary>Skill 目录一行的悬浮提示。</summary>
+        public const string LocalDataSkillsTip =
+            "Skill\r\n"
+            + "一份 Skill 一个文件，只作为发给模型的文字。";
+
+        /// <summary>对话目录一行的悬浮提示。</summary>
+        public const string LocalDataConversationsTip =
+            "对话\r\n"
+            + "一条对话一个文件，含问答和查看请求详情用的原文。";
+
+        /// <summary>日志目录一行的悬浮提示。日文件名写在详述里。</summary>
+        public const string LocalDataLogsTip =
+            "日志\r\n"
+            + "按日写入 db2sheet-yyyyMMdd.log 和 ai-audit-yyyyMMdd.log。删除对话不删除审计日志。";
+
+        /// <summary>对话页缓存一行的悬浮提示。</summary>
+        public const string LocalDataWebViewTip =
+            "对话页缓存\r\n"
+            + "对话正文所用 WebView2 的浏览器数据，不在安装目录。";
+
+        /// <summary>JDBC 转接程序一行的悬浮提示。首次使用 JDBC 才释放。</summary>
+        public const string LocalDataBridgeTip =
+            "JDBC 转接程序\r\n"
+            + "嵌在插件里的转接 jar。第一次使用 JDBC 时才释放到数据目录。这不是连接方案中的驱动 jar。";
+
+        /// <summary>模型设置列表末项「新增」的悬浮提示。</summary>
+        public const string AiModelAddTip =
+            "新增\r\n"
+            + "清空右侧，开始填写一条新的模型配置。测试通过后才能保存。";
+
+        /// <summary>模型设置列表右键「删除」的悬浮提示。</summary>
+        public const string AiModelDeleteTip =
+            "删除\r\n"
+            + "删掉这条模型配置。已经保存的密钥一并移除。";
+
+        /// <summary>模型设置里显示名下方的说明。</summary>
+        public const string AiModelNameNote = "备注名称，方便记忆和管理。";
+
+        /// <summary>模型设置里协议下方的说明。</summary>
+        public const string AiModelProtocolNote = "多数选 OpenAI 兼容。";
+
+        /// <summary>模型设置里接口地址下方的说明。</summary>
+        public const string AiModelEndpointNote = "服务商提供。";
+
+        /// <summary>模型设置里密钥下方的说明。</summary>
+        public const string AiModelKeyNote = "在服务商的 API 平台生成。";
+
+        /// <summary>Skill 设置列表末项「新增」的悬浮提示。</summary>
+        public const string AiSkillAddTip =
+            "新增\r\n"
+            + "清空右侧，开始填写一条新的 Skill。";
+
+        /// <summary>Skill 设置列表右键「删除」的悬浮提示。</summary>
+        public const string AiSkillDeleteTip =
+            "删除\r\n"
+            + "删掉这条 Skill。";
+
+        /// <summary>Skill 设置窗顶部的说明。正文只阅读，不执行。</summary>
+        public const string AiSkillHelp =
+            "Skill 是随问题一起发给模型的文字，用来交代口径、表含义或写法，让模型更懂需求。模型只阅读这段文字，不执行里面的 SQL，也不打开里面的链接。";
+
+        /// <summary>模型设置窗顶部的协议说明。不做成可选模板。</summary>
+        public const string AiProtocolHelp =
+            "OpenAI 兼容：OpenAI、DeepSeek、MiniMax、Kimi、通义千问、智谱，以及大多数兼容网关。请求路径一般以 chat/completions 结尾。\r\n"
+            + "Claude：Anthropic 官方接口上的 Claude。\r\n"
+            + "Gemini：Google 官方 generateContent 接口上的 Gemini。\r\n"
+            + "Claude 或 Gemini 若通过 OpenAI 兼容网关接入，协议仍选 OpenAI 兼容。";
+
+        /// <summary>发送按钮的悬浮提示。第一行是概述，换行后写会带上什么、不会带上什么，以及输入框按键。</summary>
+        public const string AiSendHint =
+            "发送\r\n"
+            + "将发送：你的问题、所选 Skill、输入框上方的查询页签全文、用 @ 附上的查询方案、文件或预览，以及数据库类型。删掉页签引用则不发送该页签 SQL。不自动发送查询结果、连接地址和密码。\r\n"
+            + "Enter 发送，Shift+Enter 换行。输入 @ 可附加引用。";
+
+        /// <summary>模型菜单末项。点开后弹出模型设置。</summary>
+        public const string AiAddModelMenu = "新增其他模型";
+
+        /// <summary>Skill 菜单末项。点开后弹出 Skill 设置。</summary>
+        public const string AiAddSkillMenu = "新增其他 Skill";
+
+        /// <summary>模型芯片的悬浮提示。第一行说明可以点开选择。</summary>
+        public const string AiModelTip =
+            "选择模型\r\n"
+            + "这次提问用的子型号。名称末尾的下拉标记表示可以点开更换。点开可看到配置名称。菜单末项「新增其他模型」打开模型设置。到功能区「设置 → AI 设置 → 模型设置」也可以打开同一窗体。填写协议、接口地址和密钥，测试通过后保存。可用型号在测试时从接口读取。";
+
+        /// <summary>Skill 芯片的悬浮提示。第一行说明可以点开选择。</summary>
+        public const string AiSkillTip =
+            "选择 Skill\r\n"
+            + "和问题一起发给模型的说明，用来约定表、口径或写法。可以勾选多条。没选则不附带，芯片显示 Skills。只选一条时显示名称，多条时显示个数。菜单末项「新增其他 Skill」打开 Skill 设置。在功能区「设置 → AI 设置 → Skill 设置」里也可以编写。灰色图标表示这次不附带。";
+
+        /// <summary>查询页签引用的悬浮提示。</summary>
+        public const string AiSqlRefTip =
+            "当前查询\r\n"
+            + "发送时带上该页 SQL 全文。点末尾「×」后，这一次不发送该页 SQL。";
+
+        /// <summary>用 @ 附上的预览芯片的悬浮提示。</summary>
+        public const string AiPreviewChipTip =
+            "预览引用\r\n"
+            + "当前页的预览结果。点末尾「×」后，这一次不发送。";
+
+        /// <summary>用户气泡下「查看请求详情」的文字。</summary>
+        public const string AiSentLink = "查看请求详情";
+
+        /// <summary>用户气泡下「查看请求详情」的悬浮提示。</summary>
+        public const string AiSentLinkTip =
+            "查看请求详情\r\n"
+            + "打开这次组装给模型的原文。上方是请求地址、协议、模型和响应，接着是各段占比，点分类才展开正文。";
+
+        /// <summary>请求详情里没有正文的分类显示的文字。</summary>
+        public const string AiSentEmpty = "空";
+
+        /// <summary>有输入 token 时，条形图下面的说明。{0} 是本次输入总数。</summary>
+        public const string AiSentShareNote = "本次请求输入占用「{0}」tokens，各段 token 为估算。";
+
+        /// <summary>还没有输入 token 时，条形图下面的说明。</summary>
+        public const string AiSentEstimateNote = "本次请求的输入 token 尚未返回，各段 token 为估算。";
+
+        /// <summary>请求详情「你的问题」标题。</summary>
+        public const string AiSentQuestion = "你的问题";
+
+        /// <summary>请求详情「默认说明」标题。</summary>
+        public const string AiSentSystem = "默认说明";
+
+        /// <summary>请求详情 Skill 分组标题。</summary>
+        public const string AiSentSkill = "Skill";
+
+        /// <summary>请求详情「数据库类型」标题。</summary>
+        public const string AiSentDialect = "数据库类型";
+
+        /// <summary>请求详情「当前查询页签」标题。</summary>
+        public const string AiSentTab = "当前查询页签";
+
+        /// <summary>请求详情「引用」分组标题。</summary>
+        public const string AiSentCitation = "引用";
+
+        /// <summary>请求详情「此前问答」标题。</summary>
+        public const string AiSentHistory = "此前问答";
+
+        /// <summary>此前问答下面的说明。再次发送时不带上一轮的页签、Skill 和引用。</summary>
+        public const string AiSentHistoryNote =
+            "再次发给模型的只有对话里看得见的问和答，不会把上一轮的页签 SQL、Skill 和引用再发一遍。";
+
+        /// <summary>旧对话没有记下调用信息时，请求详情顶部的说明。</summary>
+        public const string AiSentMissingCall = "这次没有记下请求地址和模型。";
+
+        /// <summary>请求详情「请求地址」标题。</summary>
+        public const string AiSentUrl = "请求地址";
+
+        /// <summary>请求地址那一行。{0} 是实际 POST 的地址。</summary>
+        public const string AiSentPostUrl = "POST {0}";
+
+        /// <summary>请求详情「协议」标题。</summary>
+        public const string AiSentProtocol = "协议";
+
+        /// <summary>请求详情「模型」标题。</summary>
+        public const string AiSentModel = "模型";
+
+        /// <summary>请求详情「发送时间」标题。</summary>
+        public const string AiSentTime = "发送时间";
+
+        /// <summary>请求详情「响应」标题。</summary>
+        public const string AiSentResponse = "响应";
+
+        /// <summary>还没有 HTTP 状态时，响应那一行的文字。</summary>
+        public const string AiSentPendingResponse = "尚未返回";
+
+        /// <summary>收到回复后的响应。{0} 是状态码，{1} 是带千分位的毫秒数。</summary>
+        public const string AiSentResponseValue = "HTTP {0}，耗时 {1} 毫秒";
+
+        /// <summary>请求详情窗关闭按钮的悬浮提示。</summary>
+        public const string AiSentCloseTip =
+            "关闭\r\n"
+            + "关掉这次请求详情。";
+
+        /// <summary>代码块复制成功后，显示在复制图标旁。</summary>
+        public const string AiCodeCopied = "已复制";
+
+        /// <summary>代码块未能写入剪贴板时，显示在复制图标旁。</summary>
+        public const string AiCodeCopyFailed = "复制失败";
+
+        /// <summary>用 @ 附上的方案或文件芯片的悬浮提示。</summary>
+        public const string AiAttachmentChipTip =
+            "引用\r\n"
+            + "这次会发给模型的内容。点末尾「×」后去掉。";
+
+        /// <summary>输入框下方轮换的灰色说明。多行文本框不能显示空框提示，所以单独放一行。</summary>
+        /// <remarks>每次创建对话栏抽一条，本次打开期间不换。有多条时不连续抽到同一条。</remarks>
+        public static readonly string[] AiComposerHints =
+        {
+            "输入 @ 可附加查询方案、文件或当前预览。",
+            "复制AI生成的SQL代码到SQL编辑器区域执行。使用者必须理解SQL代码逻辑，再使用。",
+            "模型切换：不同模型在生成质量、响应速度、Token消耗上存在区别。",
+            "Skills：为AI注入场景知识，显著提升生成SQL的准确性。",
+            "Token：对话文本的计费单位，描述越简洁消耗越低；不建议引用MB级别的文件给AI，会大幅增加token消耗。"
+        };
+
+        private static readonly Random HintRandom = new Random();
+        private static int _lastAiComposerHint = -1;
+
+        /// <summary>抽一条与上次不同的输入框说明。</summary>
+        /// <remarks>只在创建对话栏的界面线程上调用。对话栏按返回的这一句显示到关掉为止。</remarks>
+        /// <returns>这次对话栏固定显示的那一句。</returns>
+        public static string PickAiComposerHint()
+        {
+            int count = AiComposerHints.Length;
+            if (count <= 0) return string.Empty;
+            if (count == 1 || _lastAiComposerHint < 0)
+            {
+                int first = count == 1 ? 0 : HintRandom.Next(count);
+                _lastAiComposerHint = first;
+                return AiComposerHints[first];
+            }
+
+            int index = HintRandom.Next(count - 1);
+            if (index >= _lastAiComposerHint)
+                index++;
+            _lastAiComposerHint = index;
+            return AiComposerHints[index];
+        }
+
+        /// <summary>查询标题栏预览按钮的悬浮提示。</summary>
+        public const string PreviewQueryTip =
+            "预览\r\n"
+            + "执行当前页签的 SQL，把结果放在下方预览区。行数受「最大预览行数」限制。";
+
+        /// <summary>查询标题栏写入按钮的悬浮提示。</summary>
+        public const string ExportQueryTip =
+            "写入 Sheet\r\n"
+            + "把当前查询结果写入 Excel。写入前确认目标表名。";
+
+        /// <summary>预览表右键「复制」的悬浮提示。</summary>
+        public const string PreviewCopyTip =
+            "复制\r\n"
+            + "把选中的格子放进剪贴板。没有选区时复制全部数据行。不含行号和标题。";
+
+        /// <summary>预览表右键「复制带标题」的悬浮提示。</summary>
+        public const string PreviewCopyHeadersTip =
+            "复制带标题\r\n"
+            + "在数据前加上两行：字段编码和类型短名。有选区时只含选中的列和行。";
+
+        /// <summary>预览表右键「全选」的悬浮提示。</summary>
+        public const string PreviewSelectAllTip =
+            "全选\r\n"
+            + "选中预览表里的全部数据行。";
+
+        /// <summary>预览表右键「导出为 Excel」的悬浮提示。</summary>
+        public const string PreviewExportTip =
+            "导出为 Excel\r\n"
+            + "把当前已经查出的预览存成 xlsx。先选择保存路径。不重新查询，也不改当前工作簿。";
+
+        /// <summary>预览列标题右键「复制标题」的悬浮提示。</summary>
+        public const string PreviewCopyTitleTip =
+            "复制标题\r\n"
+            + "复制这一列的字段编码和类型短名。";
+
+        /// <summary>查询标题栏保存按钮的悬浮提示。</summary>
+        public const string SaveQueryTip =
+            "保存方案\r\n"
+            + "把当前页签的 SQL 写入查询方案。未保存的新建页签在这时才成为方案。";
+
+        /// <summary>查询标题栏 AI 按钮的悬浮提示。</summary>
+        public const string ToggleAiTip =
+            "AI\r\n"
+            + "展开或收起右侧对话栏。";
+
+        /// <summary>对话页签条上新建按钮的悬浮提示。</summary>
+        public const string AiNewConversationTip =
+            "新建对话\r\n"
+            + "开始一条空白对话，与右键「新建」相同。";
+
+        /// <summary>对话页签条上历史按钮的悬浮提示。</summary>
+        public const string AiArchivedTip =
+            "已归档\r\n"
+            + "列出已收起的对话。选中一条后把它放回页签。";
+
+        /// <summary>对话栏右上角关闭按钮的悬浮提示。</summary>
+        public const string AiCloseChatTip =
+            "收起\r\n"
+            + "收起右侧对话栏，与再点一次「AI」相同。";
+
+        /// <summary>没有对话时，编辑区中央按钮上的文字。</summary>
+        public const string EmptyConversationCaption = "请新建对话";
+
+        /// <summary>没有对话时，中央按钮的悬浮提示。</summary>
+        public const string EmptyConversationTip =
+            "请新建对话\r\n"
+            + "开始一条空白对话。";
+
+        /// <summary>没有已归档对话时，历史菜单里的不可用说明。</summary>
+        public const string AiNoArchivedConversation = "没有已归档的对话";
+
+        /// <summary>查询页签条上新建按钮的悬浮提示。</summary>
+        public const string NewQueryTip =
+            "新建查询\r\n"
+            + "打开一个空白页签，与菜单「新建查询」相同。保存之后才写入查询方案。";
+
+        /// <summary>没有查询页签时，编辑区中央按钮上的文字。</summary>
+        public const string EmptyQueryCaption = "请新建查询";
+
+        /// <summary>没有查询页签时，中央按钮的悬浮提示。</summary>
+        public const string EmptyQueryTip =
+            "请新建查询\r\n"
+            + "打开一个空白页签。保存之后才成为查询方案。";
 
         /// <summary>一个连接方案都没有时的说明。用于阻止打开查询或批量刷新，以及执行时列表已经为空。</summary>
         public const string NoConnectionPrompt =

@@ -14,7 +14,7 @@ namespace DB2Sheet
 {
     /// <summary>Excel VSTO 加载项入口，负责生命周期、依赖组装、Ribbon 创建和顶层窗体管理。</summary>
     /// <remarks>
-    /// 服务在首次启动或 Ribbon 操作前延迟初始化。SQL 查询和批量刷新窗体保持单实例；连接管理、JDBC 环境和设置使用模态临时窗体。
+    /// 服务在首次启动或 Ribbon 操作前延迟初始化。SQL 查询和批量刷新窗体保持单实例；连接管理、JDBC 环境、设置和本地数据使用模态临时窗体。
     /// 卸载时关闭仍打开的窗体，并结束 JDBC 转接进程。
     /// </remarks>
     public partial class ThisAddIn
@@ -34,6 +34,7 @@ namespace DB2Sheet
         private IBatchRefreshService _batchRefresh;
         private JdbcBridgeHost _jdbcBridge;
         private IJdbcEnvironmentStore _jdbcEnvironment;
+        private AiAssistant _assistant;
         private QueryEditorForm _queryEditorForm;
         private SheetRefreshForm _sheetRefreshForm;
 
@@ -58,7 +59,15 @@ namespace DB2Sheet
         /// <returns>绑定到本加载项 UI 入口的 Ribbon 实例。</returns>
         protected override OfficeCore.IRibbonExtensibility CreateRibbonExtensibilityObject()
         {
-            return new DB2SheetRibbon(OpenQueryEditor, OpenSheetRefresh, OpenConnections, OpenSettings, OpenJdbcEnvironment);
+            return new DB2SheetRibbon(
+                OpenQueryEditor,
+                OpenSheetRefresh,
+                OpenConnections,
+                OpenSettings,
+                OpenJdbcEnvironment,
+                OpenAiModels,
+                OpenAiSkills,
+                OpenLocalData);
         }
 
         /// <summary>按依赖顺序创建路径、日志、提供程序、仓储和业务服务。</summary>
@@ -82,6 +91,7 @@ namespace DB2Sheet
 
             _settingsRegistry = SettingsRegistry.CreateDefault();
             _settings = new JsonSettingsStore(_paths, _settingsRegistry);
+            _assistant = new AiAssistant(_paths, _logger);
             _connections = new ConnectionProfileRepository(_paths);
             _queries = new QueryProfileRepository(_paths);
             _executionService = new DataSourceExecutionService(_providers, _logger);
@@ -104,7 +114,7 @@ namespace DB2Sheet
                     if (!EnsureConnectionProfile("SQL 查询")) return;
                     _queryEditorForm = new QueryEditorForm(
                         _queries, _connections, _providers, _executionService, _queryBuffer,
-                        _resultWriter, _taskReader, _operationRunner, _settings, workbook, _jdbcEnvironment, OpenJdbcEnvironment);
+                        _resultWriter, _taskReader, _operationRunner, _settings, workbook, _jdbcEnvironment, _assistant, OpenJdbcEnvironment);
                     _queryEditorForm.FormClosed += (sender, args) => _queryEditorForm = null;
                     _queryEditorForm.Show();
                 }
@@ -185,6 +195,36 @@ namespace DB2Sheet
                 {
                     form.ShowDialog();
                 }
+            });
+        }
+
+        /// <summary>以模态方式打开模型设置。</summary>
+        private void OpenAiModels()
+        {
+            ExecuteUiAction(() =>
+            {
+                using (AiModelSettingsForm form = new AiModelSettingsForm(_assistant, _settings))
+                    form.ShowDialog();
+            });
+        }
+
+        /// <summary>以模态方式打开 Skill 设置。</summary>
+        private void OpenAiSkills()
+        {
+            ExecuteUiAction(() =>
+            {
+                using (AiSkillSettingsForm form = new AiSkillSettingsForm(_assistant, _settings))
+                    form.ShowDialog();
+            });
+        }
+
+        /// <summary>以模态方式打开本地数据窗，只展示路径。</summary>
+        private void OpenLocalData()
+        {
+            ExecuteUiAction(() =>
+            {
+                using (LocalDataForm form = new LocalDataForm(_paths))
+                    form.ShowDialog();
             });
         }
 

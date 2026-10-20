@@ -89,11 +89,26 @@ namespace DB2Sheet.UI
         /// <exception cref="InvalidOperationException">嵌入图片缺失或无法读取。</exception>
         public static Image LoadActionIcon(string fileName, int size)
         {
+            return LoadActionIcon(fileName, size, false);
+        }
+
+        /// <summary>读取嵌入图标并缩放到指定边长。需要灰色时再套一层灰度。</summary>
+        /// <param name="fileName">Resources 目录下的文件名。</param>
+        /// <param name="size">目标边长（像素）。</param>
+        /// <param name="grayscale">为 true 时返回灰度图。</param>
+        /// <returns>调用方负责释放的位图。由缓存长期持有时不要释放。</returns>
+        public static Image LoadActionIcon(string fileName, int size, bool grayscale)
+        {
             if (size < 1)
                 throw new ArgumentOutOfRangeException(nameof(size));
 
             using (Image source = Load(fileName))
-                return Resize(source, size);
+            using (Bitmap sized = Resize(source, size))
+            {
+                if (!grayscale)
+                    return (Image)sized.Clone();
+                return ToGray(sized);
+            }
         }
 
         private static string Key(string baseKey, bool active) => baseKey + (active ? "-color" : "-gray");

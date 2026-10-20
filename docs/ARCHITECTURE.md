@@ -74,11 +74,16 @@
 - `settings.json`
 - `jdbc-environment.json`
 - `queries\`：每个查询方案一个文件。旧版 `queries.json` 只在首次加载时迁入该目录。
+- `ai-models.json`：模型配置。密钥是当前 Windows 用户的 DPAPI 密文。测试通过后缓存该接口返回的型号 id。
+- `ai-skills\`：一份 Skill 一个文件，只作上下文。
+- `ai-conversations\`：一条对话一个文件。除可见问答外，还存本轮 token 计数，以及查看请求详情用的分类原文和这次调用的地址、协议、模型、发送时间、HTTP 状态与耗时。
+- `webview2\`：对话页 WebView2 的浏览器数据。
 - `Logs\db2sheet-yyyyMMdd.log`
+- `Logs\ai-audit-yyyyMMdd.log`：呼叫模型前写入的审计记录。写失败则不发送。删除对话不删除这些记录。
 
 仓储采用临时文件和替换方式写入；损坏的 JSON 会被重命名备份。
 
-连接密码明文写在 `connections.json`。保护方式见 `docs/DEPLOYMENT.md` 的「安全要求」。
+连接密码明文写在 `connections.json`。模型密钥不沿用这种做法。保护方式见 `docs/DEPLOYMENT.md` 的「安全要求」。AI 对话的界面和发送边界见 `.github/copilot-instructions.md` 的「AI 助手」。发给模型的说明在嵌入的 `Prompts/*.md`，代码只填占位符。
 
 ### Excel
 
@@ -100,7 +105,10 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `QueryEditorForm`：交互式 SQL 查询。
 - `SheetRefreshForm`：SQL Sheet 任务展示和批量刷新。
 - `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
-- `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」「JDBC 环境」。关于组显示版本。
+- `LocalDataForm`：只列出连接、查询、Skill 等本机路径，不改保存位置。
+- `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」、「AI 设置」（模型设置、Skill 设置）、「JDBC 环境」和「本地数据」。关于组显示版本。
+- `AiModelSettingsForm` / `AiSkillSettingsForm`：模型与 Skill。协议和发送边界见 `.github/copilot-instructions.md` 的「AI 助手」。
+- `AiChatControl`：SQL 查询窗右侧的对话，以及报错时弹出的 `AiChatForm`。正文用 WebView2 显示。只提问，不执行 SQL。
 
 窗体和按钮的细则见 `.github/copilot-instructions.md`。
 
@@ -111,18 +119,18 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 1. `ApplicationPaths` 和 `FileLogger`
 2. SQL Server、MySQL、PostgreSQL、SQLite、DuckDB 和 JDBC 提供程序，以及 `ProviderRegistry`
 3. 设置注册表和 JSON 设置存储
-4. 连接与查询仓储
+4. 连接与查询仓储，以及 AI 的模型、Skill、对话存储和审计日志
 5. 执行服务、操作协调器和查询缓冲服务
 6. SQL Sheet 读取器、Excel 写入器和批量刷新服务
 
-功能区在 Excel 请求 Ribbon 时创建。业务窗体在用户点击对应按钮时创建。SQL 查询和批量刷新保持单实例；连接管理、设置和 JDBC 环境用模态窗体。
+功能区在 Excel 请求 Ribbon 时创建。业务窗体在用户点击对应按钮时创建。SQL 查询和批量刷新保持单实例；连接管理、设置、模型设置、Skill 设置、JDBC 环境和本地数据用模态窗体。报错时的 AI 对话是查询窗拥有的非模态窗。
 
 ## 查询执行流程
 
 1. UI 选择共享连接并生成 `DataSourceRequest`。
 2. Provider 校验连接和只读 SQL。
 3. ADO.NET 提供程序打开连接并配置只读会话，用 `SequentialAccess` 执行 Reader，由 `DatabaseResultStream` 按块读取。JDBC 不走 ADO.NET，由进程外的 `java.exe` 执行，结果经 `JdbcResultStream` 按块读取。
-4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView，或由 Excel 写入器分块写入 Sheet。写入和把 SQL 写入 SQL 页的细则见 `.github/copilot-instructions.md`。
+4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView。预览右键可复制，或把已缓冲的预览存成 xlsx。写入 Sheet 和把 SQL 写入 SQL 页的细则见 `.github/copilot-instructions.md`。
 5. 进度通过 `IProgress<OperationProgress>` 上报；取消令牌触发命令取消。
 
 ## 批量刷新流程

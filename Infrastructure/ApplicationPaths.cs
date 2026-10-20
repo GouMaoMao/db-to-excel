@@ -31,11 +31,26 @@ namespace DB2Sheet.Infrastructure
         /// <summary>获取日志目录路径。</summary>
         public string LogsDirectory => Path.Combine(RootDirectory, "Logs");
 
-        /// <summary>确保根目录和日志目录存在。</summary>
+        /// <summary>获取模型配置文件路径。密钥在文件里是 DPAPI 密文。</summary>
+        public string AiModelsFile => Path.Combine(RootDirectory, "ai-models.json");
+
+        /// <summary>获取 Skill 目录。一份 Skill 一个文件，只作上下文。</summary>
+        public string AiSkillsDirectory => Path.Combine(RootDirectory, "ai-skills");
+
+        /// <summary>获取 AI 对话目录。一条对话一个文件。</summary>
+        public string AiConversationsDirectory => Path.Combine(RootDirectory, "ai-conversations");
+
+        /// <summary>获取 WebView2 用户数据目录。浏览器缓存放在这里，不放安装目录。</summary>
+        public string WebView2UserDataDirectory => Path.Combine(RootDirectory, "webview2");
+
+        /// <summary>确保根目录、查询目录、AI 目录和日志目录存在。</summary>
         public void EnsureDirectories()
         {
             Directory.CreateDirectory(RootDirectory);
             Directory.CreateDirectory(QueryProfilesDirectory);
+            Directory.CreateDirectory(AiSkillsDirectory);
+            Directory.CreateDirectory(AiConversationsDirectory);
+            Directory.CreateDirectory(WebView2UserDataDirectory);
             Directory.CreateDirectory(LogsDirectory);
         }
     }

@@ -1,11 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
+using DB2Sheet.Excel;
 using DB2Sheet.Models;
 using DB2Sheet.Services;
 using ExcelInterop = Microsoft.Office.Interop.Excel;
@@ -16,6 +21,7 @@ namespace DB2Sheet.UI
     /// <remarks>
     /// 每个页签是一份查询：SQL、方案名称和上次预览结果都留在该页。预览表格只有一份，切换页签时重画当前页的结果。
     /// 用户输入包括连接方案、SQL 和方案名称。写入时另问目标工作表，并可把 SQL 写入 SQL 页。
+    /// 预览右键把已显示的结果复制到剪贴板，或另存为 xlsx。另存不重新查询，也不修改当前工作簿。
     /// 输出副作用包括保存查询方案和修改当前工作簿。页签在界面线程上增减，不访问 Excel。
     /// </remarks>
     public sealed class QueryEditorForm : AppForm
@@ -36,7 +42,12 @@ namespace DB2Sheet.UI
         private readonly ListBox _queryProfiles;
         private readonly ISqlFormattingService _formatting;
         private readonly TabControl _queryTabs;
-        private readonly Label _emptyEditorHint;
+        private readonly Panel _editorSurface;
+        private readonly Button _emptyQueryButton;
+        private readonly Button _addQueryButton;
+        private Panel _queryTabBar;
+        private Panel _queryTabHost;
+        private bool _placingQueryButton;
         private readonly DataGridView _preview;
         private readonly ToolTip _profileTip = new ToolTip();
         private readonly Timer _profileTipTimer = new Timer();
@@ -52,6 +63,16 @@ namespace DB2Sheet.UI
         private readonly Image _queryScriptIcon;
         private readonly ContextMenuStrip _queryProfileMenu;
         private readonly ContextMenuStrip _queryTabMenu;
+        private readonly ContextMenuStrip _previewMenu;
+        private ToolStripMenuItem _previewCopyItem;
+        private ToolStripMenuItem _previewCopyHeadersItem;
+        private ToolStripMenuItem _previewSelectAllItem;
+        private ToolStripMenuItem _previewExportItem;
+        private ToolStripMenuItem _previewCopyTitleItem;
+        private int _previewHeaderColumn = -1;
+        private bool _previewMenuFromMouse;
+        private bool _previewMenuHeader;
+        private bool _suppressPreviewMenu;
         private readonly ToolStripMenuItem _tabSaveMenuItem;
         private readonly ToolStripMenuItem _tabRenameMenuItem;
         private readonly Font _previewHeaderTypeFont;
@@ -63,6 +84,14 @@ namespace DB2Sheet.UI
         private bool _closePromptActive;
         private bool _applyingWorkspaceSplit;
         private bool _userDraggingWorkspaceSplit;
+        private readonly AiAssistant _assistant;
+        private readonly AiChatControl _aiChat;
+        private readonly SplitContainer _editorSplit;
+        private AiChatForm _aiChatForm;
+        private bool _applyingAiSplit;
+        private bool _userDraggingAiSplit;
+        private bool _adjustingAiFrame;
+        private int _toggleChatWidth = -1;
 
         /// <summary>创建 SQL 查询编辑窗体。</summary>
         /// <param name="queries">查询方案仓储。</param>
@@ -76,6 +105,7 @@ namespace DB2Sheet.UI
         /// <param name="settings">查询行数、超时和分块大小设置。</param>
         /// <param name="workbook">当前操作的 Excel 工作簿。</param>
         /// <param name="jdbcEnvironment">本机 Java 路径，传给连接树里的编辑窗。</param>
+        /// <param name="assistant">AI 提问、模型、Skill 和审计。不执行 SQL。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体；为空时连接编辑不显示该入口。</param>
         public QueryEditorForm(
             IQueryProfileRepository queries,
@@ -89,6 +119,7 @@ namespace DB2Sheet.UI
             ISettingsStore settings,
             ExcelInterop.Workbook workbook,
             IJdbcEnvironmentStore jdbcEnvironment,
+            AiAssistant assistant,
             Action openJdbcEnvironment = null)
         {
             _queries = queries ?? throw new ArgumentNullException(nameof(queries));
@@ -102,6 +133,7 @@ namespace DB2Sheet.UI
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
             _jdbcEnvironment = jdbcEnvironment ?? throw new ArgumentNullException(nameof(jdbcEnvironment));
+            _assistant = assistant ?? throw new ArgumentNullException(nameof(assistant));
             _openJdbcEnvironment = openJdbcEnvironment;
 
             Text = AppPresentation.WindowTitle("SQL 查询");
@@ -125,16 +157,14 @@ namespace DB2Sheet.UI
                 IntegralHeight = false
             };
             _formatting = new SqlFormattingService();
-            _queryTabs = new TabControl { Dock = DockStyle.Fill };
-            _emptyEditorHint = new Label
-            {
-                Dock = DockStyle.Fill,
-                Text = "请新建查询",
-                TextAlign = ContentAlignment.MiddleCenter,
-                ForeColor = SystemColors.GrayText,
-                BackColor = SystemColors.Window,
-                Visible = false
-            };
+            _queryTabs = CloseMark.CreateTabs();
+            _queryTabs.Dock = DockStyle.Fill;
+            _editorSurface = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
+            _emptyQueryButton = HintButton.Create(AppPresentation.EmptyQueryCaption);
+            _emptyQueryButton.Click += (sender, args) => NewQuery();
+            _profileTip.SetToolTip(_emptyQueryButton, AppPresentation.EmptyQueryTip);
+            _editorSurface.Controls.Add(_emptyQueryButton);
+            _editorSurface.Resize += (sender, args) => CenterEmptyQueryButton();
             _queryTabMenu = BuildQueryTabMenu(out _tabSaveMenuItem, out _tabRenameMenuItem);
             _previewHeaderTypeFont = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Italic);
             _preview = new DataGridView
@@ -149,6 +179,7 @@ namespace DB2Sheet.UI
                 ColumnHeadersHeight = 42,
                 RowHeadersVisible = true,
                 RowHeadersWidth = 56,
+                ClipboardCopyMode = DataGridViewClipboardCopyMode.Disable,
                 BackgroundColor = SystemColors.Control,
                 EnableHeadersVisualStyles = false,
                 ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
@@ -161,6 +192,8 @@ namespace DB2Sheet.UI
             };
             _status = new ToolStripStatusLabel { Text = "就绪。", ForeColor = SystemColors.GrayText, Spring = true, TextAlign = ContentAlignment.MiddleLeft };
             _queryProfileMenu = BuildQueryProfileMenu();
+            _previewMenu = BuildPreviewMenu();
+            _preview.ContextMenuStrip = _previewMenu;
 
             _setCurrentConnectionMenuItem = new ToolStripMenuItem("设置为当前连接", null, (sender, args) => _connectionTree.SetSelectedAsCurrent());
             _editConnectionMenuItem = new ToolStripMenuItem("编辑连接", null, (sender, args) => _connectionTree.EditSelectedConnection());
@@ -204,50 +237,82 @@ namespace DB2Sheet.UI
             ToolStripMenuItem editMenu = new ToolStripMenuItem("编辑");
             editMenu.DropDownItems.AddRange(new ToolStripItem[] { formatMenuItem, commentMenuItem });
 
-            MenuStrip menu = new MenuStrip { Dock = DockStyle.Top };
+            ToolStripMenuItem aiMenuItem = new ToolStripMenuItem("AI", null, (sender, args) => ToggleAiPanel());
+            aiMenuItem.ToolTipText = AppPresentation.ToggleAiTip;
+            MenuStrip menu = new MenuStrip { Dock = DockStyle.Top, ShowItemToolTips = true };
             menu.Items.Add(connectionMenu);
             menu.Items.Add(queryMenu);
             menu.Items.Add(editMenu);
+            menu.Items.Add(aiMenuItem);
             MainMenuStrip = menu;
 
-            Button previewButton = ButtonOf("预览", "icon_execute.png");
-            Button exportButton = ButtonOf("写入 Sheet", "icon_writeexcel.png");
-            Button saveButton = ButtonOf("保存方案", "icon_save.png");
-            FlowLayoutPanel sqlActions = new FlowLayoutPanel
-            {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Anchor = AnchorStyles.Right,
-                Padding = Padding.Empty,
-                Margin = Padding.Empty
-            };
-            sqlActions.Controls.Add(previewButton);
-            sqlActions.Controls.Add(exportButton);
-            sqlActions.Controls.Add(saveButton);
-            Panel sqlHeader = BuildSqlHeader(sqlActions);
+            Button previewButton = IconAction("icon_execute.png", AppPresentation.PreviewQueryTip, 28);
+            Button exportButton = IconAction("icon_writeexcel.png", AppPresentation.ExportQueryTip, 28);
+            Button saveButton = IconAction("icon_save.png", AppPresentation.SaveQueryTip, 28);
+            Panel sqlHeader = BuildSqlHeader();
             _sqlLimitHintFont = new Font(AppPresentation.DefaultFontName, 8.25f, FontStyle.Regular);
             _sqlLimitHint = new Label
             {
-                Dock = DockStyle.Top,
+                Dock = DockStyle.Fill,
                 AutoSize = false,
-                Height = 48,
                 ForeColor = SystemColors.GrayText,
                 Font = _sqlLimitHintFont,
                 Padding = new Padding(8, 6, 8, 0),
                 TextAlign = ContentAlignment.MiddleLeft
             };
+            FlowLayoutPanel hintActions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Padding = new Padding(0, 6, 8, 0),
+                Margin = Padding.Empty,
+                BackColor = SystemColors.Control
+            };
+            hintActions.Controls.Add(previewButton);
+            hintActions.Controls.Add(exportButton);
+            hintActions.Controls.Add(saveButton);
+            Panel hintRow = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = SystemColors.Control };
+            hintRow.Controls.Add(_sqlLimitHint);
+            hintRow.Controls.Add(hintActions);
 
+            Image addQueryIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_add.png");
+            _actionIcons.Add(addQueryIcon);
+            _addQueryButton = new Button
+            {
+                Dock = DockStyle.Right,
+                Width = 28,
+                Height = 28,
+                Image = addQueryIcon,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = SystemColors.Control,
+                Cursor = Cursors.Hand,
+                Text = string.Empty,
+                UseVisualStyleBackColor = false
+            };
+            _addQueryButton.FlatAppearance.BorderSize = 0;
+            _addQueryButton.FlatAppearance.MouseOverBackColor = SystemColors.ControlDark;
+            _addQueryButton.FlatAppearance.MouseDownBackColor = SystemColors.ControlDarkDark;
+            _addQueryButton.Click += (sender, args) => NewQuery();
+            _profileTip.SetToolTip(_addQueryButton, AppPresentation.NewQueryTip);
+            _queryTabBar = new Panel { Dock = DockStyle.Top, Height = 28, BackColor = SystemColors.Control };
+            _queryTabHost = new Panel { Dock = DockStyle.Left, Width = 28, Height = 28, BackColor = SystemColors.Control };
+            _queryTabHost.Controls.Add(_queryTabs);
+            _queryTabHost.Controls.Add(_addQueryButton);
+            _queryTabBar.Controls.Add(_queryTabHost);
+            _queryTabBar.Resize += (sender, args) => PlaceNewQueryButton();
+            _queryTabs.HandleCreated += (sender, args) => PlaceNewQueryButton();
             Panel editorHost = new Panel { Dock = DockStyle.Fill };
-            editorHost.Controls.Add(_queryTabs);
-            editorHost.Controls.Add(_emptyEditorHint);
-            Panel sqlPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 30, 0, 0) };
+            editorHost.Controls.Add(_editorSurface);
+            editorHost.Controls.Add(_queryTabBar);
+            Panel sqlPanel = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Control };
             sqlPanel.Controls.Add(editorHost);
-            sqlPanel.Controls.Add(_sqlLimitHint);
+            sqlPanel.Controls.Add(hintRow);
             sqlPanel.Controls.Add(sqlHeader);
 
-            Panel previewPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 30, 0, 0) };
+            Panel previewPanel = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Control };
             previewPanel.Controls.Add(_preview);
             previewPanel.Controls.Add(SectionHeader("结果预览"));
 
@@ -258,8 +323,19 @@ namespace DB2Sheet.UI
                 Panel2Collapsed = true,
                 FixedPanel = FixedPanel.None
             };
-            _resultsSplit.Panel1.Controls.Add(sqlPanel);
-            _resultsSplit.Panel2.Controls.Add(previewPanel);
+            _resultsSplit.Panel1.Controls.Add(LightBorder.Wrap(sqlPanel));
+            _resultsSplit.Panel2.Controls.Add(LightBorder.Wrap(previewPanel));
+
+            _aiChat = new AiChatControl(_assistant, _settings, ReadEditorForAi, ReadMentions, ToggleAiPanel);
+            _editorSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterWidth = 6,
+                Panel2Collapsed = true
+            };
+            _editorSplit.Panel1.Controls.Add(_resultsSplit);
+            _editorSplit.Panel2.Controls.Add(LightBorder.Wrap(_aiChat));
 
             _leftSplit = new SplitContainer
             {
@@ -276,7 +352,7 @@ namespace DB2Sheet.UI
                 SplitterWidth = 6
             };
             _workspace.Panel1.Controls.Add(_leftSplit);
-            _workspace.Panel2.Controls.Add(_resultsSplit);
+            _workspace.Panel2.Controls.Add(_editorSplit);
 
             StatusStrip statusStrip = new StatusStrip { Dock = DockStyle.Bottom, SizingGrip = false };
             statusStrip.Items.Add(_status);
@@ -291,7 +367,8 @@ namespace DB2Sheet.UI
             _queryTabs.MouseDown += QueryTabsMouseDown;
             _queryTabs.MouseUp += QueryTabsMouseUp;
             _queryTabs.SelectedIndexChanged += QueryTabsSelectedIndexChanged;
-            _emptyEditorHint.MouseUp += EmptyEditorMouseUp;
+            _editorSurface.MouseUp += EmptyEditorMouseUp;
+            _emptyQueryButton.MouseUp += EmptyEditorMouseUp;
             _queryProfiles.SelectedIndexChanged += QueryProfilesSelectedIndexChanged;
             _queryProfiles.MouseUp += QueryProfilesMouseUp;
             _queryProfiles.MouseMove += QueryProfilesMouseMove;
@@ -301,15 +378,34 @@ namespace DB2Sheet.UI
             _profileTipTimer.Tick += ProfileTipTimerTick;
             _preview.RowPostPaint += PreviewRowPostPaint;
             _preview.CellPainting += PreviewCellPainting;
+            _preview.MouseDown += PreviewMouseDown;
+            _preview.KeyDown += PreviewGridKeyDown;
+            _previewMenu.Opening += PreviewMenuOpening;
             _connectionTree.NoticeChanged += (sender, args) => _status.Text = _connectionTree.Notice;
             _connectionTree.SelectionChanged += (sender, args) => UpdateConnectionMenuState();
             FormClosing += QueryEditorFormFormClosing;
             FormClosed += QueryEditorFormFormClosed;
-            Activated += (sender, args) => UpdateSqlLimitHint();
+            Shown += (sender, args) => PlaceNewQueryButton();
+            Activated += (sender, args) =>
+            {
+                UpdateSqlLimitHint();
+                _aiChat.ReloadChoices();
+            };
             UpdateSqlLimitHint();
-            _workspace.SizeChanged += (sender, args) => ApplyWorkspaceSplit();
+            _workspace.SizeChanged += (sender, args) =>
+            {
+                if (!_adjustingAiFrame)
+                    ApplyWorkspaceSplit();
+            };
             _workspace.SplitterMoving += (sender, args) => _userDraggingWorkspaceSplit = true;
             _workspace.SplitterMoved += (sender, args) => RememberWorkspaceSplit(_workspace);
+            _editorSplit.SizeChanged += (sender, args) =>
+            {
+                if (!_adjustingAiFrame)
+                    ApplyAiSplit();
+            };
+            _editorSplit.SplitterMoving += (sender, args) => _userDraggingAiSplit = true;
+            _editorSplit.SplitterMoved += (sender, args) => RememberAiSplit();
 
             ReloadQueries(null);
             NewQuery();
@@ -609,37 +705,21 @@ namespace DB2Sheet.UI
             return connection.Name;
         }
 
-        /// <summary>SQL 编辑区标题行。左侧是固定标题，右侧是操作按钮，中间百分比列把按钮留在右侧。</summary>
-        /// <param name="actions">标题行右侧的操作控件。</param>
+        /// <summary>SQL 编辑区标题行。只放固定标题。</summary>
         /// <returns>已排好的标题行面板。</returns>
-        private Panel BuildSqlHeader(Control actions)
+        private Panel BuildSqlHeader()
         {
             Panel header = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = SystemColors.ControlLight };
-            TableLayoutPanel layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 3,
-                RowCount = 1,
-                Margin = Padding.Empty,
-                Padding = new Padding(8, 0, 4, 0)
-            };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             Label title = new Label
             {
                 Text = "SQL编辑器（仅限只读查询）",
                 AutoSize = true,
-                Anchor = AnchorStyles.Left,
+                Dock = DockStyle.Left,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0, 6, 12, 0),
+                Padding = new Padding(8, 6, 12, 0),
                 Font = new Font(AppPresentation.DefaultFontName, AppPresentation.DefaultFontSize, FontStyle.Bold)
             };
-            actions.Margin = new Padding(0, 2, 0, 0);
-            layout.Controls.Add(title, 0, 0);
-            layout.Controls.Add(actions, 2, 0);
-            header.Controls.Add(layout);
+            header.Controls.Add(title);
             return header;
         }
 
@@ -703,7 +783,7 @@ namespace DB2Sheet.UI
                     if (ActiveTab == tab)
                         _resultsSplit.Panel2Collapsed = true;
                 }
-                ShowError(exception);
+                ShowError(exception, sqlText);
             }
         }
 
@@ -722,6 +802,8 @@ namespace DB2Sheet.UI
                 return;
             }
 
+            string sqlText = tab.Editor.SqlText;
+            bool failedDuringQuery = false;
             try
             {
                 if (WorksheetExists(_workbook, targetSheet)
@@ -737,13 +819,14 @@ namespace DB2Sheet.UI
                     return;
                 }
 
-                string sqlText = tab.Editor.SqlText;
                 DataSourceRequest request = CreateRequest(connection, sqlText, ExecutionPurpose.Export, _settings.Get(CoreSettings.MaxExportRows));
+                failedDuringQuery = true;
                 long rows = _operationRunner.Run(this, "写入 Excel", true, async (progress, token) =>
                 {
                     string operationId = Guid.NewGuid().ToString("N");
                     BufferedQueryResult result = await _queryBuffer.ExecuteAsync(
                         request, operationId, progress, token);
+                    failedDuringQuery = false;
                     long written = _writer.WriteResult(_workbook, targetSheet, result, progress, token, operationId);
                     if (writeSql)
                         _taskReader.WriteTaskColumn(_workbook, targetSheet, sqlText);
@@ -761,7 +844,7 @@ namespace DB2Sheet.UI
             }
             catch (Exception exception)
             {
-                ShowError(exception);
+                ShowError(exception, failedDuringQuery ? sqlText : null);
             }
         }
 
@@ -838,6 +921,9 @@ namespace DB2Sheet.UI
         {
             ApplyWorkspaceSplit();
             TrySetSplitterDistance(_leftSplit, _leftSplit.Height / 2);
+            ApplyAiSplit();
+            if (_settings.Get(CoreSettings.AiChatVisible))
+                _aiChat.EnsureConversation();
         }
 
         /// <summary>按已记住的千分比摆左右分栏。容器还没有宽度时不改距离。</summary>
@@ -893,6 +979,241 @@ namespace DB2Sheet.UI
             ratio = Math.Max(1, Math.Min(999, ratio));
             if (ratio == _settings.Get(CoreSettings.WorkspaceSplitRatio)) return;
             _settings.Set(CoreSettings.WorkspaceSplitRatio, ratio);
+        }
+
+        /// <summary>展开或收起右侧 AI 对话。展开时加宽窗体，收起时收回；宽度只有拖动分割条才记住。</summary>
+        private void ToggleAiPanel()
+        {
+            bool visible = !_settings.Get(CoreSettings.AiChatVisible);
+            _settings.Set(CoreSettings.AiChatVisible, visible);
+            if (visible)
+                _toggleChatWidth = WidenForAiPanel();
+            else
+                NarrowAfterAiPanel();
+            ApplyAiSplit();
+            _toggleChatWidth = -1;
+            if (visible)
+                _aiChat.EnsureConversation();
+        }
+
+        /// <summary>
+        /// 按当前 SQL 列宽度算出对话栏，并把窗体向右加宽。
+        /// 左栏像素宽度保持不变。最大化或右侧没有余地时不加宽，多出来的宽度由 SQL 列让出。
+        /// </summary>
+        /// <returns>希望的对话栏像素宽度。SQL 列还没有宽度时为 -1。</returns>
+        private int WidenForAiPanel()
+        {
+            if (_editorSplit == null || _editorSplit.IsDisposed || !_editorSplit.Panel2Collapsed) return -1;
+            int sqlWidth = _editorSplit.Width;
+            if (sqlWidth <= 0) return -1;
+            int chatWidth = ChatWidthBesideSql(sqlWidth);
+            if (WindowState == FormWindowState.Maximized) return chatWidth;
+
+            int growth = chatWidth + _editorSplit.SplitterWidth;
+            Rectangle area = Screen.FromControl(this).WorkingArea;
+            int room = Math.Max(0, area.Right - Bounds.Right);
+            int applied = Math.Min(growth, room);
+            if (applied <= 0) return chatWidth;
+
+            int left = _workspace.SplitterDistance;
+            _adjustingAiFrame = true;
+            try
+            {
+                Width += applied;
+                TrySetSplitterDistance(_workspace, left);
+            }
+            finally
+            {
+                _adjustingAiFrame = false;
+            }
+
+            return chatWidth;
+        }
+
+        /// <summary>收起对话栏时把窗体收回对话栏和分割条所占的宽度，SQL 列像素宽度保持不变。</summary>
+        private void NarrowAfterAiPanel()
+        {
+            if (WindowState == FormWindowState.Maximized) return;
+            if (_editorSplit == null || _editorSplit.IsDisposed || _editorSplit.Panel2Collapsed) return;
+            int remove = _editorSplit.Width - _editorSplit.SplitterDistance;
+            if (remove <= 0) return;
+            int left = _workspace.SplitterDistance;
+            int floor = Math.Max(MinimumSize.Width, 200);
+            _adjustingAiFrame = true;
+            try
+            {
+                Width = Math.Max(floor, Width - remove);
+                TrySetSplitterDistance(_workspace, left);
+            }
+            finally
+            {
+                _adjustingAiFrame = false;
+            }
+        }
+
+        /// <summary>由 SQL 列宽度反推对话栏宽度。还没拖过时为 SQL 列的 2/3。</summary>
+        /// <param name="sqlWidth">对话栏收起时的 SQL 列宽度。</param>
+        /// <returns>对话栏像素宽度。</returns>
+        private int ChatWidthBesideSql(int sqlWidth)
+        {
+            int ratio = _settings.Get(CoreSettings.AiChatSplitRatio);
+            if (ratio > 0 && ratio < 1000)
+                return Math.Max(1, sqlWidth * ratio / (1000 - ratio));
+            return Math.Max(1, sqlWidth * 2 / 3);
+        }
+
+        /// <summary>按已记住的千分比摆右侧对话栏。还没记住时，对话栏占 SQL 列与对话栏合计宽度的 2/5，即 SQL 列的 2/3。</summary>
+        private void ApplyAiSplit()
+        {
+            if (_applyingAiSplit || _editorSplit == null || _editorSplit.IsDisposed) return;
+            _applyingAiSplit = true;
+            try
+            {
+                bool visible = _settings.Get(CoreSettings.AiChatVisible);
+                if (_editorSplit.Panel2Collapsed == visible)
+                    _editorSplit.Panel2Collapsed = !visible;
+                if (!visible) return;
+
+                _userDraggingAiSplit = false;
+                ApplySplitterPanelMinSizes(_editorSplit, 420, 280);
+                int available = _editorSplit.Width - _editorSplit.SplitterWidth;
+                if (available <= 0) return;
+                int chatWidth = _toggleChatWidth;
+                if (chatWidth < 0)
+                {
+                    int ratio = _settings.Get(CoreSettings.AiChatSplitRatio);
+                    chatWidth = ratio > 0 ? available * ratio / 1000 : available * 2 / 5;
+                }
+
+                TrySetSplitterDistance(_editorSplit, available - chatWidth);
+            }
+            finally
+            {
+                _applyingAiSplit = false;
+            }
+        }
+
+        /// <summary>用户拖动右侧分割条后，把对话栏宽度写成千分比。</summary>
+        private void RememberAiSplit()
+        {
+            if (!_userDraggingAiSplit) return;
+            _userDraggingAiSplit = false;
+            if (_applyingAiSplit || _editorSplit == null || _editorSplit.IsDisposed || _editorSplit.Panel2Collapsed) return;
+            int available = _editorSplit.Width - _editorSplit.SplitterWidth;
+            if (available <= 0) return;
+            int chatWidth = available - _editorSplit.SplitterDistance;
+            int ratio = (int)Math.Round(chatWidth * 1000d / available);
+            ratio = Math.Max(1, Math.Min(999, ratio));
+            if (ratio == _settings.Get(CoreSettings.AiChatSplitRatio)) return;
+            _settings.Set(CoreSettings.AiChatSplitRatio, ratio);
+        }
+
+        /// <summary>让对话控件刷新输入框上方的当前页签引用。</summary>
+        private void RefreshAiReference()
+        {
+            if (_aiChat != null && !_aiChat.IsDisposed)
+                _aiChat.NotifyEditorChanged();
+            if (_aiChatForm != null && !_aiChatForm.IsDisposed)
+                _aiChatForm.NotifyEditorChanged();
+        }
+
+        /// <summary>读取当前页签全文和当前连接的数据库类型。没有页签时标明为空。</summary>
+        /// <returns>发送当时的编辑器快照。</returns>
+        private AiEditorSnapshot ReadEditorForAi()
+        {
+            QueryTab tab = ActiveTab;
+            ConnectionProfileSnapshot connection = _connectionTree.ActiveConnection;
+            return new AiEditorSnapshot
+            {
+                HasTab = tab != null,
+                TabName = tab == null ? string.Empty : tab.TabTitle,
+                Sql = tab == null ? string.Empty : tab.Editor.SqlText,
+                ProviderId = connection == null ? string.Empty : connection.ProviderId
+            };
+        }
+
+        /// <summary>列出已保存方案，并带上当前页已经有的预览。供输入 @ 时选用。</summary>
+        /// <returns>方案和预览快照。预览按行截断，不重新查询。</returns>
+        private AiMentionSource ReadMentions()
+        {
+            List<AiSavedQuery> queries = new List<AiSavedQuery>();
+            foreach (QueryProfile profile in _queries.GetAll())
+            {
+                if (profile == null) continue;
+                queries.Add(new AiSavedQuery { Name = profile.Name, Sql = profile.QueryText });
+            }
+
+            QueryTab tab = ActiveTab;
+            bool hasPreview = tab != null && tab.HasPreview && tab.Preview != null;
+            return new AiMentionSource
+            {
+                Queries = queries,
+                HasPreview = hasPreview,
+                PreviewLabel = tab == null ? string.Empty : tab.TabTitle,
+                PreviewText = hasPreview ? FormatPreviewForAi(tab.Preview) : string.Empty
+            };
+        }
+
+        /// <summary>把预览收成制表符分隔的文本。最多 30 行、约 16KB。</summary>
+        /// <param name="result">当前页已有的预览。</param>
+        /// <returns>可放进引用的文本。没有列时为空。</returns>
+        private static string FormatPreviewForAi(BufferedQueryResult result)
+        {
+            const int maxRows = 30;
+            const int maxChars = 16 * 1024;
+            if (result == null || result.Columns.Count == 0) return string.Empty;
+            StringBuilder builder = new StringBuilder();
+            for (int index = 0; index < result.Columns.Count; index++)
+            {
+                if (index > 0)
+                    builder.Append('\t');
+                builder.Append(result.Columns[index].Name ?? string.Empty);
+            }
+
+            builder.AppendLine();
+            int written = 0;
+            foreach (object[,] block in result.Blocks)
+            {
+                int rows = block.GetLength(0);
+                int columns = block.GetLength(1);
+                for (int row = 0; row < rows && written < maxRows && builder.Length < maxChars; row++)
+                {
+                    for (int column = 0; column < columns; column++)
+                    {
+                        if (column > 0)
+                            builder.Append('\t');
+                        object value = block[row, column];
+                        builder.Append(value == null || value is DBNull ? string.Empty : Convert.ToString(value));
+                    }
+
+                    builder.AppendLine();
+                    written++;
+                }
+            }
+
+            if (written < result.RowCount || result.IsTruncated || builder.Length >= maxChars)
+                builder.Append("（预览已截断，以上为前 ").Append(written.ToString()).Append(" 行。）");
+            if (builder.Length <= maxChars)
+                return builder.ToString();
+            return builder.ToString(0, maxChars) + Environment.NewLine + "（预览已截断。）";
+        }
+
+        /// <summary>弹出独立对话窗，新建「SQL 报错」对话并填入脱敏草稿。</summary>
+        /// <param name="sql">失败的那次 SQL。</param>
+        /// <param name="errorMessage">异常消息，不含堆栈。</param>
+        private void OpenAiErrorChat(string sql, string errorMessage)
+        {
+            if (_aiChatForm == null || _aiChatForm.IsDisposed)
+            {
+                _aiChatForm = new AiChatForm(_assistant, _settings, ReadEditorForAi, ReadMentions);
+                _aiChatForm.FormClosed += (sender, args) => _aiChatForm = null;
+            }
+
+            _aiChatForm.StartErrorConversation(AiTextRedactor.BuildErrorDraft(sql, errorMessage));
+            if (!_aiChatForm.Visible)
+                _aiChatForm.Show(this);
+            else
+                _aiChatForm.Activate();
         }
 
         /// <summary>在满足面板最小尺寸约束时安全设置分割条位置，避免 WinForms 抛出范围异常。</summary>
@@ -1009,6 +1330,838 @@ namespace DB2Sheet.UI
             return dataType == null ? string.Empty : dataType.Name;
         }
 
+        /// <summary>建立预览表右键菜单。点单元格和点列标题时显示的项不同，打开前再切换。</summary>
+        /// <returns>挂到预览表上的菜单。窗体关闭时释放。</returns>
+        private ContextMenuStrip BuildPreviewMenu()
+        {
+            _previewCopyItem = PreviewMenuItem("复制", "Ctrl+C", AppPresentation.PreviewCopyTip, (sender, args) => CopyPreview(false));
+            _previewCopyHeadersItem = PreviewMenuItem("复制带标题", "Ctrl+Shift+C", AppPresentation.PreviewCopyHeadersTip, (sender, args) => CopyPreview(true));
+            _previewSelectAllItem = PreviewMenuItem("全选", "Ctrl+A", AppPresentation.PreviewSelectAllTip, (sender, args) => SelectEntirePreview());
+            _previewExportItem = PreviewMenuItem("导出为 Excel", null, AppPresentation.PreviewExportTip, (sender, args) => ExportPreview());
+            _previewCopyTitleItem = PreviewMenuItem("复制标题", null, AppPresentation.PreviewCopyTitleTip, (sender, args) => CopyPreviewTitle());
+            ContextMenuStrip menu = new ContextMenuStrip { ShowItemToolTips = true };
+            menu.Items.AddRange(new ToolStripItem[]
+            {
+                _previewCopyItem,
+                _previewCopyHeadersItem,
+                _previewSelectAllItem,
+                _previewExportItem,
+                _previewCopyTitleItem
+            });
+            return menu;
+        }
+
+        /// <summary>创建一项预览菜单。快捷键只显示，不注册到窗体，避免抢走 SQL 编辑器的按键。</summary>
+        /// <param name="text">菜单文字。</param>
+        /// <param name="shortcut">显示用的快捷键。没有时为空。</param>
+        /// <param name="tip">悬浮说明。概述和详述用换行分开。</param>
+        /// <param name="click">点击时在界面线程执行的动作。</param>
+        /// <returns>尚未加入菜单的项。</returns>
+        private static ToolStripMenuItem PreviewMenuItem(string text, string shortcut, string tip, EventHandler click)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(text, null, click)
+            {
+                AutoToolTip = false,
+                ToolTipText = tip
+            };
+            if (!string.IsNullOrEmpty(shortcut))
+                item.ShortcutKeyDisplayString = shortcut;
+            return item;
+        }
+
+        /// <summary>按右键落点调整选区，并记下这次要显示单元格菜单还是列标题菜单。</summary>
+        /// <param name="sender">预览表。</param>
+        /// <param name="e">鼠标事件。只处理右键。</param>
+        /// <remarks>调整选区必须发生在菜单打开之前。滚动条和列宽拖动不弹出菜单。</remarks>
+        private void PreviewMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right) return;
+
+            _previewMenuFromMouse = true;
+            _previewMenuHeader = false;
+            _suppressPreviewMenu = false;
+            DataGridView.HitTestInfo hit = _preview.HitTest(e.X, e.Y);
+            switch (hit.Type)
+            {
+                case DataGridViewHitTestType.Cell:
+                    SelectPreviewCellIfNeeded(hit.RowIndex, hit.ColumnIndex);
+                    break;
+                case DataGridViewHitTestType.RowHeader:
+                    SelectPreviewRowIfNeeded(hit.RowIndex);
+                    break;
+                case DataGridViewHitTestType.ColumnHeader:
+                    _previewMenuHeader = true;
+                    _previewHeaderColumn = hit.ColumnIndex;
+                    SelectPreviewColumn(hit.ColumnIndex);
+                    break;
+                case DataGridViewHitTestType.None:
+                case DataGridViewHitTestType.TopLeftHeader:
+                    break;
+                default:
+                    _suppressPreviewMenu = true;
+                    break;
+            }
+        }
+
+        /// <summary>预览表有焦点时响应复制和全选。SQL 编辑器不经过这里。</summary>
+        /// <param name="sender">预览表。</param>
+        /// <param name="e">按键。处理过后不再交给表格自己的剪贴板。</param>
+        private void PreviewGridKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!e.Control || e.Alt) return;
+            if (e.KeyCode == Keys.A && !e.Shift)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                SelectEntirePreview();
+                return;
+            }
+
+            if (e.KeyCode != Keys.C) return;
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            CopyPreview(e.Shift);
+        }
+
+        /// <summary>打开菜单前按点击位置留下四项或只留「复制标题」，并按有没有数据行决定能否点。</summary>
+        /// <param name="sender">预览菜单。</param>
+        /// <param name="e">取消时这次不弹出。</param>
+        /// <remarks>键盘弹出菜单时没有右键落点，按单元格菜单处理。</remarks>
+        private void PreviewMenuOpening(object sender, CancelEventArgs e)
+        {
+            bool fromMouse = _previewMenuFromMouse;
+            _previewMenuFromMouse = false;
+            if (fromMouse && _suppressPreviewMenu)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            bool header = fromMouse && _previewMenuHeader;
+            _previewCopyItem.Visible = !header;
+            _previewCopyHeadersItem.Visible = !header;
+            _previewSelectAllItem.Visible = !header;
+            _previewExportItem.Visible = !header;
+            _previewCopyTitleItem.Visible = header;
+
+            bool hasRows = _preview.Rows.Count > 0;
+            _previewCopyItem.Enabled = hasRows;
+            _previewCopyHeadersItem.Enabled = hasRows;
+            _previewSelectAllItem.Enabled = hasRows;
+            QueryTab tab = ActiveTab;
+            _previewExportItem.Enabled = tab != null && tab.HasPreview && tab.Preview != null && tab.Preview.Columns.Count > 0;
+            _previewCopyTitleItem.Enabled = _previewHeaderColumn >= 0 && _previewHeaderColumn < _preview.Columns.Count;
+        }
+
+        /// <summary>点在未选中的格子上时，改为只选中该格。已经在选区里则保留选区。</summary>
+        /// <param name="rowIndex">行号，从 0 开始。</param>
+        /// <param name="columnIndex">列号，从 0 开始。</param>
+        private void SelectPreviewCellIfNeeded(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || columnIndex < 0 || rowIndex >= _preview.Rows.Count || columnIndex >= _preview.Columns.Count) return;
+            DataGridViewCell cell = _preview.Rows[rowIndex].Cells[columnIndex];
+            if (cell.Selected) return;
+            _preview.ClearSelection();
+            _preview.CurrentCell = cell;
+            cell.Selected = true;
+        }
+
+        /// <summary>点在行号上时，若该行没有整行进入选区，改为只选中这一行。</summary>
+        /// <param name="rowIndex">行号，从 0 开始。</param>
+        private void SelectPreviewRowIfNeeded(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= _preview.Rows.Count) return;
+            DataGridViewRow row = _preview.Rows[rowIndex];
+            foreach (DataGridViewCell cell in row.Cells)
+            {
+                if (cell.Selected) continue;
+                _preview.ClearSelection();
+                row.Selected = true;
+                if (row.Cells.Count > 0)
+                    _preview.CurrentCell = row.Cells[0];
+                return;
+            }
+        }
+
+        /// <summary>点列标题时选中整列，供随后复制标题对应这一列。</summary>
+        /// <param name="columnIndex">列号，从 0 开始。</param>
+        private void SelectPreviewColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= _preview.Columns.Count || _preview.Rows.Count == 0) return;
+            _preview.ClearSelection();
+            _preview.CurrentCell = _preview.Rows[0].Cells[columnIndex];
+            foreach (DataGridViewRow row in _preview.Rows)
+                row.Cells[columnIndex].Selected = true;
+        }
+
+        /// <summary>选中全部数据行。没有数据行时不做。</summary>
+        private void SelectEntirePreview()
+        {
+            if (_preview.Rows.Count == 0) return;
+            _preview.SelectAll();
+        }
+
+        /// <summary>把选区或整张预览放进剪贴板。带标题时在数据前加上字段编码和类型短名。</summary>
+        /// <param name="withHeaders">为 true 时加两行表头。Ctrl+Shift+C 走这条。</param>
+        /// <remarks>必须在界面线程调用。剪贴板被占用时弹出错误详情。没有数据行时直接返回。</remarks>
+        private void CopyPreview(bool withHeaders)
+        {
+            if (_preview.Rows.Count == 0) return;
+            try
+            {
+                CopyPreviewTable(withHeaders);
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception);
+            }
+        }
+
+        /// <summary>按当前选区或整张预览组制表符文本和 HTML。带标题时先写字段编码和类型短名。</summary>
+        /// <param name="withHeaders">为 true 时在数据前加两行表头。</param>
+        /// <remarks>
+        /// 不改选区。不使用表格自带的剪贴板内容：那份 HTML 没有字符集，Excel 会把中文读成乱码。
+        /// 单元格里的换行写成 br，贴进 Excel 时仍留在同一格。
+        /// </remarks>
+        private void CopyPreviewTable(bool withHeaders)
+        {
+            List<int> rowIndexes;
+            List<int> columnIndexes;
+            bool entire;
+            CollectCopyAxes(out rowIndexes, out columnIndexes, out entire);
+            if (columnIndexes.Count == 0) return;
+
+            StringBuilder text = new StringBuilder();
+            StringBuilder html = new StringBuilder();
+            html.Append("<table>");
+            string[] names = new string[columnIndexes.Count];
+            string[] types = new string[columnIndexes.Count];
+            for (int index = 0; index < columnIndexes.Count; index++)
+            {
+                DataGridViewColumn column = _preview.Columns[columnIndexes[index]];
+                ResultColumn definition = column.Tag as ResultColumn;
+                names[index] = definition == null ? (column.HeaderText ?? string.Empty) : (definition.Name ?? string.Empty);
+                types[index] = FormatPreviewTypeName(definition);
+            }
+
+            if (withHeaders)
+            {
+                AppendClipboardRow(text, html, names, true);
+                AppendClipboardRow(text, html, types, false);
+            }
+
+            string[] values = new string[columnIndexes.Count];
+            bool firstDataRow = !withHeaders;
+            foreach (int rowIndex in rowIndexes)
+            {
+                DataGridViewRow row = _preview.Rows[rowIndex];
+                for (int index = 0; index < columnIndexes.Count; index++)
+                {
+                    DataGridViewCell cell = row.Cells[columnIndexes[index]];
+                    values[index] = entire || cell.Selected ? PreviewCellText(cell) : string.Empty;
+                }
+
+                AppendClipboardRow(text, html, values, firstDataRow);
+                firstDataRow = false;
+            }
+
+            html.Append("</table>");
+            SetPreviewClipboard(text.ToString(), html.ToString());
+            _status.Text = entire ? "已复制全部预览。" : "已复制选区。";
+        }
+
+        /// <summary>复制右键那一列的字段编码和类型短名。没有类型时只留字段编码。</summary>
+        /// <remarks>必须在界面线程调用。剪贴板被占用时弹出错误详情。</remarks>
+        private void CopyPreviewTitle()
+        {
+            if (_previewHeaderColumn < 0 || _previewHeaderColumn >= _preview.Columns.Count) return;
+            try
+            {
+                DataGridViewColumn column = _preview.Columns[_previewHeaderColumn];
+                ResultColumn definition = column.Tag as ResultColumn;
+                string name = definition == null ? (column.HeaderText ?? string.Empty) : (definition.Name ?? string.Empty);
+                string typeName = FormatPreviewTypeName(definition);
+                StringBuilder text = new StringBuilder();
+                StringBuilder html = new StringBuilder();
+                html.Append("<table>");
+                AppendClipboardRow(text, html, new[] { name }, true);
+                if (!string.IsNullOrEmpty(typeName))
+                    AppendClipboardRow(text, html, new[] { typeName }, false);
+                html.Append("</table>");
+                SetPreviewClipboard(text.ToString(), html.ToString());
+                _status.Text = "已复制标题。";
+            }
+            catch (Exception exception)
+            {
+                ShowError(exception);
+            }
+        }
+
+        /// <summary>确定这次复制覆盖哪些行和列。没有选区时覆盖全部数据行，列按从左到右的显示顺序。</summary>
+        /// <param name="rowIndexes">要复制的行号，从上到下。</param>
+        /// <param name="columnIndexes">要复制的列号，从左到右。</param>
+        /// <param name="entire">没有选区、因此复制整张预览时为 true。</param>
+        private void CollectCopyAxes(out List<int> rowIndexes, out List<int> columnIndexes, out bool entire)
+        {
+            entire = _preview.SelectedCells.Count == 0;
+            rowIndexes = new List<int>();
+            columnIndexes = new List<int>();
+            bool[] rowHit = entire ? null : new bool[_preview.Rows.Count];
+            bool[] columnHit = entire ? null : new bool[_preview.Columns.Count];
+            if (!entire)
+            {
+                foreach (DataGridViewCell cell in _preview.SelectedCells)
+                {
+                    if (cell.RowIndex >= 0 && cell.RowIndex < rowHit.Length)
+                        rowHit[cell.RowIndex] = true;
+                    if (cell.ColumnIndex >= 0 && cell.ColumnIndex < columnHit.Length)
+                        columnHit[cell.ColumnIndex] = true;
+                }
+            }
+
+            if (entire)
+            {
+                for (int row = 0; row < _preview.Rows.Count; row++)
+                    rowIndexes.Add(row);
+            }
+            else
+            {
+                for (int row = 0; row < rowHit.Length; row++)
+                {
+                    if (rowHit[row])
+                        rowIndexes.Add(row);
+                }
+            }
+
+            for (DataGridViewColumn column = _preview.Columns.GetFirstColumn(DataGridViewElementStates.Visible);
+                column != null;
+                column = _preview.Columns.GetNextColumn(column, DataGridViewElementStates.Visible, DataGridViewElementStates.None))
+            {
+                if (entire || columnHit[column.Index])
+                    columnIndexes.Add(column.Index);
+            }
+        }
+
+        /// <summary>把当前预览另存为 xlsx。先让用户选路径，再写入临时工作簿。</summary>
+        /// <remarks>
+        /// 不重新查询，也不修改当前工作簿。用户取消对话框时不导出。
+        /// 路径指向当前工作簿时只提示，不覆盖。失败弹出错误详情，不提供「问 AI」。
+        /// </remarks>
+        private void ExportPreview()
+        {
+            QueryTab tab = ActiveTab;
+            if (tab == null || !tab.HasPreview || tab.Preview == null || tab.Preview.Columns.Count == 0) return;
+
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = "导出为 Excel";
+                dialog.Filter = "Excel 工作簿 (*.xlsx)|*.xlsx";
+                dialog.DefaultExt = "xlsx";
+                dialog.AddExtension = true;
+                dialog.OverwritePrompt = true;
+                dialog.FileName = PreviewExportFileName(tab.Name);
+                string directory = CurrentWorkbookDirectory();
+                if (!string.IsNullOrEmpty(directory))
+                    dialog.InitialDirectory = directory;
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    _status.Text = "已取消导出。";
+                    return;
+                }
+
+                string path = dialog.FileName;
+                if (IsCurrentWorkbookPath(path))
+                {
+                    MessageBox.Show(this, "不能把预览导出到当前已打开的工作簿。", "导出为 Excel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                BufferedQueryResult result = tab.Preview;
+                string sheetName = PreviewExportSheetName(tab.Name);
+                try
+                {
+                    long rows = _operationRunner.Run(
+                        this,
+                        "导出 Excel",
+                        true,
+                        (progress, token) => Task.FromResult(WritePreviewFile(path, sheetName, result, progress, token)));
+                    int previewLimit = _settings.Get(CoreSettings.MaxPreviewRows);
+                    _status.Text = result.IsTruncated
+                        ? string.Format(
+                            "已导出到“{0}”，共 {1:N0} 行，已达上限 {2:N0} 行并截断。可在设置中修改“最大预览行数”。",
+                            path,
+                            rows,
+                            previewLimit)
+                        : string.Format("已导出到“{0}”，共 {1:N0} 行。", path, rows);
+                }
+                catch (OperationCanceledException)
+                {
+                    _status.Text = "导出已取消。";
+                }
+                catch (Exception exception)
+                {
+                    ShowError(exception);
+                }
+            }
+        }
+
+        /// <summary>把预览写入一个新建的工作簿并另存为 xlsx，然后关掉它。</summary>
+        /// <param name="path">用户选择的 xlsx 路径。</param>
+        /// <param name="sheetName">已经整理过的工作表名。</param>
+        /// <param name="result">当前页已经查出的预览。调用方保证有列。</param>
+        /// <param name="progress">进度窗。写入器按块报告。</param>
+        /// <param name="cancellationToken">用户取消时在保存前停下来。已创建的临时簿仍会关掉。</param>
+        /// <returns>写入的数据行数，不含标题。</returns>
+        /// <remarks>
+        /// 必须在 Excel 界面线程调用。不释放宿主 Application，也不释放用户原来的工作簿。
+        /// 不把临时簿的窗口藏起来。藏起来再另存会写出打不开的文件。重画保持关闭，避免这张表闪一下。
+        /// 另存格式用整数 51，也就是 xlsx。传枚举时宿主会忽略，扩展名虽是 xlsx，内容仍是旧的 xls。
+        /// 关掉临时簿之后核对文件头。不是有效的 xlsx 就删掉并抛出错误。取消或失败时也关掉临时簿。
+        /// </remarks>
+        private long WritePreviewFile(
+            string path,
+            string sheetName,
+            BufferedQueryResult result,
+            IProgress<OperationProgress> progress,
+            System.Threading.CancellationToken cancellationToken)
+        {
+            ExcelInterop.Application application = _workbook.Application;
+            ExcelInterop.Workbook original = null;
+            ExcelInterop.Workbook temp = null;
+            bool restoreScreen = false;
+            bool previousScreen = true;
+            bool restoreAlerts = false;
+            bool previousAlerts = true;
+            try
+            {
+                try
+                {
+                    original = application.ActiveWorkbook;
+                }
+                catch (COMException)
+                {
+                    // 读不到活动工作簿时仍继续导出，结束时不切换回去。
+                }
+                catch (InvalidComObjectException)
+                {
+                }
+
+                try
+                {
+                    previousScreen = application.ScreenUpdating;
+                    application.ScreenUpdating = false;
+                    restoreScreen = true;
+                }
+                catch (COMException)
+                {
+                    // 关不掉重画时仍继续。新建的工作簿可能会闪一下。
+                }
+                catch (InvalidComObjectException)
+                {
+                }
+
+                try
+                {
+                    previousAlerts = application.DisplayAlerts;
+                    application.DisplayAlerts = false;
+                    restoreAlerts = true;
+                }
+                catch (COMException)
+                {
+                    // 关不掉提示时不删除多余工作表，避免确认框卡在进度窗下面。
+                }
+                catch (InvalidComObjectException)
+                {
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                temp = application.Workbooks.Add();
+                if (restoreAlerts)
+                    KeepOnlyFirstSheet(temp);
+                RenameFirstSheet(temp, sheetName);
+                long written = _writer.WriteResult(
+                    temp,
+                    sheetName,
+                    result,
+                    progress,
+                    cancellationToken,
+                    Guid.NewGuid().ToString("N"));
+                cancellationToken.ThrowIfCancellationRequested();
+                temp.SaveAs(
+                    Filename: path,
+                    FileFormat: 51,
+                    AccessMode: ExcelInterop.XlSaveAsAccessMode.xlNoChange);
+                try
+                {
+                    temp.Saved = true;
+                }
+                catch (COMException)
+                {
+                    // 标不成已保存时仍关闭。Close(false) 不会把已写好的文件再改掉。
+                }
+                catch (InvalidComObjectException)
+                {
+                }
+
+                CloseWorkbook(temp);
+                temp = null;
+                EnsureXlsxFile(path);
+                return written;
+            }
+            finally
+            {
+                if (temp != null)
+                    CloseWorkbook(temp);
+                ActivateWorkbook(original);
+                if (restoreAlerts)
+                {
+                    try
+                    {
+                        application.DisplayAlerts = previousAlerts;
+                    }
+                    catch (COMException)
+                    {
+                        // 恢复提示失败不能盖住原来的导出异常。
+                    }
+                    catch (InvalidComObjectException)
+                    {
+                    }
+                }
+
+                if (restoreScreen)
+                {
+                    try
+                    {
+                        application.ScreenUpdating = previousScreen;
+                    }
+                    catch (COMException)
+                    {
+                        // 恢复重画失败不能盖住原来的导出异常。
+                    }
+                    catch (InvalidComObjectException)
+                    {
+                    }
+                }
+
+                if (original != null && !ReferenceEquals(original, _workbook))
+                {
+                    try
+                    {
+                        Marshal.FinalReleaseComObject(original);
+                    }
+                    catch (InvalidComObjectException)
+                    {
+                        // 引用已经释放时不再处理。
+                    }
+                }
+            }
+        }
+
+        /// <summary>确认另存结果是非空的 xlsx。xlsx 是 zip，文件头必须是 PK。</summary>
+        /// <param name="path">刚关掉的临时簿写下的路径。</param>
+        /// <remarks>不是有效文件时删掉它再抛出，避免状态栏把坏文件报成导出成功。</remarks>
+        /// <exception cref="InvalidOperationException">文件为空、读不到，或文件头不是 PK。</exception>
+        private static void EnsureXlsxFile(string path)
+        {
+            byte[] header = new byte[2];
+            int read = 0;
+            bool readable = false;
+            try
+            {
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    readable = true;
+                    if (stream.Length > 0)
+                        read = stream.Read(header, 0, 2);
+                }
+            }
+            catch (IOException)
+            {
+                // 读不到就按坏文件处理，下面删掉并抛出。
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            if (readable && read == 2 && header[0] == (byte)'P' && header[1] == (byte)'K')
+                return;
+
+            DeletePreviewExport(path);
+            throw new InvalidOperationException("导出的文件不是有效的 xlsx。");
+        }
+
+        /// <summary>删掉核对失败的导出文件。</summary>
+        /// <param name="path">要删除的路径。</param>
+        /// <remarks>文件正被占用时删不掉，仍由调用方抛出原来的错误。</remarks>
+        private static void DeletePreviewExport(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (IOException)
+            {
+                // 删不掉坏文件时仍抛出原来的错误。
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        /// <summary>只留第一张工作表，避免新建工作簿按 Excel 选项带出多余空表。</summary>
+        /// <param name="workbook">临时工作簿。调用前须已关掉提示，否则删除可能弹出确认。</param>
+        private static void KeepOnlyFirstSheet(ExcelInterop.Workbook workbook)
+        {
+            while (workbook.Worksheets.Count > 1)
+            {
+                ExcelInterop.Worksheet extra = workbook.Worksheets[workbook.Worksheets.Count] as ExcelInterop.Worksheet;
+                if (extra == null) break;
+                try
+                {
+                    extra.Delete();
+                }
+                finally
+                {
+                    Marshal.FinalReleaseComObject(extra);
+                }
+            }
+        }
+
+        /// <summary>把第一张工作表改成目标名，使写入器复用它而不是再追加一张。</summary>
+        /// <param name="workbook">临时工作簿。</param>
+        /// <param name="sheetName">合法的工作表名。</param>
+        private static void RenameFirstSheet(ExcelInterop.Workbook workbook, string sheetName)
+        {
+            ExcelInterop.Worksheet first = workbook.Worksheets[1] as ExcelInterop.Worksheet;
+            if (first == null)
+                throw new InvalidOperationException("新建的工作簿没有工作表。");
+            try
+            {
+                if (!string.Equals(first.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                    first.Name = sheetName;
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(first);
+            }
+        }
+
+        /// <summary>关掉临时工作簿且不保存，并释放 COM 引用。</summary>
+        /// <param name="workbook">要关掉的工作簿。调用后不得再使用。</param>
+        private static void CloseWorkbook(ExcelInterop.Workbook workbook)
+        {
+            if (workbook == null) return;
+            try
+            {
+                workbook.Close(false);
+            }
+            catch (COMException)
+            {
+                // 已经关掉或宿主拒绝时仍释放引用，避免临时簿留在进程里。
+            }
+            catch (InvalidComObjectException)
+            {
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(workbook);
+            }
+        }
+
+        /// <summary>回到导出前的活动工作簿。</summary>
+        /// <param name="workbook">导出前的活动工作簿。为空或已关掉时不做。不释放。</param>
+        private static void ActivateWorkbook(ExcelInterop.Workbook workbook)
+        {
+            if (workbook == null) return;
+            try
+            {
+                workbook.Activate();
+            }
+            catch (COMException)
+            {
+                // 原来的工作簿已经关掉时不打断导出结果。
+            }
+            catch (InvalidComObjectException)
+            {
+            }
+        }
+
+        /// <summary>读取当前工作簿所在目录，用作保存对话框的起始位置。</summary>
+        /// <returns>已保存工作簿的目录。未保存或读不到时为空。</returns>
+        private string CurrentWorkbookDirectory()
+        {
+            try
+            {
+                string fullName = _workbook.FullName;
+                if (string.IsNullOrWhiteSpace(fullName) || !Path.IsPathRooted(fullName)) return null;
+                return Path.GetDirectoryName(fullName);
+            }
+            catch (COMException)
+            {
+                // 读不到路径时用对话框自己的目录，不打断导出。
+                return null;
+            }
+            catch (InvalidComObjectException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>判断路径是不是当前正在编辑的工作簿，避免另存覆盖它。</summary>
+        /// <param name="path">用户选择的文件路径。</param>
+        /// <returns>指向当前工作簿文件时为 true。未保存的工作簿没有路径，返回 false。</returns>
+        private bool IsCurrentWorkbookPath(string path)
+        {
+            try
+            {
+                string fullName = _workbook.FullName;
+                if (string.IsNullOrWhiteSpace(fullName) || !Path.IsPathRooted(fullName)) return false;
+                return string.Equals(Path.GetFullPath(fullName), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
+            }
+            catch (COMException)
+            {
+                return false;
+            }
+            catch (InvalidComObjectException)
+            {
+                return false;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (NotSupportedException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>把页签名称整理成可用的文件名。去掉系统不允许的字符。</summary>
+        /// <param name="name">页签名称，不含未保存标记。</param>
+        /// <returns>不含扩展名的文件名。</returns>
+        private static string PreviewExportFileName(string name)
+        {
+            string value = string.IsNullOrWhiteSpace(name) ? "预览" : name.Trim();
+            foreach (char invalid in Path.GetInvalidFileNameChars())
+                value = value.Replace(invalid.ToString(), string.Empty);
+            value = value.Trim();
+            if (value.Length == 0) return "预览";
+            if (value.Length > 180) value = value.Substring(0, 180).Trim();
+            return value.Length == 0 ? "预览" : value;
+        }
+
+        /// <summary>把页签名称整理成工作表名。去掉 Excel 不允许的字符，最长 31 个字符。</summary>
+        /// <param name="name">页签名称。</param>
+        /// <returns>可直接用作工作表名。空名称或 SQL 时返回「预览」。</returns>
+        private static string PreviewExportSheetName(string name)
+        {
+            string value = name ?? string.Empty;
+            char[] invalid = { ':', '\\', '/', '?', '*', '[', ']' };
+            for (int index = 0; index < invalid.Length; index++)
+                value = value.Replace(invalid[index].ToString(), string.Empty);
+            value = value.Trim().Trim('\'');
+            if (value.Length > 31)
+                value = value.Substring(0, 31).Trim().Trim('\'');
+            if (value.Length == 0 || string.Equals(value, SqlSheetTaskReader.SqlSheetName, StringComparison.OrdinalIgnoreCase))
+                return "预览";
+            return value;
+        }
+
+        /// <summary>读取格子里用户看见的文字。空值是空串。</summary>
+        /// <param name="cell">预览表中的格子。</param>
+        /// <returns>显示文字。</returns>
+        private static string PreviewCellText(DataGridViewCell cell)
+        {
+            object value = cell.FormattedValue;
+            if (value == null || value is DBNull) return string.Empty;
+            return Convert.ToString(value) ?? string.Empty;
+        }
+
+        /// <summary>向制表符文本和 HTML 表各追加一行。</summary>
+        /// <param name="text">制表符文本。列之间是制表符，行之间是换行。</param>
+        /// <param name="html">HTML 表身，不含 html 标记。</param>
+        /// <param name="cells">这一行的各格文字。</param>
+        /// <param name="first">为 true 时文本前面不加换行。</param>
+        private static void AppendClipboardRow(StringBuilder text, StringBuilder html, string[] cells, bool first)
+        {
+            if (!first)
+                text.Append("\r\n");
+            html.Append("<tr>");
+            for (int index = 0; index < cells.Length; index++)
+            {
+                if (index > 0)
+                    text.Append('\t');
+                string value = cells[index] ?? string.Empty;
+                text.Append(EscapeTsv(value));
+                html.Append("<td>");
+                html.Append(EncodeHtmlCell(value));
+                html.Append("</td>");
+            }
+
+            html.Append("</tr>");
+        }
+
+        /// <summary>把含制表符或换行的格子用引号包起来，供纯文本粘贴。</summary>
+        /// <param name="value">格子文字。</param>
+        /// <returns>可放进制表符行的文字。</returns>
+        private static string EscapeTsv(string value)
+        {
+            if (value.IndexOfAny(new[] { '\t', '\r', '\n', '"' }) < 0)
+                return value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        /// <summary>把格子文字转成 HTML 单元格内容。换行变成 br，贴进 Excel 时仍在同一格。</summary>
+        /// <param name="value">格子文字。</param>
+        /// <returns>已编码的 HTML。</returns>
+        private static string EncodeHtmlCell(string value)
+        {
+            return WebUtility.HtmlEncode(value).Replace("\r\n", "<br>").Replace("\n", "<br>").Replace("\r", "<br>");
+        }
+
+        /// <summary>同时放入 Unicode 文本和 UTF-8 的 HTML。Excel 优先用 HTML，才能按列分开并保留类型行。</summary>
+        /// <param name="text">制表符文本。给不读 HTML 的程序用。</param>
+        /// <param name="htmlFragment">table 片段，不含 CF_HTML 头。</param>
+        /// <remarks>
+        /// 必须在界面线程调用。剪贴板被占用时由调用方弹出错误详情。
+        /// HTML 必须以 UTF-8 字节放入，并写明字符集。按字符串放入时会按系统 ANSI 编码，中文贴进 Excel 就是乱码。
+        /// </remarks>
+        private static void SetPreviewClipboard(string text, string htmlFragment)
+        {
+            DataObject data = new DataObject();
+            data.SetData(DataFormats.UnicodeText, text);
+            byte[] htmlBytes = new UTF8Encoding(false).GetBytes(BuildHtmlClipboard(htmlFragment));
+            using (MemoryStream html = new MemoryStream(htmlBytes))
+            {
+                data.SetData(DataFormats.Html, false, html);
+                Clipboard.SetDataObject(data, true);
+            }
+        }
+
+        /// <summary>按 CF_HTML 拼出剪贴板需要的描述头。偏移按 UTF-8 字节计算。</summary>
+        /// <param name="fragment">StartFragment 与 EndFragment 之间的 HTML。</param>
+        /// <returns>带描述头的完整 HTML 剪贴板文本。正文声明字符集为 UTF-8。</returns>
+        private static string BuildHtmlClipboard(string fragment)
+        {
+            const string header =
+                "Version:0.9\r\nStartHTML:{0:0000000000}\r\nEndHTML:{1:0000000000}\r\nStartFragment:{2:0000000000}\r\nEndFragment:{3:0000000000}\r\n";
+            string start = "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html;charset=utf-8\"></head><body>\r\n<!--StartFragment-->";
+            string end = "<!--EndFragment-->\r\n</body></html>";
+            string prefix = string.Format(header, 0, 0, 0, 0);
+            Encoding utf8 = new UTF8Encoding(false);
+            int startHtml = utf8.GetByteCount(prefix);
+            int startFragment = startHtml + utf8.GetByteCount(start);
+            int endFragment = startFragment + utf8.GetByteCount(fragment ?? string.Empty);
+            int endHtml = endFragment + utf8.GetByteCount(end);
+            prefix = string.Format(header, startHtml, endHtml, startFragment, endFragment);
+            return prefix + start + (fragment ?? string.Empty) + end;
+        }
+
         private ContextMenuStrip BuildQueryProfileMenu()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
@@ -1024,7 +2177,8 @@ namespace DB2Sheet.UI
             _queryTabs.MouseDown -= QueryTabsMouseDown;
             _queryTabs.MouseUp -= QueryTabsMouseUp;
             _queryTabs.SelectedIndexChanged -= QueryTabsSelectedIndexChanged;
-            _emptyEditorHint.MouseUp -= EmptyEditorMouseUp;
+            _editorSurface.MouseUp -= EmptyEditorMouseUp;
+            _emptyQueryButton.MouseUp -= EmptyEditorMouseUp;
             _queryProfiles.MouseUp -= QueryProfilesMouseUp;
             _queryProfiles.MouseMove -= QueryProfilesMouseMove;
             _queryProfiles.MouseLeave -= QueryProfilesMouseLeave;
@@ -1035,8 +2189,12 @@ namespace DB2Sheet.UI
             _profileTip.Dispose();
             _preview.RowPostPaint -= PreviewRowPostPaint;
             _preview.CellPainting -= PreviewCellPainting;
+            _preview.MouseDown -= PreviewMouseDown;
+            _preview.KeyDown -= PreviewGridKeyDown;
+            _previewMenu.Opening -= PreviewMenuOpening;
             _queryProfileMenu.Dispose();
             _queryTabMenu.Dispose();
+            _previewMenu.Dispose();
             foreach (Image icon in _actionIcons)
                 icon.Dispose();
             _actionIcons.Clear();
@@ -1185,10 +2343,12 @@ namespace DB2Sheet.UI
             _profileTip.Hide(_queryProfiles);
         }
 
-        private void ShowError(Exception exception)
+        private void ShowError(Exception exception, string sqlForAi = null)
         {
             _status.Text = exception.Message;
-            ExceptionDetailForm.Show(this, exception);
+            bool ask = ExceptionDetailForm.Show(this, exception, sqlForAi != null);
+            if (ask)
+                OpenAiErrorChat(sqlForAi, exception.Message);
         }
 
         private void UpdateConnectionMenuState()
@@ -1199,61 +2359,35 @@ namespace DB2Sheet.UI
             _setCurrentConnectionMenuItem.Enabled = hasSelection;
         }
 
-        /// <summary>创建标题栏操作按钮，图标在文字左侧，高度留在 30 像素标题栏内。</summary>
-        /// <param name="text">按钮文字。</param>
-        /// <param name="iconFileName">Resources 目录下的图标文件名。返回按钮持有的图像在窗体关闭时释放。</param>
-        /// <returns>已设置图标和紧凑边距的按钮。</returns>
-        private Button ButtonOf(string text, string iconFileName)
+        /// <summary>创建只显示图标的操作按钮。文字写在悬浮说明里。图像在窗体关闭时释放。</summary>
+        /// <param name="iconFileName">Resources 目录下的图标文件名。</param>
+        /// <param name="tip">概述换行详述的悬浮说明。</param>
+        /// <param name="iconSize">图标边长。说明行的预览、写入和保存用 28。</param>
+        /// <returns>无文字的图标按钮。</returns>
+        private Button IconAction(string iconFileName, string tip, int iconSize)
         {
-            Image icon = CreateActionIcon(iconFileName);
+            Image icon = DatabaseTreeImageCatalog.LoadActionIcon(iconFileName, iconSize);
             _actionIcons.Add(icon);
-            return new Button
+            Button button = new Button
             {
-                Text = text,
+                Text = string.Empty,
                 Image = icon,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                ImageAlign = ContentAlignment.MiddleLeft,
-                TextAlign = ContentAlignment.MiddleLeft,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(2, 0, 2, 0),
+                Padding = new Padding(4, 2, 4, 2),
                 Margin = new Padding(0, 0, 3, 0),
                 UseVisualStyleBackColor = true
             };
-        }
-
-        /// <summary>加载 16 像素操作图标，并在右侧留出 4 像素透明间隔，使文字不贴住图标。</summary>
-        /// <param name="iconFileName">Resources 目录下的图标文件名。</param>
-        /// <returns>调用方负责释放的位图。宽度为 20 像素。</returns>
-        private static Image CreateActionIcon(string iconFileName)
-        {
-            using (Image source = DatabaseTreeImageCatalog.LoadActionIcon(iconFileName))
-            {
-                Bitmap spaced = new Bitmap(source.Width + 4, source.Height);
-                try
-                {
-                    using (Graphics graphics = Graphics.FromImage(spaced))
-                    {
-                        graphics.Clear(Color.Transparent);
-                        graphics.DrawImage(source, 0, 0, source.Width, source.Height);
-                    }
-
-                    return spaced;
-                }
-                catch
-                {
-                    spaced.Dispose();
-                    throw;
-                }
-            }
+            _profileTip.SetToolTip(button, tip);
+            return button;
         }
 
         private static Panel SectionPanel(string title, Control content)
         {
-            Panel panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 30, 0, 0) };
+            Panel panel = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Control };
             panel.Controls.Add(content);
             panel.Controls.Add(SectionHeader(title));
-            return panel;
+            return LightBorder.Wrap(panel);
         }
 
         private static Panel SectionHeader(string title)
@@ -1295,6 +2429,8 @@ namespace DB2Sheet.UI
             editor.SqlTextChanged += DocumentSqlTextChanged;
             editor.ExecuteSelectionRequested += DocumentExecuteSelectionRequested;
 
+            editor.Visible = false;
+            _editorSurface.Controls.Add(editor);
             TabPage page = new TabPage
             {
                 Tag = tab,
@@ -1302,7 +2438,6 @@ namespace DB2Sheet.UI
                 UseVisualStyleBackColor = true
             };
             tab.Page = page;
-            page.Controls.Add(editor);
             RefreshTabTitle(tab);
 
             _adjustingTabs = true;
@@ -1377,13 +2512,14 @@ namespace DB2Sheet.UI
             return true;
         }
 
-        /// <summary>从页签条移除并释放编辑器。最后一个页签关掉后显示新建提示。</summary>
-        /// <param name="tab">要移除的页签。编辑器随页释放。</param>
+        /// <summary>从页签条移除并释放编辑器。最后一个页签关掉后显示新建按钮。</summary>
+        /// <param name="tab">要移除的页签。编辑器不在页里，这里单独释放。</param>
         private void RemoveTab(QueryTab tab)
         {
             if (tab == null || tab.Page == null) return;
-            tab.Editor.SqlTextChanged -= DocumentSqlTextChanged;
-            tab.Editor.ExecuteSelectionRequested -= DocumentExecuteSelectionRequested;
+            SqlEditorControl editor = tab.Editor;
+            editor.SqlTextChanged -= DocumentSqlTextChanged;
+            editor.ExecuteSelectionRequested -= DocumentExecuteSelectionRequested;
             TabPage page = tab.Page;
             tab.Page = null;
             _adjustingTabs = true;
@@ -1396,6 +2532,9 @@ namespace DB2Sheet.UI
                 _adjustingTabs = false;
             }
 
+            if (editor.Parent != null)
+                editor.Parent.Controls.Remove(editor);
+            editor.Dispose();
             page.Dispose();
             if (_queryTabs.TabCount == 0) ShowEmptyEditor();
             else ShowActiveTab();
@@ -1412,7 +2551,8 @@ namespace DB2Sheet.UI
             }
 
             _queryTabs.Visible = true;
-            _emptyEditorHint.Visible = false;
+            ShowOnly(tab);
+            PlaceNewQueryButton();
             if (tab.HasPreview && tab.Preview != null)
             {
                 BindPreview(tab.Preview);
@@ -1426,17 +2566,57 @@ namespace DB2Sheet.UI
             }
 
             SyncProfileSelection(tab);
+            RefreshAiReference();
         }
 
-        /// <summary>隐藏页签条，在编辑区显示「请新建查询」，并折叠预览。</summary>
+        /// <summary>只显示当前页的编辑器。没有页签时改显示中央的新建按钮。</summary>
+        /// <param name="tab">要显示的页。为空表示编辑区是空的。</param>
+        private void ShowOnly(QueryTab tab)
+        {
+            foreach (TabPage page in _queryTabs.TabPages)
+            {
+                QueryTab item = page.Tag as QueryTab;
+                if (item == null || item.Editor == null || item.Editor.IsDisposed) continue;
+                item.Editor.Visible = item == tab;
+            }
+
+            _emptyQueryButton.Visible = tab == null;
+            if (tab == null)
+            {
+                _emptyQueryButton.BringToFront();
+                CenterEmptyQueryButton();
+                return;
+            }
+
+            if (tab.Editor.Parent != _editorSurface)
+                _editorSurface.Controls.Add(tab.Editor);
+            tab.Editor.Dock = DockStyle.Fill;
+            tab.Editor.BringToFront();
+        }
+
+        /// <summary>把「请新建查询」放在编辑区正中。按钮本身没有边框。</summary>
+        private void CenterEmptyQueryButton()
+        {
+            if (_emptyQueryButton == null || _editorSurface == null) return;
+            Size size = _emptyQueryButton.PreferredSize;
+            if (_emptyQueryButton.Width > 0) size.Width = _emptyQueryButton.Width;
+            if (_emptyQueryButton.Height > 0) size.Height = _emptyQueryButton.Height;
+            _emptyQueryButton.Location = new Point(
+                Math.Max(0, (_editorSurface.ClientSize.Width - size.Width) / 2),
+                Math.Max(0, (_editorSurface.ClientSize.Height - size.Height) / 2));
+        }
+
+        /// <summary>藏起页签控件，在编辑区显示「请新建查询」，并折叠预览。页签条和新建图标仍留着。</summary>
         private void ShowEmptyEditor()
         {
             _queryTabs.Visible = false;
-            _emptyEditorHint.Visible = true;
+            ShowOnly(null);
+            PlaceNewQueryButton();
             ClearPreviewGrid();
             _resultsSplit.Panel2Collapsed = true;
             SyncProfileSelection(null);
             _status.Text = "请新建查询。";
+            RefreshAiReference();
         }
 
         /// <summary>让左侧列表高亮当前已保存方案。未保存或没有页签时取消选中，且不触发打开。</summary>
@@ -1470,15 +2650,82 @@ namespace DB2Sheet.UI
             }
         }
 
-        /// <summary>把方案名、未保存标记和关闭标记写进页签文字。系统按这段文字计算宽度。</summary>
+        /// <summary>把方案名、未保存标记和关闭空位写进页签文字。系统按这段文字计算宽度，标记另画。</summary>
         /// <param name="tab">要更新标题的页签。</param>
         private void RefreshTabTitle(QueryTab tab)
         {
             if (tab == null || tab.Page == null || tab.Page.IsDisposed) return;
-            string caption = tab.TabTitle + "  ×";
+            string caption = CloseMark.Caption(tab.TabTitle, _queryTabs.Font);
             if (string.Equals(tab.Page.Text, caption, StringComparison.Ordinal)) return;
             tab.Page.Text = caption;
+            PlaceNewQueryButton();
         }
+
+        /// <summary>把新建按钮放在最后一个页签右侧。页签放不下时停在条的右端，没有页签时停在左端。句柄或条宽还没准备好时不改宽度，避免重开窗体后把页签挤没。条高按页签实际高度留出整行标题。</summary>
+        private void PlaceNewQueryButton()
+        {
+            if (_placingQueryButton || _queryTabBar == null || _queryTabHost == null || _addQueryButton == null) return;
+            int bar = _queryTabBar.ClientSize.Width;
+            if (bar <= 0) return;
+            int button = Math.Max(28, _addQueryButton.Width);
+            _placingQueryButton = true;
+            try
+            {
+                if (!_queryTabs.IsHandleCreated)
+                    return;
+                if (!_queryTabs.Visible || _queryTabs.TabCount == 0)
+                {
+                    _queryTabHost.Width = button;
+                    return;
+                }
+
+                if (_queryTabHost.Width != bar)
+                    _queryTabHost.Width = bar;
+                _queryTabHost.PerformLayout();
+                int right = 0;
+                int tabHeight = 0;
+                for (int index = 0; index < _queryTabs.TabCount; index++)
+                {
+                    Rectangle rect = _queryTabs.GetTabRect(index);
+                    if (rect.Right > right) right = rect.Right;
+                    if (rect.Height > tabHeight) tabHeight = rect.Height;
+                }
+
+                int textHeight = TextRenderer.MeasureText("页签", _queryTabs.Font).Height + 8;
+                int barHeight = Math.Max(28, Math.Max(tabHeight, textHeight));
+                if (_queryTabBar.Height != barHeight)
+                    _queryTabBar.Height = barHeight;
+
+                const int slack = 12;
+                int natural = right + slack + button;
+                bool fits = natural < bar;
+                int desired = fits ? Math.Max(button, natural) : bar;
+                if (_queryTabHost.Width != desired)
+                    _queryTabHost.Width = desired;
+                _queryTabHost.PerformLayout();
+                SetTabScrollButtons(fits);
+            }
+            finally
+            {
+                _placingQueryButton = false;
+            }
+        }
+
+        /// <summary>页签放得下时藏起左右箭头，避免箭头盖住标题。放不下时留着，供左右滚动。</summary>
+        /// <param name="hide">为 true 时隐藏箭头。</param>
+        private void SetTabScrollButtons(bool hide)
+        {
+            if (_queryTabs == null || !_queryTabs.IsHandleCreated) return;
+            IntPtr upDown = FindWindowEx(_queryTabs.Handle, IntPtr.Zero, "msctls_updown32", null);
+            if (upDown == IntPtr.Zero) return;
+            ShowWindow(upDown, hide ? 0 : 5);
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string window);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr window, int command);
 
         /// <summary>编辑器文本变化时刷新对应页签的未保存标记。</summary>
         private void DocumentSqlTextChanged(object sender, EventArgs e)
@@ -1490,6 +2737,7 @@ namespace DB2Sheet.UI
             {
                 if (tab.Editor != editor) continue;
                 RefreshTabTitle(tab);
+                RefreshAiReference();
                 return;
             }
         }
@@ -1574,7 +2822,7 @@ namespace DB2Sheet.UI
             if (e.Button != MouseButtons.Left) return;
             int index = TabIndexAt(e.Location);
             if (index < 0) return;
-            if (!CloseGlyphBounds(_queryTabs.GetTabRect(index)).Contains(e.Location)) return;
+            if (!CloseMark.Hit(_queryTabs.GetTabRect(index), e.Location)) return;
             QueryTab tab = _queryTabs.TabPages[index].Tag as QueryTab;
             if (tab == null) return;
             BeginInvoke(new Action(() =>
@@ -1602,7 +2850,8 @@ namespace DB2Sheet.UI
             if (e.Button != MouseButtons.Right) return;
             _tabSaveMenuItem.Enabled = false;
             _tabRenameMenuItem.Enabled = false;
-            _queryTabMenu.Show(_emptyEditorHint, e.Location);
+            Control source = sender as Control ?? _editorSurface;
+            _queryTabMenu.Show(source, e.Location);
         }
 
         /// <summary>页签切换后恢复该页自己的预览，或在没有预览时折叠预览区。</summary>
@@ -1622,15 +2871,6 @@ namespace DB2Sheet.UI
             }
 
             return -1;
-        }
-
-        /// <summary>计算页签文字右侧关闭标记所占的区域。宽度按「 ×」的字面测量。</summary>
-        /// <param name="tabBounds">页签的客户区矩形。</param>
-        private Rectangle CloseGlyphBounds(Rectangle tabBounds)
-        {
-            int width = TextRenderer.MeasureText(" ×", _queryTabs.Font).Width;
-            width = Math.Max(16, width);
-            return new Rectangle(tabBounds.Right - width, tabBounds.Top, width, tabBounds.Height);
         }
 
         /// <summary>创建页签右键菜单。保存和重命名作用于右键时激活的那一页。</summary>
@@ -1734,7 +2974,7 @@ namespace DB2Sheet.UI
             /// <summary>该页的 SQL 编辑器。</summary>
             public SqlEditorControl Editor { get; }
 
-            /// <summary>承载编辑器的页。移除页签后置空，避免再改已释放的标题。</summary>
+            /// <summary>页签条上的那一页。编辑器放在页签条下面，不放在这一页里。移除页签后置空，避免再改已释放的标题。</summary>
             public TabPage Page { get; set; }
 
             /// <summary>方案标识。新建时尚未落盘，保存后与仓储一致。</summary>

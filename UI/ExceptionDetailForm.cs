@@ -13,11 +13,13 @@ namespace DB2Sheet.UI
     {
         private readonly TextBox _summary;
         private readonly TextBox _detail;
+        private bool _askAi;
 
         /// <summary>创建错误详情窗体。</summary>
         /// <param name="summary">简短说明，通常是异常消息。</param>
         /// <param name="detail">完整详情文本。</param>
-        public ExceptionDetailForm(string summary, string detail)
+        /// <param name="offerAskAi">为 true 时显示「问 AI」。只有查询执行失败会打开。</param>
+        public ExceptionDetailForm(string summary, string detail, bool offerAskAi)
         {
             Text = AppPresentation.WindowTitle("错误详情");
             Width = 720;
@@ -68,6 +70,17 @@ namespace DB2Sheet.UI
             };
             footer.Controls.Add(closeButton);
             footer.Controls.Add(copyButton);
+            if (offerAskAi)
+            {
+                Button askButton = new Button { Text = "问 AI", AutoSize = true, UseVisualStyleBackColor = true };
+                askButton.Click += (sender, args) =>
+                {
+                    _askAi = true;
+                    DialogResult = DialogResult.OK;
+                    Close();
+                };
+                footer.Controls.Add(askButton);
+            }
 
             TableLayoutPanel root = new TableLayoutPanel
             {
@@ -100,13 +113,20 @@ namespace DB2Sheet.UI
         /// <param name="exception">异常；为空时显示未知错误。</param>
         public static void Show(IWin32Window owner, Exception exception)
         {
-            if (exception == null)
-            {
-                Show(owner, "未知错误", "没有可用的异常对象。");
-                return;
-            }
+            Show(owner, exception, false);
+        }
 
-            Show(owner, exception.Message, exception.ToString());
+        /// <summary>弹出异常详情窗，并在查询执行失败时提供「问 AI」。</summary>
+        /// <param name="owner">父窗体；可为 null。</param>
+        /// <param name="exception">异常；为空时显示未知错误。</param>
+        /// <param name="offerAskAi">为 true 时显示「问 AI」。</param>
+        /// <returns>用户点了「问 AI」时为 true。点关闭或没有该按钮时为 false。</returns>
+        public static bool Show(IWin32Window owner, Exception exception, bool offerAskAi)
+        {
+            if (exception == null)
+                return Show(owner, "未知错误", "没有可用的异常对象。", offerAskAi);
+
+            return Show(owner, exception.Message, exception.ToString(), offerAskAi);
         }
 
         /// <summary>弹出错误详情窗（无异常对象时使用，例如连接测试失败消息）。</summary>
@@ -115,18 +135,27 @@ namespace DB2Sheet.UI
         /// <param name="detail">完整详情。</param>
         public static void Show(IWin32Window owner, string summary, string detail)
         {
+            Show(owner, summary, detail, false);
+        }
+
+        /// <summary>弹出错误详情窗。</summary>
+        /// <param name="owner">父窗体；可为 null。</param>
+        /// <param name="summary">简短说明。</param>
+        /// <param name="detail">完整详情。</param>
+        /// <param name="offerAskAi">为 true 时显示「问 AI」。</param>
+        /// <returns>用户点了「问 AI」时为 true。</returns>
+        public static bool Show(IWin32Window owner, string summary, string detail, bool offerAskAi)
+        {
             using (ExceptionDetailForm form = new ExceptionDetailForm(
                 string.IsNullOrWhiteSpace(summary) ? "操作失败。" : summary.Trim(),
-                string.IsNullOrWhiteSpace(detail) ? (summary ?? string.Empty) : detail))
+                string.IsNullOrWhiteSpace(detail) ? (summary ?? string.Empty) : detail,
+                offerAskAi))
             {
                 if (owner == null)
-                {
                     form.ShowDialog();
-                }
                 else
-                {
                     form.ShowDialog(owner);
-                }
+                return form._askAi;
             }
         }
     }

@@ -25,6 +25,9 @@ namespace DB2Sheet.UI
         private readonly Action _openConnections;
         private readonly Action _openSettings;
         private readonly Action _openJdbcEnvironment;
+        private readonly Action _openAiModels;
+        private readonly Action _openAiSkills;
+        private readonly Action _openLocalData;
 
         /// <summary>创建 Ribbon 并注入各按钮对应的 UI 操作。</summary>
         /// <param name="openQueryEditor">打开 SQL 查询窗体的操作。</param>
@@ -32,18 +35,27 @@ namespace DB2Sheet.UI
         /// <param name="openConnections">打开连接管理窗体的操作。</param>
         /// <param name="openSettings">打开设置窗体的操作。</param>
         /// <param name="openJdbcEnvironment">打开 JDBC 环境窗体的操作。</param>
+        /// <param name="openAiModels">打开模型设置窗体的操作。</param>
+        /// <param name="openAiSkills">打开 Skill 设置窗体的操作。</param>
+        /// <param name="openLocalData">打开本地数据窗体的操作。</param>
         public DB2SheetRibbon(
             Action openQueryEditor,
             Action openSheetRefresh,
             Action openConnections,
             Action openSettings,
-            Action openJdbcEnvironment)
+            Action openJdbcEnvironment,
+            Action openAiModels,
+            Action openAiSkills,
+            Action openLocalData)
         {
             _openQueryEditor = openQueryEditor ?? throw new ArgumentNullException(nameof(openQueryEditor));
             _openSheetRefresh = openSheetRefresh ?? throw new ArgumentNullException(nameof(openSheetRefresh));
             _openConnections = openConnections ?? throw new ArgumentNullException(nameof(openConnections));
             _openSettings = openSettings ?? throw new ArgumentNullException(nameof(openSettings));
             _openJdbcEnvironment = openJdbcEnvironment ?? throw new ArgumentNullException(nameof(openJdbcEnvironment));
+            _openAiModels = openAiModels ?? throw new ArgumentNullException(nameof(openAiModels));
+            _openAiSkills = openAiSkills ?? throw new ArgumentNullException(nameof(openAiSkills));
+            _openLocalData = openLocalData ?? throw new ArgumentNullException(nameof(openLocalData));
         }
 
         /// <summary>返回 Excel 请求的自定义 Ribbon XML。</summary>
@@ -64,7 +76,12 @@ namespace DB2Sheet.UI
           <button id=""DB2SheetConnectionsButton"" label=""连接管理"" getImage=""GetImage"" onAction=""OpenConnections"" />
           <menu id=""DB2SheetSettingsMenu"" label=""设置"" getImage=""GetImage"">
             <button id=""DB2SheetSettingsButton"" label=""参数设置"" getImage=""GetImage"" onAction=""OpenSettings"" />
+            <menu id=""DB2SheetAiMenu"" label=""AI 设置"" getImage=""GetImage"">
+              <button id=""DB2SheetAiModelsButton"" label=""模型设置"" getImage=""GetImage"" onAction=""OpenAiModels"" />
+              <button id=""DB2SheetAiSkillsButton"" label=""Skill 设置"" getImage=""GetImage"" onAction=""OpenAiSkills"" />
+            </menu>
             <button id=""DB2SheetJdbcEnvironmentButton"" label=""JDBC 环境"" getImage=""GetImage"" onAction=""OpenJdbcEnvironment"" />
+            <button id=""DB2SheetLocalDataButton"" label=""本地数据"" getImage=""GetImage"" onAction=""OpenLocalData"" screentip=""查看本机配置和日志保存在哪里"" />
           </menu>
         </group>
         <group id=""DB2SheetAboutGroup"" label=""关于"">
@@ -117,6 +134,27 @@ namespace DB2Sheet.UI
             _openJdbcEnvironment();
         }
 
+        /// <summary>处理“模型设置”按钮回调。</summary>
+        /// <param name="control">触发回调的 Ribbon 控件。</param>
+        public void OpenAiModels(OfficeCore.IRibbonControl control)
+        {
+            _openAiModels();
+        }
+
+        /// <summary>处理“Skill 设置”按钮回调。</summary>
+        /// <param name="control">触发回调的 Ribbon 控件。</param>
+        public void OpenAiSkills(OfficeCore.IRibbonControl control)
+        {
+            _openAiSkills();
+        }
+
+        /// <summary>处理“本地数据”按钮回调。</summary>
+        /// <param name="control">触发回调的 Ribbon 控件。</param>
+        public void OpenLocalData(OfficeCore.IRibbonControl control)
+        {
+            _openLocalData();
+        }
+
         /// <summary>按控件 ID 返回嵌入图标。由 Office 在绘制 Ribbon 时于 UI 线程调用。</summary>
         /// <param name="control">正在绘制的按钮或菜单。未知 ID 不显示图标。</param>
         /// <returns>缓存的 OLE 图片。同一文件和尺寸只解码一次，由本对象持有到加载项卸载。</returns>
@@ -164,10 +202,18 @@ namespace DB2Sheet.UI
                     return true;
                 case "DB2SheetSettingsMenu":
                 case "DB2SheetSettingsButton":
+                case "DB2SheetAiMenu":
+                case "DB2SheetAiModelsButton":
                     fileName = "icon_setting.png";
+                    return true;
+                case "DB2SheetAiSkillsButton":
+                    fileName = "icon_script.png";
                     return true;
                 case "DB2SheetJdbcEnvironmentButton":
                     fileName = "icon_java.png";
+                    return true;
+                case "DB2SheetLocalDataButton":
+                    fileName = "icon_folder.png";
                     return true;
                 case "DB2SheetVersionLabel":
                     fileName = "icon_info.png";

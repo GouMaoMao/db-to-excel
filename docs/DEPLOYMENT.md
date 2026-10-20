@@ -42,6 +42,7 @@
 - .NET Framework 4.7.2 与 VSTO Runtime 的先决条件检测。
 - MySQL、PostgreSQL、SQLite 和 DuckDB 的托管程序集，输出目录中的 `duckdb.dll`，以及 `x64\SQLite.Interop.dll`。
 - 不包含 JDK，也不包含 MaxCompute 或其他厂商的 JDBC 驱动。用户不用单独安装 DuckDB。
+- `runtimes\win-x64\native\WebView2Loader.dll` 与 `runtimes\win-x86\native\WebView2Loader.dll`，以及 WebView2、Markdig 的托管程序集。不包含 WebView2 固定版运行库。目标机器需要已安装的 Evergreen WebView2 运行库；插件不下载它。
 - 不必单独包含 `db2sheet-jdbc-bridge.jar`。它已嵌入 `DB2Sheet.dll`，首次使用 JDBC 时释放到 `%LocalAppData%\DB2Sheet\db2sheet-jdbc-bridge.jar`。用户通过「JDBC 环境」检测或指定本机 `java.exe`；厂商驱动 jar 在连接方案里选择。
 
 代码签名、Office 位数、安装范围和卸载时是否保留用户数据见「尚待决定」。当前发布脚本不签名。
@@ -57,7 +58,7 @@
 - 当前发布脚本不签名。生产证书和签名流程见「尚待决定」。临时测试证书不用作生产证书。
 - 不在安装包中预置真实数据库凭据。
 - 日志目录保持普通用户可写，不要求管理员权限。
-- 连接密码仍明文保存在 `connections.json`。Windows DPAPI 或凭据管理器尚未接入。
+- 连接密码仍明文保存在 `connections.json`。模型密钥用 Windows DPAPI（当前用户）保存在 `ai-models.json`，不写入审计日志。连接密码的 DPAPI 或凭据管理器尚未接入。
 
 ## Office 位数与依赖
 
@@ -74,6 +75,7 @@
 - [ ] Excel 信任中心的表现与当时的签名状态一致。当前脚本不签名。
 - [ ] SQL Server、MySQL、PostgreSQL、SQLite、DuckDB 依赖加载正常。安装目录中有 `duckdb.dll`、DuckDB 托管程序集，以及 `x64\SQLite.Interop.dll`。
 - [ ] 未配置 Java 时，JDBC 连接会提示打开「JDBC 环境」，而不是随安装包附带 JDK 或厂商驱动。
+- [ ] 已安装 WebView2 运行库时，AI 对话能显示排版。未安装时对话区说明缺少运行库，安装包不因此变大为一整份浏览器。
 - [ ] 安装后首次启动正常。
 - [ ] 升级后，已决定保留的用户配置仍然可用。卸载是否删除 `%LocalAppData%\DB2Sheet` 尚未决定。
 - [ ] 卸载后加载项注册项清理。

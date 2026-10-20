@@ -80,6 +80,10 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.SqlSheetTabColor);
             registry.Register(CoreSettings.BeautifyAfterSave);
             registry.Register(CoreSettings.BeautifyAfterRefresh);
+            registry.Register(CoreSettings.AiChatSplitRatio);
+            registry.Register(CoreSettings.AiChatVisible);
+            registry.Register(CoreSettings.AiModelChoice);
+            registry.Register(CoreSettings.AiSkillChoice);
             return registry;
         }
     }
@@ -187,6 +191,32 @@ namespace DB2Sheet.Services
         /// <summary>批量刷新正常结束后是否自动美化整张 SQL 页。列多时较慢，默认关闭。</summary>
         public static readonly SettingDefinition<bool> BeautifyAfterRefresh = Flag(
             "batch.beautifyAfterRefresh", "刷新后美化", false, 8);
+
+        /// <summary>SQL 查询窗右侧 AI 栏宽度占该栏所在区域的千分比。0 表示用户还没拖过，展开时对话栏为当时 SQL 列的 2/3。</summary>
+        public static readonly SettingDefinition<int> AiChatSplitRatio = Integer(
+            "session.aiChatSplitRatio", "AI 对话栏宽度比例", "会话", 0, 0, 999);
+
+        /// <summary>对话里上次选中的账号和子型号，形如「账号标识|型号」。不出现在参数设置里。</summary>
+        public static readonly SettingDefinition<string> AiModelChoice =
+            new SettingDefinition<string>(
+                "session.aiModelChoice", "AI 型号选择", "会话", string.Empty,
+                value => Tuple.Create(true, value ?? string.Empty));
+
+        /// <summary>对话里上次勾选的 Skill。多项用竖线分隔，一条都没勾时为空。不出现在参数设置里。</summary>
+        public static readonly SettingDefinition<string> AiSkillChoice =
+            new SettingDefinition<string>(
+                "session.aiSkillChoice", "AI Skill 勾选", "会话", string.Empty,
+                value => Tuple.Create(true, value ?? string.Empty));
+
+        /// <summary>SQL 查询窗右侧 AI 栏是否展开。不出现在参数设置里。</summary>
+        public static readonly SettingDefinition<bool> AiChatVisible =
+            new SettingDefinition<bool>(
+                "session.aiChatVisible", "AI 对话展开", "会话", false,
+                value =>
+                {
+                    bool succeeded = bool.TryParse(value, out bool parsed);
+                    return Tuple.Create(succeeded, parsed);
+                });
 
         private static SettingDefinition<Color> ColorSetting(
             string key, string displayName, Color defaultColor, int sortOrder, string category = null)
