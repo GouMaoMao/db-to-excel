@@ -791,6 +791,7 @@ namespace DB2Sheet.UI
         /// <remarks>
         /// 勾选写入 SQL 时，结果写成功后才把 SQL 按列写入 SQL 页。取消或覆盖被拒绝时两者都不写。
         /// 写入成功且「保存后美化」为开时，再走一遍美化进度窗。这次美化取消或失败不撤销已经写入的结果和 SQL。
+        /// 正常结束后弹出与状态栏相同的一句，必须点确定。美化失败只留错误详情，不再叠一层写入成功框。取消不弹这层框。
         /// </remarks>
         private void ExportQuery()
         {
@@ -821,22 +822,26 @@ namespace DB2Sheet.UI
 
                 DataSourceRequest request = CreateRequest(connection, sqlText, ExecutionPurpose.Export, _settings.Get(CoreSettings.MaxExportRows));
                 failedDuringQuery = true;
+                bool truncated = false;
                 long rows = _operationRunner.Run(this, "写入 Excel", true, async (progress, token) =>
                 {
                     string operationId = Guid.NewGuid().ToString("N");
                     BufferedQueryResult result = await _queryBuffer.ExecuteAsync(
                         request, operationId, progress, token);
                     failedDuringQuery = false;
+                    truncated = result.IsTruncated;
                     long written = _writer.WriteResult(_workbook, targetSheet, result, progress, token, operationId);
                     if (writeSql)
                         _taskReader.WriteTaskColumn(_workbook, targetSheet, sqlText);
                     return written;
                 });
-                _status.Text = writeSql
-                    ? string.Format("已向“{0}”写入 {1:N0} 行，并已把 SQL 写入工作表 SQL。", targetSheet, rows)
-                    : string.Format("已向“{0}”写入 {1:N0} 行。", targetSheet, rows);
-                if (writeSql)
-                    BeautifySavedSql(targetSheet, rows);
+                SavedSqlBeautify beautify = writeSql ? BeautifySavedSql() : SavedSqlBeautify.Skipped;
+                if (beautify == SavedSqlBeautify.Failed)
+                    return;
+                ShowOutcome(
+                    "写入 Sheet",
+                    DescribeSheetWrite(targetSheet, rows, truncated, writeSql, beautify),
+                    truncated);
             }
             catch (OperationCanceledException)
             {
@@ -849,31 +854,71 @@ namespace DB2Sheet.UI
         }
 
         /// <summary>按「保存后美化」在写入成功后再美化整张 SQL 页。</summary>
-        /// <param name="targetSheet">刚写入的结果表名，只用于完成后的状态文字。</param>
-        /// <param name="rows">已写入的结果行数。</param>
-        /// <remarks>开关关闭、没有可美化的列、取消或失败时不把这次写入当成失败。取消和失败改写状态栏。</remarks>
-        private void BeautifySavedSql(string targetSheet, long rows)
+        /// <returns>美化是否做完。失败时错误详情已经弹出。</returns>
+        /// <remarks>
+        /// 开关关闭或没有可美化的列时返回跳过，不把这次写入当成失败。
+        /// 取消或失败不撤销已经写入的结果和 SQL。完成说明由调用方统一弹出。
+        /// </remarks>
+        private SavedSqlBeautify BeautifySavedSql()
         {
-            if (!_settings.Get(CoreSettings.BeautifyAfterSave)) return;
+            if (!_settings.Get(CoreSettings.BeautifyAfterSave))
+                return SavedSqlBeautify.Skipped;
             try
             {
                 int count = _taskReader.CountStyleColumns(_workbook);
-                if (count == 0) return;
+                if (count == 0)
+                    return SavedSqlBeautify.Skipped;
                 _operationRunner.Run(
                     this,
                     "美化格式",
                     true,
                     (progress, token) => _taskReader.FormatSqlSheet(_workbook, progress, token));
-                _status.Text = string.Format("已向“{0}”写入 {1:N0} 行，并已美化 SQL 页。", targetSheet, rows);
+                return SavedSqlBeautify.Done;
             }
             catch (OperationCanceledException)
             {
-                _status.Text = "SQL 已写入，美化已取消。";
+                return SavedSqlBeautify.Cancelled;
             }
             catch (Exception exception)
             {
                 ShowError(exception);
+                return SavedSqlBeautify.Failed;
             }
+        }
+
+        /// <summary>组装写入结束后的一句说明。截断时写出上限，并指向「最大导出行数」。</summary>
+        /// <param name="targetSheet">刚写入的结果表名。</param>
+        /// <param name="rows">已写入的数据行数，不含标题。</param>
+        /// <param name="truncated">查询结果达到最大导出行数后被截断时为 true。</param>
+        /// <param name="writeSql">这次是否把 SQL 写入了工作表 SQL。</param>
+        /// <param name="beautify">保存后美化的结果。失败不会走到这里。</param>
+        /// <returns>与状态栏和确定框相同的一句。</returns>
+        private string DescribeSheetWrite(
+            string targetSheet, long rows, bool truncated, bool writeSql, SavedSqlBeautify beautify)
+        {
+            if (beautify == SavedSqlBeautify.Cancelled)
+            {
+                if (!truncated)
+                    return "SQL 已写入，美化已取消。";
+                return string.Format(
+                    "SQL 已写入，美化已取消。已达上限 {0:N0} 行并截断。可在设置中修改“最大导出行数”。",
+                    _settings.Get(CoreSettings.MaxExportRows));
+            }
+
+            string extra = beautify == SavedSqlBeautify.Done
+                ? "，并已美化 SQL 页"
+                : writeSql
+                    ? "，并已把 SQL 写入工作表 SQL"
+                    : string.Empty;
+            if (!truncated)
+                return string.Format("已向“{0}”写入 {1:N0} 行{2}。", targetSheet, rows, extra);
+
+            return string.Format(
+                "已向“{0}”写入 {1:N0} 行{2}，已达上限 {3:N0} 行并截断。可在设置中修改“最大导出行数”。",
+                targetSheet,
+                rows,
+                extra,
+                _settings.Get(CoreSettings.MaxExportRows));
         }
 
         /// <summary>判断当前工作簿是否已有同名工作表。比较时忽略大小写，不激活工作表。</summary>
@@ -1646,6 +1691,7 @@ namespace DB2Sheet.UI
         /// <remarks>
         /// 不重新查询，也不修改当前工作簿。用户取消对话框时不导出。
         /// 路径指向当前工作簿时只提示，不覆盖。失败弹出错误详情，不提供「问 AI」。
+        /// 成功后弹出与状态栏相同的一句，必须点确定。取消不弹这层框。
         /// </remarks>
         private void ExportPreview()
         {
@@ -1686,13 +1732,16 @@ namespace DB2Sheet.UI
                         true,
                         (progress, token) => Task.FromResult(WritePreviewFile(path, sheetName, result, progress, token)));
                     int previewLimit = _settings.Get(CoreSettings.MaxPreviewRows);
-                    _status.Text = result.IsTruncated
-                        ? string.Format(
-                            "已导出到“{0}”，共 {1:N0} 行，已达上限 {2:N0} 行并截断。可在设置中修改“最大预览行数”。",
-                            path,
-                            rows,
-                            previewLimit)
-                        : string.Format("已导出到“{0}”，共 {1:N0} 行。", path, rows);
+                    ShowOutcome(
+                        "导出为 Excel",
+                        result.IsTruncated
+                            ? string.Format(
+                                "已导出到“{0}”，共 {1:N0} 行，已达上限 {2:N0} 行并截断。可在设置中修改“最大预览行数”。",
+                                path,
+                                rows,
+                                previewLimit)
+                            : string.Format("已导出到“{0}”，共 {1:N0} 行。", path, rows),
+                        result.IsTruncated);
                 }
                 catch (OperationCanceledException)
                 {
@@ -2343,6 +2392,22 @@ namespace DB2Sheet.UI
             _profileTip.Hide(_queryProfiles);
         }
 
+        /// <summary>把完成说明写入状态栏，并弹出必须点确定的提示。</summary>
+        /// <param name="title">提示框标题。</param>
+        /// <param name="message">与状态栏相同的一句说明。</param>
+        /// <param name="truncated">结果被截断时用警告图标，否则用信息图标。</param>
+        /// <remarks>在界面线程上以模态方式显示。调用方只在正常结束时调用。取消和失败不走这里。</remarks>
+        private void ShowOutcome(string title, string message, bool truncated)
+        {
+            _status.Text = message;
+            MessageBox.Show(
+                this,
+                message,
+                title,
+                MessageBoxButtons.OK,
+                truncated ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+
         private void ShowError(Exception exception, string sqlForAi = null)
         {
             _status.Text = exception.Message;
@@ -2946,6 +3011,22 @@ namespace DB2Sheet.UI
             }
 
             return name;
+        }
+
+        /// <summary>写入 SQL 之后的美化结果。失败时错误详情已经弹出，调用方不再提示写入成功。</summary>
+        private enum SavedSqlBeautify
+        {
+            /// <summary>未开启保存后美化，或没有可美化的列。</summary>
+            Skipped,
+
+            /// <summary>整张 SQL 页已美化。</summary>
+            Done,
+
+            /// <summary>用户取消了美化。结果和 SQL 已经写入。</summary>
+            Cancelled,
+
+            /// <summary>美化抛错。错误详情已显示。</summary>
+            Failed
         }
 
         /// <summary>为查询方案列表包装模型和显示名称。</summary>

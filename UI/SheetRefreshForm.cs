@@ -703,7 +703,7 @@ namespace DB2Sheet.UI
             }
             _tasks.InvalidateColumn(_statusColumn);
             if (_settings.Get(CoreSettings.BeautifyAfterRefresh))
-                BeautifySqlSheet();
+                BeautifySqlSheet(false);
             _status.Text = _scanSummary;
             ShowRefreshSummary(result, succeeded, failed, truncated);
         }
@@ -1347,7 +1347,7 @@ namespace DB2Sheet.UI
         private MenuStrip BuildFormatMenu()
         {
             ToolStripMenuItem formatMenu = new ToolStripMenuItem("格式");
-            formatMenu.DropDownItems.Add(new ToolStripMenuItem("美化格式", null, (sender, args) => BeautifySqlSheet()));
+            formatMenu.DropDownItems.Add(new ToolStripMenuItem("美化格式", null, (sender, args) => BeautifySqlSheet(true)));
             formatMenu.DropDownItems.Add(new ToolStripMenuItem("格式设置", null, (sender, args) => OpenSqlFormatSettings()));
 
             MenuStrip menu = new MenuStrip { Dock = DockStyle.Top };
@@ -1372,7 +1372,9 @@ namespace DB2Sheet.UI
         }
 
         /// <summary>用进度窗美化当前工作簿的 SQL 页。没有可美化的列时不打开进度窗。</summary>
-        private void BeautifySqlSheet()
+        /// <param name="acknowledge">为 true 时，成功或没有可美化的列弹出确定框。刷新结束后的自动美化传 false，结果仍由刷新结束说明承担。</param>
+        /// <remarks>取消只改状态栏。失败弹出错误详情。确定框在界面线程上模态显示，并留在激活抑制之内，避免被 Excel 挡住。</remarks>
+        private void BeautifySqlSheet(bool acknowledge)
         {
             int count;
             try
@@ -1388,7 +1390,13 @@ namespace DB2Sheet.UI
 
             if (count == 0)
             {
-                _status.Text = "没有可美化的列。";
+                const string message = "没有可美化的列。";
+                _status.Text = message;
+                if (acknowledge)
+                {
+                    MessageBox.Show(this, message, "美化格式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
                 return;
             }
 
@@ -1400,7 +1408,12 @@ namespace DB2Sheet.UI
                     "美化格式",
                     true,
                     (progress, token) => _taskReader.FormatSqlSheet(_workbook, progress, token));
-                _status.Text = string.Format("已美化 {0} 列。", styled);
+                string message = string.Format("已美化 {0} 列。", styled);
+                _status.Text = message;
+                if (acknowledge)
+                {
+                    MessageBox.Show(this, message, "美化格式", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
             catch (OperationCanceledException)
             {
