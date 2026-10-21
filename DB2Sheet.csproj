@@ -369,6 +369,9 @@
     <EmbeddedResource Include="Resources\icon_close.png" />
     <EmbeddedResource Include="Resources\icon_send.png" />
     <EmbeddedResource Include="Resources\icon_talk.png" />
+	<EmbeddedResource Include="Resources\icon_ing.png" />
+<EmbeddedResource Include="Resources\icon_error.png" />
+<EmbeddedResource Include="Resources\icon_unread.png" />
     <EmbeddedResource Include="Resources\llm_openai.png" />
     <EmbeddedResource Include="Resources\llm_qwen.png" />
     <EmbeddedResource Include="Resources\llm_minimax.png" />

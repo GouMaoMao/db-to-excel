@@ -22,6 +22,10 @@ namespace DB2Sheet.UI
     public sealed class AiChatControl : UserControl
     {
         private const int MaxFileBytes = 64 * 1024;
+        private const int ConversationTabIconDefault = 0;
+        private const int ConversationTabIconPending = 1;
+        private const int ConversationTabIconError = 2;
+        private const int ConversationTabIconUnread = 3;
 
         private readonly AiAssistant _assistant;
         private readonly ISettingsStore _settings;
@@ -29,7 +33,7 @@ namespace DB2Sheet.UI
         private readonly Func<AiMentionSource> _readMentions;
         private readonly Action _closePanel;
         private readonly TabControl _tabs = CloseMark.CreateTabs();
-        private readonly ImageList _conversationTabIcons = DatabaseTreeImageCatalog.CreateSingleIconList("icon_talk.png");
+        private readonly ImageList _conversationTabIcons = CreateConversationTabIcons();
         private readonly Panel _empty = new Panel
         {
             Dock = DockStyle.Fill,
@@ -78,6 +82,8 @@ namespace DB2Sheet.UI
         private readonly ContextMenuStrip _skillMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _historyMenu = new ContextMenuStrip();
         private readonly List<Image> _tabIcons = new List<Image>();
+        private readonly HashSet<string> _errorConversationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _unreadConversationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Image _addIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_add.png");
         private readonly List<ModelPick> _models = new List<ModelPick>();
         private readonly List<SkillPick> _skills = new List<SkillPick>();
@@ -100,6 +106,31 @@ namespace DB2Sheet.UI
         private List<AiSentSection> _pendingSent;
         private AiSentCall _pendingCall;
         private int _titleSerial;
+
+        /// <summary>创建对话页签图标集合。顺序固定为默认、等待、失败和未读。</summary>
+        /// <returns>调用方负责释放的图像列表。</returns>
+        private static ImageList CreateConversationTabIcons()
+        {
+            ImageList images = new ImageList
+            {
+                ColorDepth = ColorDepth.Depth32Bit,
+                ImageSize = new Size(16, 16),
+                TransparentColor = Color.Transparent
+            };
+            try
+            {
+                images.Images.Add(DatabaseTreeImageCatalog.LoadActionIcon("icon_talk.png", 16));
+                images.Images.Add(DatabaseTreeImageCatalog.LoadActionIcon("icon_ing.png", 16));
+                images.Images.Add(DatabaseTreeImageCatalog.LoadActionIcon("icon_error.png", 16));
+                images.Images.Add(DatabaseTreeImageCatalog.LoadActionIcon("icon_unread.png", 16));
+                return images;
+            }
+            catch
+            {
+                images.Dispose();
+                throw;
+            }
+        }
 
         /// <summary>创建对话控件。</summary>
         /// <param name="assistant">模型、Skill、对话和审计。</param>
@@ -448,6 +479,7 @@ namespace DB2Sheet.UI
         {
             AiConversation conversation = Current();
             if (conversation == null) return;
+            ClearConversationAlerts(conversation.Id);
             if (string.Equals(_currentId, conversation.Id, StringComparison.OrdinalIgnoreCase))
                 _currentId = null;
             _assistant.Conversations.SetArchived(conversation.Id, true);
@@ -469,6 +501,7 @@ namespace DB2Sheet.UI
                 return;
             if (string.Equals(_currentId, conversation.Id, StringComparison.OrdinalIgnoreCase))
                 _currentId = null;
+            ClearConversationAlerts(conversation.Id);
             _assistant.Conversations.Delete(conversation.Id);
             _assistant.WriteAction(
                 "conversation.delete",
@@ -518,6 +551,8 @@ namespace DB2Sheet.UI
             IList<AiChatTurn> history = conversation.Messages;
             List<Attachment> sentAttachments = new List<Attachment>(_attachments);
             _sending = true;
+            _errorConversationIds.Remove(conversationId);
+            _unreadConversationIds.Remove(conversationId);
             SetComposerBusy(true);
             HideMention();
             _input.Clear();
@@ -525,6 +560,7 @@ namespace DB2Sheet.UI
             RebuildAttachmentChips();
             _pendingConversationId = conversationId;
             _pendingUser = raw;
+            RefreshConversationTabIcons();
             ShowTranscript();
             try
             {
@@ -697,6 +733,11 @@ namespace DB2Sheet.UI
                         InputTokens = reply.InputTokens,
                         OutputTokens = reply.OutputTokens
                     });
+                    if (string.Equals(_currentId, conversationId, StringComparison.OrdinalIgnoreCase))
+                        ClearConversationAlerts(conversationId);
+                    else
+                        MarkConversationUnread(conversationId);
+                    RefreshConversationTabIcons();
                     ShowTranscript();
                     MaybeTitle(conversationId, model, apiKey);
                 });
@@ -710,6 +751,7 @@ namespace DB2Sheet.UI
                     _pendingConversationId = null;
                     _pendingSent = null;
                     _pendingCall = null;
+                    MarkConversationError(conversationId);
                     if (string.Equals(_currentId, conversationId, StringComparison.OrdinalIgnoreCase)
                         && string.IsNullOrEmpty(_input.Text))
                         _input.Text = raw;
@@ -718,6 +760,7 @@ namespace DB2Sheet.UI
                         foreach (Attachment item in sentAttachments)
                             AddAttachment(item.Label, item.Body, item.Kind);
                     }
+                    RefreshConversationTabIcons();
                     ShowTranscript();
                     ExceptionDetailForm.Show(FindForm(), exception);
                 });
@@ -731,6 +774,7 @@ namespace DB2Sheet.UI
                     SetComposerBusy(false);
                     _omitSql = false;
                     RefreshSqlReference();
+                    RefreshConversationTabIcons();
                 });
             }
         }
@@ -780,12 +824,39 @@ namespace DB2Sheet.UI
                 _tabs.TabPages.Add(new TabPage(CloseMark.Caption(conversation.Title, _tabs.Font))
                 {
                     Tag = conversation.Id,
-                    ImageIndex = 0
+                    ImageIndex = ConversationTabIconDefault
                 });
             }
 
+            RefreshConversationTabIcons();
             ApplyTranscriptVisibility();
             _binding = false;
+        }
+
+        /// <summary>按会话状态刷新所有页签图标。状态优先级是等待、失败、未读、默认。</summary>
+        private void RefreshConversationTabIcons()
+        {
+            for (int index = 0; index < _tabs.TabPages.Count; index++)
+            {
+                TabPage page = _tabs.TabPages[index];
+                page.ImageIndex = ResolveConversationTabIcon(page.Tag as string);
+            }
+        }
+
+        /// <summary>计算某条会话应显示的图标索引。</summary>
+        /// <param name="conversationId">会话标识。</param>
+        /// <returns>页签图标索引。</returns>
+        private int ResolveConversationTabIcon(string conversationId)
+        {
+            if (!string.IsNullOrEmpty(conversationId)
+                && _sending
+                && string.Equals(conversationId, _pendingConversationId, StringComparison.OrdinalIgnoreCase))
+                return ConversationTabIconPending;
+            if (!string.IsNullOrEmpty(conversationId) && _errorConversationIds.Contains(conversationId))
+                return ConversationTabIconError;
+            if (!string.IsNullOrEmpty(conversationId) && _unreadConversationIds.Contains(conversationId))
+                return ConversationTabIconUnread;
+            return ConversationTabIconDefault;
         }
 
         /// <summary>没有对话时用整块空白盖住正文，避免 WebView 吃掉点击。</summary>
@@ -811,6 +882,8 @@ namespace DB2Sheet.UI
             if (_binding) return;
             if (_tabs.SelectedTab == null) return;
             _currentId = _tabs.SelectedTab.Tag as string;
+            ClearConversationAlerts(_currentId);
+            RefreshConversationTabIcons();
             ShowTranscript();
         }
 
@@ -1397,11 +1470,40 @@ namespace DB2Sheet.UI
                 _tabs.SelectedIndex = index;
                 _currentId = id;
                 _binding = false;
+                ClearConversationAlerts(_currentId);
+                RefreshConversationTabIcons();
                 ShowTranscript();
                 return true;
             }
 
             return false;
+        }
+
+        /// <summary>把会话标记成失败，并清掉该会话的未读标记。</summary>
+        /// <param name="conversationId">会话标识。</param>
+        private void MarkConversationError(string conversationId)
+        {
+            if (string.IsNullOrEmpty(conversationId)) return;
+            _unreadConversationIds.Remove(conversationId);
+            _errorConversationIds.Add(conversationId);
+        }
+
+        /// <summary>把会话标记成未读，并清掉失败标记。</summary>
+        /// <param name="conversationId">会话标识。</param>
+        private void MarkConversationUnread(string conversationId)
+        {
+            if (string.IsNullOrEmpty(conversationId)) return;
+            _errorConversationIds.Remove(conversationId);
+            _unreadConversationIds.Add(conversationId);
+        }
+
+        /// <summary>用户查看会话后清除失败和未读提示。</summary>
+        /// <param name="conversationId">会话标识。</param>
+        private void ClearConversationAlerts(string conversationId)
+        {
+            if (string.IsNullOrEmpty(conversationId)) return;
+            _errorConversationIds.Remove(conversationId);
+            _unreadConversationIds.Remove(conversationId);
         }
 
         private void SelectFirstActive()
