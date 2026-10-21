@@ -19,10 +19,8 @@ namespace DB2Sheet.UI
         public const float DefaultFontSize = 9F;
         public const string LogFontName = "Consolas";
         public const float LogFontSize = 9F;
-        public const string CodeFontName = "Microsoft YaHei UI Light";
-        public const float CodeFontSize = 9.5F;
 
-        /// <summary>SQL 工作表单元格使用的等宽字体。编辑器仍用 <see cref="CodeFontName"/>。</summary>
+        /// <summary>SQL 工作表单元格和 SQL 编辑器使用的等宽字体。</summary>
         public const string SqlSheetFontName = "Cascadia Code Light";
 
         /// <summary>SQL 工作表单元格的字号。</summary>
@@ -457,23 +455,24 @@ namespace DB2Sheet.UI
             }
         }
 
-        /// <summary>为 SQL 编辑器创建中英文同一字面高度的常规代码字体；优先细体雅黑，缺失时回退。</summary>
+        /// <summary>为 SQL 编辑器创建与 SQL 页相同的等宽字体；优先 Cascadia Code Light，缺失时回退。</summary>
         /// <returns>已解析到本机已安装字体族的字体实例。调用方负责释放。</returns>
+        /// <remarks>字号与 <see cref="SqlSheetFontSize"/> 相同。探测时要求字体族名称一致，避免系统悄悄换成别的字体。</remarks>
         public static Font CreateCodeFont()
         {
-            string[] candidates = { "Microsoft YaHei UI Light", "DengXian Light", "Microsoft YaHei UI" };
+            string[] candidates = { SqlSheetFontName, "Cascadia Code", LogFontName, DefaultFontName };
             foreach (string name in candidates)
             {
-                using (Font probe = new Font(name, CodeFontSize, FontStyle.Regular, GraphicsUnit.Point))
+                using (Font probe = new Font(name, SqlSheetFontSize, FontStyle.Regular, GraphicsUnit.Point))
                 {
                     if (!string.Equals(probe.FontFamily.Name, name, StringComparison.OrdinalIgnoreCase))
                         continue;
                 }
 
-                return new Font(name, CodeFontSize, FontStyle.Regular, GraphicsUnit.Point);
+                return new Font(name, SqlSheetFontSize, FontStyle.Regular, GraphicsUnit.Point);
             }
 
-            return new Font(DefaultFontName, CodeFontSize, FontStyle.Regular, GraphicsUnit.Point);
+            return new Font(DefaultFontName, SqlSheetFontSize, FontStyle.Regular, GraphicsUnit.Point);
         }
 
         /// <summary>生成统一格式的功能窗体标题。</summary>
@@ -626,14 +625,8 @@ namespace DB2Sheet.UI
                     return "进度窗口只显示不低于所选级别的日志。Debug 最详细，Error 只显示错误。写入文件的日志仍保留全部级别。";
                 case "excel.sqlSheetHeaderColor":
                     return "第 1 行目标表名的字体颜色，并加粗显示。// 之后的参数保持灰色。";
-                case "excel.sqlSheetCommentColor":
-                    return "以 -- 或 /* */ 书写的注释文本。";
                 case "excel.sqlSheetFormulaColor":
                     return "Excel 公式单元格的字体颜色。底色按该颜色向白色淡化。";
-                case "excel.sqlSheetKeywordColor":
-                    return "SELECT、FROM、WHERE 等 SQL 关键字。";
-                case "excel.sqlSheetLiteralColor":
-                    return "单引号字符串的字体颜色，包括两侧引号。双引号、反引号和方括号中的标识符保持黑色。";
                 case "excel.sqlSheetTabColor":
                     return "SQL 工作表标签的颜色。";
                 case "excel.beautifyAfterSave":

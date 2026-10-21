@@ -8,8 +8,7 @@ namespace DB2Sheet.Services
     /// <summary>以内部词法分析实现常见查询语句的结构化格式化。</summary>
     /// <remarks>
     /// 服务不连接数据库且不修改 SQL 语义；它覆盖四类已支持数据库的常用查询语法，但不是完整方言解析器。
-    /// 格式化按列对齐子句内容，不使用固定缩进。<see cref="Format"/> 的排版结果不依赖标记起点。
-    /// <see cref="ColorSpans"/> 把同一套词法的关键字、注释和单引号字符串标成区间，供 SQL 页着色，不改 SQL 文本。
+    /// 格式化按列对齐子句内容，不使用固定缩进。语法上色由 AvalonEdit 的 T-SQL 定义负责，不在这里。
     /// </remarks>
     public sealed class SqlFormattingService : ISqlFormattingService
     {
@@ -100,8 +99,7 @@ namespace DB2Sheet.Services
                     string text = value.Substring(start, index - start);
                     tokens.Add(new SqlToken(
                         Keywords.Contains(text) ? SqlTokenKind.Keyword : SqlTokenKind.Word,
-                        text,
-                        start));
+                        text));
                     continue;
                 }
 
@@ -120,31 +118,9 @@ namespace DB2Sheet.Services
             return new Layout(tokens).Render().Trim();
         }
 
-        /// <summary>标出 SQL 页要着色的区间。起点相对传入文本的开头，块注释可以跨行。</summary>
-        /// <param name="sql">一列 SQL。单元格之间用换行拼起来。空白不产生区间。</param>
-        /// <returns>关键字、注释和单引号字符串。双引号、反引号和方括号标识符不在其中。</returns>
-        /// <remarks>与 <see cref="Format"/> 使用同一次词法。不修改文本，也不把标识符当成引号文本。</remarks>
-        internal static IReadOnlyList<SqlColorSpan> ColorSpans(string sql)
-        {
-            IReadOnlyList<SqlToken> tokens = Tokenize(sql);
-            List<SqlColorSpan> spans = new List<SqlColorSpan>();
-            foreach (SqlToken token in tokens)
-            {
-                SqlColorKind kind;
-                if (token.Kind == SqlTokenKind.Keyword) kind = SqlColorKind.Keyword;
-                else if (token.Kind == SqlTokenKind.Comment) kind = SqlColorKind.Comment;
-                else if (token.Kind == SqlTokenKind.String) kind = SqlColorKind.String;
-                else continue;
-                if (token.Text.Length == 0) continue;
-                spans.Add(new SqlColorSpan(kind, token.Start, token.Text.Length));
-            }
-
-            return spans;
-        }
-
         private static void Add(ICollection<SqlToken> tokens, SqlTokenKind kind, string source, int start, int end)
         {
-            tokens.Add(new SqlToken(kind, source.Substring(start, end - start), start));
+            tokens.Add(new SqlToken(kind, source.Substring(start, end - start)));
         }
 
         private static bool IsPairOperator(char first, char second)
@@ -785,18 +761,16 @@ namespace DB2Sheet.Services
             Symbol
         }
 
-        /// <summary>格式化使用的词法标记。起点只供着色对齐，排版仍只读种类和原文。</summary>
+        /// <summary>格式化使用的词法标记。排版只读种类和原文。</summary>
         private sealed class SqlToken
         {
-            /// <summary>创建带起点的词法标记。</summary>
+            /// <summary>创建词法标记。</summary>
             /// <param name="kind">标记类型。</param>
             /// <param name="text">标记原始文本。</param>
-            /// <param name="start">标记在源文本中的起点，从 0 开始。</param>
-            public SqlToken(SqlTokenKind kind, string text, int start)
+            public SqlToken(SqlTokenKind kind, string text)
             {
                 Kind = kind;
                 Text = text ?? string.Empty;
-                Start = start;
             }
 
             /// <summary>获取标记类型。</summary>
@@ -804,46 +778,6 @@ namespace DB2Sheet.Services
 
             /// <summary>获取标记原始文本。</summary>
             public string Text { get; }
-
-            /// <summary>获取标记在源文本中的起点，从 0 开始。</summary>
-            public int Start { get; }
         }
-    }
-
-    /// <summary>SQL 页着色用的标记种类。只含关键字、注释和单引号字符串。</summary>
-    internal enum SqlColorKind
-    {
-        /// <summary>格式化已经认识的关键字。</summary>
-        Keyword,
-
-        /// <summary>单行或块注释。</summary>
-        Comment,
-
-        /// <summary>单引号字符串，含两侧引号。</summary>
-        String
-    }
-
-    /// <summary>一段需要着色的原文。起点从 0 开始，长度含该段全部字符。</summary>
-    internal struct SqlColorSpan
-    {
-        /// <summary>创建一段着色区间。</summary>
-        /// <param name="kind">着色种类。</param>
-        /// <param name="start">在源文本中的起点，从 0 开始。</param>
-        /// <param name="length">字符数。调用方保证大于 0。</param>
-        public SqlColorSpan(SqlColorKind kind, int start, int length)
-        {
-            Kind = kind;
-            Start = start;
-            Length = length;
-        }
-
-        /// <summary>获取着色种类。</summary>
-        public SqlColorKind Kind { get; }
-
-        /// <summary>获取起点，从 0 开始。</summary>
-        public int Start { get; }
-
-        /// <summary>获取字符数。</summary>
-        public int Length { get; }
     }
 }

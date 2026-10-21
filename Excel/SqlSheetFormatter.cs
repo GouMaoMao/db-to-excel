@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using DB2Sheet.Models;
-using DB2Sheet.Services;
 using DB2Sheet.UI;
 using ExcelInterop = Microsoft.Office.Interop.Excel;
 
@@ -16,7 +15,7 @@ namespace DB2Sheet.Excel
     /// <remarks>
     /// 应在 Excel UI 线程调用。整表美化期间关闭重画，结束、取消或出错时恢复进入前的开关。
     /// 先清空整张表的格式，再给有表名的列上色，然后冻结首行并设置标签颜色。
-    /// 第 1 行只画表名和参数。第 2 行起用格式化服务的词法着色。公式格整格用公式色，不套关键字、注释和引号色。
+    /// 第 1 行只画表名和参数。第 2 行起按 AvalonEdit 的 T-SQL 定义上色。公式格整格用公式色，不套语法色。
     /// </remarks>
     internal static class SqlSheetFormatter
     {
@@ -33,7 +32,7 @@ namespace DB2Sheet.Excel
 
         /// <summary>美化每一个有表名的列，并按列报告进度。</summary>
         /// <param name="worksheet">SQL 工作表。调用方在方法返回前保持引用。</param>
-        /// <param name="palette">六项颜色。为 null 时抛出。</param>
+        /// <param name="palette">表名、公式和标签颜色。为 null 时抛出。</param>
         /// <param name="progress">进度接收器。可为空。</param>
         /// <param name="cancellationToken">清空前和每列开始前检查。当前列做完才停。</param>
         /// <returns>已美化的列数。没有可美化的列时为 0，且不改工作表。</returns>
@@ -175,7 +174,7 @@ namespace DB2Sheet.Excel
                 {
                     cell = CellAt(worksheet, row, column);
                     foreach (TextPiece piece in style.Pieces)
-                        ColorCharacters(cell, piece.Start, piece.Length, piece.Color, bold: false);
+                        ColorCharacters(cell, piece.Start, piece.Length, piece.Color, piece.Bold);
                 }
                 finally
                 {
@@ -198,7 +197,7 @@ namespace DB2Sheet.Excel
             try
             {
                 range = ColumnRange(worksheet, column, runStart, runEnd);
-                SetFont(range, run.Color, bold: false);
+                SetFont(range, run.Color, run.Bold);
                 if (run.Fill) SetFill(range, SqlSheetPalette.Lighten(run.Color));
             }
             finally
@@ -212,7 +211,7 @@ namespace DB2Sheet.Excel
 
         private static bool SameUniform(BodyStyle left, BodyStyle right)
         {
-            return left.Fill == right.Fill && left.Color.ToArgb() == right.Color.ToArgb();
+            return left.Fill == right.Fill && left.Bold == right.Bold && left.Color.ToArgb() == right.Color.ToArgb();
         }
 
         private static BodyStyle[] ClassifyBody(string[] texts, bool[] formulas, SqlSheetPalette palette)
@@ -230,35 +229,32 @@ namespace DB2Sheet.Excel
                 if (index + 1 < bodyCount) joined.Append('\n');
             }
 
-            IReadOnlyList<SqlColorSpan> spans = SqlFormattingService.ColorSpans(joined.ToString());
+            IReadOnlyList<SqlHighlightSpan> spans = SqlSyntax.Highlight(joined.ToString());
             BodyStyle[] styles = new BodyStyle[bodyCount];
             for (int index = 0; index < bodyCount; index++)
             {
                 if (formulas[index + 1])
                 {
-                    styles[index] = BodyStyle.UniformStyle(palette.Formula, fill: true);
+                    styles[index] = BodyStyle.UniformStyle(palette.Formula, fill: true, bold: false);
                     continue;
                 }
 
-                styles[index] = StyleOfLine(lines[index], starts[index], spans, palette);
+                styles[index] = StyleOfLine(lines[index], starts[index], spans);
             }
 
             return styles;
         }
 
-        private static BodyStyle StyleOfLine(
-            string text,
-            int lineStart,
-            IReadOnlyList<SqlColorSpan> spans,
-            SqlSheetPalette palette)
+        private static BodyStyle StyleOfLine(string text, int lineStart, IReadOnlyList<SqlHighlightSpan> spans)
         {
             int lineEnd = lineStart + text.Length;
             List<TextPiece> pieces = null;
-            SqlColorKind kind = SqlColorKind.Keyword;
+            Color color = Color.Black;
+            bool bold = false;
             bool saw = false;
             bool mixed = false;
             bool[] covered = text.Length == 0 ? null : new bool[text.Length];
-            foreach (SqlColorSpan span in spans)
+            foreach (SqlHighlightSpan span in spans)
             {
                 int spanEnd = span.Start + span.Length;
                 if (spanEnd <= lineStart || span.Start >= lineEnd) continue;
@@ -267,23 +263,24 @@ namespace DB2Sheet.Excel
                 if (localEnd <= localStart) continue;
                 if (!saw)
                 {
-                    kind = span.Kind;
+                    color = span.Color;
+                    bold = span.Bold;
                     saw = true;
                 }
-                else if (span.Kind != kind)
+                else if (span.Bold != bold || span.Color.ToArgb() != color.ToArgb())
                 {
                     mixed = true;
                 }
 
                 if (pieces == null) pieces = new List<TextPiece>();
-                pieces.Add(new TextPiece(localStart, localEnd - localStart, ColorOf(span.Kind, palette)));
+                pieces.Add(new TextPiece(localStart, localEnd - localStart, span.Color, span.Bold));
                 for (int index = localStart; index < localEnd; index++)
                     covered[index] = true;
             }
 
             if (!saw) return default(BodyStyle);
             if (!mixed && IsWhitespaceUncovered(text, covered))
-                return BodyStyle.UniformStyle(ColorOf(kind, palette), fill: false);
+                return BodyStyle.UniformStyle(color, fill: false, bold);
             return BodyStyle.Mixed(pieces);
         }
 
@@ -295,13 +292,6 @@ namespace DB2Sheet.Excel
             }
 
             return true;
-        }
-
-        private static Color ColorOf(SqlColorKind kind, SqlSheetPalette palette)
-        {
-            if (kind == SqlColorKind.Comment) return palette.Comment;
-            if (kind == SqlColorKind.String) return palette.Literal;
-            return palette.Keyword;
         }
 
         private static string[] ReadTexts(
@@ -706,12 +696,13 @@ namespace DB2Sheet.Excel
         {
             public bool Uniform { get; private set; }
             public bool Fill { get; private set; }
+            public bool Bold { get; private set; }
             public Color Color { get; private set; }
             public List<TextPiece> Pieces { get; private set; }
 
-            public static BodyStyle UniformStyle(Color color, bool fill)
+            public static BodyStyle UniformStyle(Color color, bool fill, bool bold)
             {
-                return new BodyStyle { Uniform = true, Fill = fill, Color = color };
+                return new BodyStyle { Uniform = true, Fill = fill, Bold = bold, Color = color };
             }
 
             public static BodyStyle Mixed(List<TextPiece> pieces)
@@ -723,16 +714,18 @@ namespace DB2Sheet.Excel
         /// <summary>同一单元格里的一段着色。起点从 0 开始。</summary>
         private struct TextPiece
         {
-            public TextPiece(int start, int length, Color color)
+            public TextPiece(int start, int length, Color color, bool bold)
             {
                 Start = start;
                 Length = length;
                 Color = color;
+                Bold = bold;
             }
 
             public int Start { get; }
             public int Length { get; }
             public Color Color { get; }
+            public bool Bold { get; }
         }
     }
 }

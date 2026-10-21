@@ -215,10 +215,7 @@ namespace DB2Sheet.Excel
         {
             return new SqlSheetPalette(
                 _settings.Get(CoreSettings.SqlSheetHeaderColor),
-                _settings.Get(CoreSettings.SqlSheetCommentColor),
                 _settings.Get(CoreSettings.SqlSheetFormulaColor),
-                _settings.Get(CoreSettings.SqlSheetKeywordColor),
-                _settings.Get(CoreSettings.SqlSheetLiteralColor),
                 _settings.Get(CoreSettings.SqlSheetTabColor));
         }
 

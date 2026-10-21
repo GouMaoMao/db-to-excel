@@ -73,10 +73,7 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.RefreshSplitRatio);
             registry.Register(CoreSettings.FormBounds);
             registry.Register(CoreSettings.SqlSheetHeaderColor);
-            registry.Register(CoreSettings.SqlSheetCommentColor);
             registry.Register(CoreSettings.SqlSheetFormulaColor);
-            registry.Register(CoreSettings.SqlSheetKeywordColor);
-            registry.Register(CoreSettings.SqlSheetLiteralColor);
             registry.Register(CoreSettings.SqlSheetTabColor);
             registry.Register(CoreSettings.BeautifyAfterSave);
             registry.Register(CoreSettings.BeautifyAfterRefresh);
@@ -164,33 +161,21 @@ namespace DB2Sheet.Services
         public static readonly SettingDefinition<Color> SqlSheetHeaderColor = ColorSetting(
             "excel.sqlSheetHeaderColor", "表名颜色", SqlSheetPalette.Default.Header, 1);
 
-        /// <summary>注释颜色。保存为 <c>R,G,B</c>。</summary>
-        public static readonly SettingDefinition<Color> SqlSheetCommentColor = ColorSetting(
-            "excel.sqlSheetCommentColor", "注释颜色", SqlSheetPalette.Default.Comment, 2);
-
         /// <summary>公式字体颜色。底色由其淡化，不单独保存。保存为 <c>R,G,B</c>。</summary>
         public static readonly SettingDefinition<Color> SqlSheetFormulaColor = ColorSetting(
-            "excel.sqlSheetFormulaColor", "公式颜色", SqlSheetPalette.Default.Formula, 3);
-
-        /// <summary>SQL 关键字颜色。保存为 <c>R,G,B</c>。</summary>
-        public static readonly SettingDefinition<Color> SqlSheetKeywordColor = ColorSetting(
-            "excel.sqlSheetKeywordColor", "关键字颜色", SqlSheetPalette.Default.Keyword, 4);
-
-        /// <summary>单引号文本颜色。保存为 <c>R,G,B</c>。</summary>
-        public static readonly SettingDefinition<Color> SqlSheetLiteralColor = ColorSetting(
-            "excel.sqlSheetLiteralColor", "引号颜色", SqlSheetPalette.Default.Literal, 5);
+            "excel.sqlSheetFormulaColor", "公式颜色", SqlSheetPalette.Default.Formula, 2);
 
         /// <summary>SQL 工作表底部标签的颜色。保存为 <c>R,G,B</c>。</summary>
         public static readonly SettingDefinition<Color> SqlSheetTabColor = ColorSetting(
-            "excel.sqlSheetTabColor", "标签颜色", SqlSheetPalette.Default.Tab, 6);
+            "excel.sqlSheetTabColor", "标签颜色", SqlSheetPalette.Default.Tab, 3);
 
         /// <summary>查询把 SQL 保存进 Excel 之后是否自动美化整张 SQL 页。默认开启。</summary>
         public static readonly SettingDefinition<bool> BeautifyAfterSave = Flag(
-            "excel.beautifyAfterSave", "保存后美化", true, 7);
+            "excel.beautifyAfterSave", "保存后美化", true, 4);
 
         /// <summary>批量刷新正常结束后是否自动美化整张 SQL 页。列多时较慢，默认关闭。</summary>
         public static readonly SettingDefinition<bool> BeautifyAfterRefresh = Flag(
-            "batch.beautifyAfterRefresh", "刷新后美化", false, 8);
+            "batch.beautifyAfterRefresh", "刷新后美化", false, 5);
 
         /// <summary>SQL 查询窗右侧 AI 栏宽度占该栏所在区域的千分比。0 表示用户还没拖过，展开时对话栏为当时 SQL 列的 2/3。</summary>
         public static readonly SettingDefinition<int> AiChatSplitRatio = Integer(

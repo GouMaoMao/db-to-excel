@@ -1,61 +1,81 @@
 using System;
-using System.Drawing;
 using System.Windows.Forms;
+using System.Windows.Forms.Integration;
+using WpfScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility;
+using System.Windows.Input;
+using System.Windows.Media;
 using DB2Sheet.Contracts;
+using ICSharpCode.AvalonEdit;
+using ICSharpCode.AvalonEdit.Document;
 
 namespace DB2Sheet.UI
 {
     /// <summary>封装支持格式化、行注释和选区执行请求的 SQL 文本编辑器。</summary>
     /// <remarks>
-    /// 控件使用普通多行文本框，只接收纯文本，粘贴不会带入富文本边框。
+    /// 编辑区是 AvalonEdit，语法高亮直接使用 <see cref="SqlSyntax"/> 的 T-SQL 定义。
+    /// 控件只接收纯文本。对外的 <see cref="SqlText"/> 使用回车换行，编辑器内部使用换行符。
     /// 控件不直接连接数据库。调用方负责响应 <see cref="ExecuteSelectionRequested"/> 并执行只读校验及查询。
     /// </remarks>
     public sealed class SqlEditorControl : UserControl
     {
         private readonly ISqlFormattingService _formattingService;
-        private readonly TextBox _editor;
-        private readonly Font _font;
+        private readonly ElementHost _host;
+        private readonly TextEditor _editor;
+        private readonly System.Drawing.Font _font;
+        private readonly ContextMenuStrip _menu;
         private readonly ToolStripMenuItem _copyItem;
         private readonly ToolStripMenuItem _executeSelectionItem;
         private readonly ToolStripMenuItem _formatItem;
         private readonly ToolStripMenuItem _commentItem;
 
         /// <summary>创建 SQL 文本编辑器。</summary>
-        /// <param name="formattingService">共享的 SQL 格式化服务。</param>
+        /// <param name="formattingService">共享的 SQL 格式化服务。只用于排版，不负责上色。</param>
         public SqlEditorControl(ISqlFormattingService formattingService)
         {
             _formattingService = formattingService ?? throw new ArgumentNullException(nameof(formattingService));
             _font = AppPresentation.CreateCodeFont();
-            _editor = new TextBox
+            _editor = new TextEditor
+            {
+                FontFamily = new FontFamily(_font.FontFamily.Name),
+                FontSize = _font.SizeInPoints * 96.0 / 72.0,
+                ShowLineNumbers = false,
+                WordWrap = false,
+                HorizontalScrollBarVisibility = WpfScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = WpfScrollBarVisibility.Auto,
+                Background = System.Windows.SystemColors.WindowBrush,
+                Foreground = System.Windows.SystemColors.WindowTextBrush,
+                SyntaxHighlighting = SqlSyntax.Definition
+            };
+            _editor.Options.ConvertTabsToSpaces = false;
+            _editor.Options.CutCopyWholeLine = false;
+            _editor.Options.EnableHyperlinks = false;
+            _editor.Options.EnableEmailHyperlinks = false;
+
+            _host = new ElementHost { Dock = DockStyle.Fill, Child = _editor };
+            Panel border = new Panel
             {
                 Dock = DockStyle.Fill,
-                Multiline = true,
-                AcceptsReturn = true,
-                AcceptsTab = true,
-                WordWrap = false,
-                ScrollBars = ScrollBars.Both,
-                HideSelection = false,
-                MaxLength = 0,
-                Font = _font,
-                BorderStyle = BorderStyle.FixedSingle
+                BackColor = System.Drawing.SystemColors.WindowFrame,
+                Padding = new Padding(1)
             };
+            border.Controls.Add(_host);
+            Controls.Add(border);
+
             _copyItem = new ToolStripMenuItem("复制");
             _executeSelectionItem = new ToolStripMenuItem("执行选中文本");
             _formatItem = new ToolStripMenuItem("格式化 SQL");
             _commentItem = new ToolStripMenuItem("注释/取消注释");
+            _menu = new ContextMenuStrip();
+            _menu.Items.Add(_copyItem);
+            _menu.Items.Add(new ToolStripSeparator());
+            _menu.Items.Add(_executeSelectionItem);
+            _menu.Items.Add(_formatItem);
+            _menu.Items.Add(_commentItem);
+            _menu.Opening += (sender, args) => UpdateMenuState();
 
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add(_copyItem);
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(_executeSelectionItem);
-            menu.Items.Add(_formatItem);
-            menu.Items.Add(_commentItem);
-            menu.Opening += (sender, args) => UpdateMenuState();
-            _editor.ContextMenuStrip = menu;
-            Controls.Add(_editor);
-
-            _editor.KeyDown += EditorKeyDown;
-            _editor.TextChanged += (sender, args) => SqlTextChanged?.Invoke(this, EventArgs.Empty);
+            _editor.TextChanged += EditorTextChanged;
+            _editor.TextArea.PreviewKeyDown += EditorPreviewKeyDown;
+            _editor.TextArea.PreviewMouseRightButtonDown += EditorPreviewMouseRightButtonDown;
             _copyItem.Click += (sender, args) => _editor.Copy();
             _executeSelectionItem.Click += (sender, args) => ExecuteSelectionRequested?.Invoke(this, EventArgs.Empty);
             _formatItem.Click += (sender, args) => FormatSelectionOrAll();
@@ -70,14 +90,15 @@ namespace DB2Sheet.UI
         public event EventHandler SqlTextChanged;
 
         /// <summary>获取或设置编辑器中的 SQL 文本。</summary>
+        /// <remarks>读取时把内部换行符收成回车换行。写入时由编辑器自己规范化换行。</remarks>
         public string SqlText
         {
-            get => _editor.Text;
-            set => _editor.Text = ToEditorNewlines(value);
+            get => ToExternalNewlines(_editor.Text);
+            set => _editor.Text = value ?? string.Empty;
         }
 
         /// <summary>获取当前选中的 SQL 文本。</summary>
-        public string SelectedSql => _editor.SelectedText;
+        public string SelectedSql => ToExternalNewlines(_editor.SelectedText);
 
         /// <summary>获取当前是否存在非空文本选区。</summary>
         public bool HasSelection => _editor.SelectionLength > 0 && !string.IsNullOrWhiteSpace(_editor.SelectedText);
@@ -85,26 +106,32 @@ namespace DB2Sheet.UI
         /// <summary>清空 SQL 并将输入焦点移入编辑器。</summary>
         public void ClearAndFocus()
         {
-            _editor.Clear();
-            _editor.Focus();
+            _editor.Text = string.Empty;
+            FocusEditor();
         }
 
         /// <summary>将输入焦点移入内部文本编辑器。</summary>
         public void FocusEditor()
         {
+            _host.Focus();
             _editor.Focus();
+            _editor.TextArea.Focus();
         }
 
-        /// <summary>释放字体和右键菜单等托管 UI 资源。</summary>
+        /// <summary>释放字体、宿主和右键菜单等托管 UI 资源。</summary>
         /// <param name="disposing">是否释放托管资源。</param>
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                _editor.KeyDown -= EditorKeyDown;
-                _editor.ContextMenuStrip?.Dispose();
+                _editor.TextChanged -= EditorTextChanged;
+                _editor.TextArea.PreviewKeyDown -= EditorPreviewKeyDown;
+                _editor.TextArea.PreviewMouseRightButtonDown -= EditorPreviewMouseRightButtonDown;
+                _menu.Dispose();
+                _host.Dispose();
                 _font.Dispose();
             }
+
             base.Dispose(disposing);
         }
 
@@ -120,21 +147,37 @@ namespace DB2Sheet.UI
             ToggleLineComments();
         }
 
-        private void EditorKeyDown(object sender, KeyEventArgs e)
+        private void EditorTextChanged(object sender, EventArgs e)
         {
-            if (e.Control && (e.KeyCode == Keys.OemQuestion || e.KeyCode == Keys.Oem2))
+            SqlTextChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void EditorPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            System.Windows.Input.ModifierKeys modifiers = Keyboard.Modifiers;
+            bool control = (modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control;
+            bool shift = (modifiers & System.Windows.Input.ModifierKeys.Shift) == System.Windows.Input.ModifierKeys.Shift;
+            if (control && !shift && (e.Key == Key.Oem2 || e.Key == Key.Divide))
             {
                 ToggleLineComments();
                 e.Handled = true;
-                e.SuppressKeyPress = true;
                 return;
             }
 
-            if (e.KeyCode != Keys.Tab) return;
+            if (e.Key != Key.Tab || control) return;
 
-            ChangeSelectionIndent(e.Shift);
+            ChangeSelectionIndent(shift);
             e.Handled = true;
-            e.SuppressKeyPress = true;
+        }
+
+        /// <summary>右键弹出原有菜单，不移动插入点，以便选区执行仍针对右键前的选区。</summary>
+        /// <param name="sender">文本区。</param>
+        /// <param name="e">鼠标事件。标记为已处理，避免编辑器改选区。</param>
+        private void EditorPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            e.Handled = true;
+            FocusEditor();
+            _menu.Show(System.Windows.Forms.Cursor.Position);
         }
 
         private void FormatSelectionOrAll()
@@ -142,10 +185,9 @@ namespace DB2Sheet.UI
             bool hasSelection = _editor.SelectionLength > 0;
             int start = hasSelection ? _editor.SelectionStart : 0;
             string segment = hasSelection ? _editor.SelectedText : _editor.Text;
-            string formatted = ToEditorNewlines(_formattingService.Format(segment));
-            int length = hasSelection ? _editor.SelectionLength : _editor.TextLength;
-            _editor.Select(start, length);
-            _editor.SelectedText = formatted;
+            string formatted = ToDocumentNewlines(_formattingService.Format(segment));
+            int length = hasSelection ? _editor.SelectionLength : _editor.Document.TextLength;
+            _editor.Document.Replace(start, length, formatted);
             _editor.Select(start, formatted.Length);
         }
 
@@ -181,15 +223,14 @@ namespace DB2Sheet.UI
                 }
             }
 
-            ReplaceEditorText(start, end - start, string.Join("\n", lines));
+            ReplaceDocument(start, end - start, string.Join("\n", lines));
         }
 
         private void ChangeSelectionIndent(bool outdent)
         {
             GetAffectedLineRange(out int start, out int end);
             int blockLength = Math.Max(0, end - start);
-            _editor.Select(start, blockLength);
-            string block = _editor.SelectedText;
+            string block = _editor.Document.GetText(start, blockLength);
             string[] lines = SplitLinesPreservingTrailingBreak(block);
             for (int index = 0; index < lines.Length; index++)
             {
@@ -206,28 +247,36 @@ namespace DB2Sheet.UI
                 }
             }
 
-            ReplaceEditorText(start, end - start, string.Join("\n", lines));
+            ReplaceDocument(start, end - start, string.Join("\n", lines));
         }
 
-        /// <summary>把文本写回编辑器。普通文本框只把回车换行当成换行，单独的换行符会被忽略。</summary>
-        /// <param name="start">替换起点。</param>
+        /// <summary>替换文档中的一段，并选中替换结果里除末尾换行以外的部分。</summary>
+        /// <param name="start">替换起点，按编辑器内部偏移。</param>
         /// <param name="length">被替换的原文字符数。</param>
-        /// <param name="value">新文本，换行可以是换行符或回车换行。</param>
-        private void ReplaceEditorText(int start, int length, string value)
+        /// <param name="value">新文本。换行会收成换行符。</param>
+        private void ReplaceDocument(int start, int length, string value)
         {
-            string replacement = ToEditorNewlines(value);
-            _editor.Select(start, length);
-            _editor.SelectedText = replacement;
+            string replacement = ToDocumentNewlines(value);
+            _editor.Document.Replace(start, length, replacement);
             _editor.Select(start, SelectionLengthWithoutTrailingBreak(replacement));
         }
 
-        /// <summary>把各种换行收成文本框要求的回车换行。</summary>
+        /// <summary>把各种换行收成编辑器内部使用的换行符。</summary>
         /// <param name="value">待写入的文本。</param>
-        /// <returns>只含回车换行的文本。空文本原样返回。</returns>
-        private static string ToEditorNewlines(string value)
+        /// <returns>只含换行符的文本。空文本原样返回。</returns>
+        private static string ToDocumentNewlines(string value)
         {
             if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
-            return value.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
+            return value.Replace("\r\n", "\n").Replace('\r', '\n');
+        }
+
+        /// <summary>把编辑器内部的换行符收成对外的回车换行。</summary>
+        /// <param name="value">编辑器文本。</param>
+        /// <returns>只含回车换行的文本。空文本原样返回。</returns>
+        private static string ToExternalNewlines(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            return ToDocumentNewlines(value).Replace("\n", "\r\n");
         }
 
         private static int SelectionLengthWithoutTrailingBreak(string replacement)
@@ -241,7 +290,8 @@ namespace DB2Sheet.UI
 
         private void GetAffectedLineRange(out int start, out int end)
         {
-            int textLength = _editor.TextLength;
+            TextDocument document = _editor.Document;
+            int textLength = document.TextLength;
             if (textLength <= 0)
             {
                 start = 0;
@@ -251,7 +301,7 @@ namespace DB2Sheet.UI
 
             int selectionStart = _editor.SelectionStart;
             int selectionLength = _editor.SelectionLength;
-            int startLine = _editor.GetLineFromCharIndex(selectionStart);
+            DocumentLine startLine = document.GetLineByOffset(selectionStart);
             int endIndex;
             if (selectionLength <= 0)
             {
@@ -262,19 +312,16 @@ namespace DB2Sheet.UI
                 int selectionEnd = selectionStart + selectionLength;
                 int lastIncluded = Math.Min(selectionEnd, textLength) - 1;
                 if (lastIncluded < selectionStart) lastIncluded = selectionStart;
-                int endLine = _editor.GetLineFromCharIndex(lastIncluded);
-                int lineStart = _editor.GetFirstCharIndexFromLine(endLine);
-                if (selectionEnd == lineStart && selectionEnd > selectionStart && endLine > startLine)
+                DocumentLine endLine = document.GetLineByOffset(lastIncluded);
+                if (selectionEnd == endLine.Offset && selectionEnd > selectionStart && endLine.LineNumber > startLine.LineNumber)
                     endIndex = selectionEnd - 1;
                 else
                     endIndex = lastIncluded;
             }
 
-            int lastLine = _editor.GetLineFromCharIndex(Math.Min(Math.Max(endIndex, 0), textLength - 1));
-            start = _editor.GetFirstCharIndexFromLine(startLine);
-            end = lastLine + 1 < _editor.Lines.Length
-                ? _editor.GetFirstCharIndexFromLine(lastLine + 1)
-                : textLength;
+            DocumentLine lastLine = document.GetLineByOffset(Math.Min(Math.Max(endIndex, 0), textLength - 1));
+            start = startLine.Offset;
+            end = lastLine.Offset + lastLine.TotalLength;
         }
 
         private static string[] SplitLinesPreservingTrailingBreak(string block)
@@ -287,8 +334,8 @@ namespace DB2Sheet.UI
         {
             _copyItem.Enabled = _editor.SelectionLength > 0;
             _executeSelectionItem.Enabled = HasSelection;
-            _formatItem.Enabled = _editor.TextLength > 0;
-            _commentItem.Enabled = _editor.TextLength > 0;
+            _formatItem.Enabled = _editor.Document.TextLength > 0;
+            _commentItem.Enabled = _editor.Document.TextLength > 0;
         }
     }
 }

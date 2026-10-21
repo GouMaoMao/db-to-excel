@@ -43,6 +43,7 @@
 - MySQL、PostgreSQL、SQLite 和 DuckDB 的托管程序集，输出目录中的 `duckdb.dll`，以及 `x64\SQLite.Interop.dll`。
 - 不包含 JDK，也不包含 MaxCompute 或其他厂商的 JDBC 驱动。用户不用单独安装 DuckDB。
 - `runtimes\win-x64\native\WebView2Loader.dll` 与 `runtimes\win-x86\native\WebView2Loader.dll`，以及 WebView2、Markdig 的托管程序集。不包含 WebView2 固定版运行库。目标机器需要已安装的 Evergreen WebView2 运行库；插件不下载它。
+- `ICSharpCode.AvalonEdit.dll`。SQL 编辑器和 SQL 页高亮使用它。不包含该程序集的 XML 文档，也不另带 WPF 运行库；WPF 随 .NET Framework 4.7.2 提供。
 - 不必单独包含 `db2sheet-jdbc-bridge.jar`。它已嵌入 `DB2Sheet.dll`，首次使用 JDBC 时释放到 `%LocalAppData%\DB2Sheet\db2sheet-jdbc-bridge.jar`。用户通过「JDBC 环境」检测或指定本机 `java.exe`；厂商驱动 jar 在连接方案里选择。
 
 代码签名、Office 位数、安装范围和卸载时是否保留用户数据见「尚待决定」。当前发布脚本不签名。

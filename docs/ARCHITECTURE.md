@@ -102,7 +102,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `ConnectionProfileEditForm`：由 Provider 参数元数据动态生成字段。
 - `ConnectionProfilesForm`：连接方案增删改。
 - `SettingsForm`：由设置注册表动态生成编辑界面。
-- `QueryEditorForm`：交互式 SQL 查询。
+- `QueryEditorForm`：交互式 SQL 查询。编辑器是 AvalonEdit，语法高亮使用其自带的 T-SQL 定义；SQL 页正文美化使用同一份定义。
 - `SheetRefreshForm`：SQL Sheet 任务展示和批量刷新。
 - `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
 - `LocalDataForm`：只列出连接、查询、Skill 等本机路径，不改保存位置。
