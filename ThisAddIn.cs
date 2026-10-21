@@ -103,7 +103,7 @@ namespace DB2Sheet
         }
 
         /// <summary>打开或激活 SQL 查询单实例窗体。</summary>
-        /// <remarks>还没有连接方案时不创建窗体，提示先到连接管理新建。已经打开时只激活。</remarks>
+        /// <remarks>还没有连接方案时不创建窗体，提示先到连接管理新建。第一次打开在布局完成前保持透明。已经打开时只激活。</remarks>
         private void OpenQueryEditor()
         {
             ExecuteUiAction(() =>
@@ -112,11 +112,18 @@ namespace DB2Sheet
                 if (_queryEditorForm == null || _queryEditorForm.IsDisposed)
                 {
                     if (!EnsureConnectionProfile("SQL 查询")) return;
-                    _queryEditorForm = new QueryEditorForm(
-                        _queries, _connections, _providers, _executionService, _queryBuffer,
-                        _resultWriter, _taskReader, _operationRunner, _settings, workbook, _jdbcEnvironment, _assistant, OpenJdbcEnvironment);
-                    _queryEditorForm.FormClosed += (sender, args) => _queryEditorForm = null;
-                    _queryEditorForm.Show();
+                    OpenPreparedForm(() =>
+                    {
+                        QueryEditorForm created = new QueryEditorForm(
+                            _queries, _connections, _providers, _executionService, _queryBuffer,
+                            _resultWriter, _taskReader, _operationRunner, _settings, workbook, _jdbcEnvironment, _assistant, OpenJdbcEnvironment);
+                        created.FormClosed += (sender, args) =>
+                        {
+                            if (ReferenceEquals(_queryEditorForm, created))
+                                _queryEditorForm = null;
+                        };
+                        return created;
+                    }, form => _queryEditorForm = (QueryEditorForm)form);
                 }
                 else
                 {
@@ -126,7 +133,7 @@ namespace DB2Sheet
         }
 
         /// <summary>打开或激活批量刷新单实例窗体。</summary>
-        /// <remarks>先确认有 SQL 工作表，再确认至少有一个连接方案。任一不满足都不创建窗体。已经打开时只激活。</remarks>
+        /// <remarks>先确认有 SQL 工作表，再确认至少有一个连接方案。任一不满足都不创建窗体。第一次打开在布局完成前保持透明。已经打开时只激活。</remarks>
         private void OpenSheetRefresh()
         {
             ExecuteUiAction(() =>
@@ -145,18 +152,78 @@ namespace DB2Sheet
                     }
 
                     if (!EnsureConnectionProfile("Sheet 批量刷新")) return;
-                    _sheetRefreshForm = new SheetRefreshForm(
-                        _connections, _providers, _executionService, _operationRunner, _settings,
-                        _taskReader, _batchRefresh, workbook, _jdbcEnvironment, OpenJdbcEnvironment,
-                        OpenSqlSheetFormatSettings);
-                    _sheetRefreshForm.FormClosed += (sender, args) => _sheetRefreshForm = null;
-                    _sheetRefreshForm.Show();
+                    OpenPreparedForm(() =>
+                    {
+                        SheetRefreshForm created = new SheetRefreshForm(
+                            _connections, _providers, _executionService, _operationRunner, _settings,
+                            _taskReader, _batchRefresh, workbook, _jdbcEnvironment, OpenJdbcEnvironment,
+                            OpenSqlSheetFormatSettings);
+                        created.FormClosed += (sender, args) =>
+                        {
+                            if (ReferenceEquals(_sheetRefreshForm, created))
+                                _sheetRefreshForm = null;
+                        };
+                        return created;
+                    }, form => _sheetRefreshForm = (SheetRefreshForm)form);
                 }
                 else
                 {
                     ActivateForm(_sheetRefreshForm);
                 }
             });
+        }
+
+        /// <summary>创建并显示功能窗体。布局完成前保持透明，再一次画出来。</summary>
+        /// <param name="create">创建窗体并挂上关闭回调。</param>
+        /// <param name="opened">窗体已经显示但仍透明时收下实例。失败关闭会先于这一步，或在关闭回调里清掉。</param>
+        /// <remarks>
+        /// 必须在 Excel 界面线程调用。打开过程只显示功能窗体本身。
+        /// 创建或显示失败时关掉已经创建的窗体，再把异常交给调用方。仍透明时的后续失败同样关掉窗体。
+        /// </remarks>
+        private static void OpenPreparedForm(Func<AppForm> create, Action<AppForm> opened)
+        {
+            if (create == null) throw new ArgumentNullException(nameof(create));
+            AppForm form = null;
+            try
+            {
+                form = create();
+                if (form == null) throw new InvalidOperationException("没有创建窗体。");
+                form.Show();
+                if (opened != null) opened(form);
+            }
+            catch (Exception)
+            {
+                CloseOpeningForm(form);
+                throw;
+            }
+
+            try
+            {
+                form.RevealFirstShow();
+                form.Activate();
+            }
+            catch (Exception)
+            {
+                if (!form.IsDisposed && form.Opacity < 1)
+                    CloseOpeningForm(form);
+                throw;
+            }
+        }
+
+        /// <summary>打开失败时关掉已经创建的功能窗体，避免它停在透明状态。</summary>
+        /// <param name="form">可能为空或已释放的窗体。</param>
+        /// <remarks>关闭过程的异常只用于清理，不再向外抛。</remarks>
+        private static void CloseOpeningForm(Form form)
+        {
+            if (form == null || form.IsDisposed) return;
+            try
+            {
+                form.Close();
+            }
+            catch (Exception)
+            {
+                // 打开已经失败。关闭时的异常不能盖住原来的错误。
+            }
         }
 
         /// <summary>没有连接方案时提示先去连接管理新建。</summary>

@@ -23,6 +23,7 @@ namespace DB2Sheet.UI
     /// 单击勾选框切换该行并记为连续勾选的起点。按住 Shift 点击时，把起点那次的勾选结果写到起点与该行之间，且不跳转。
     /// 「格式」菜单美化 SQL 页，或打开参数设置的「sql页格式」。美化走进度窗，按列推进，可取消。
     /// 窗体尺寸沿用会话记忆；左右比例只在用户拖动分割条时写入。
+    /// 第一次显示保持透明，任务在这时读完。重名和读取错误等窗体显示后再提示。
     /// </remarks>
     public sealed class SheetRefreshForm : AppForm
     {
@@ -77,7 +78,16 @@ namespace DB2Sheet.UI
         /// <summary>Shift 点击结束参数格的编辑时不把内容写回 SQL 页。</summary>
         private bool _discardEdit;
 
-        /// <summary>首次显示前已经扫过任务。紧接着的那次激活不再重扫，避免同一次打开读两遍 SQL 页。</summary>
+        /// <summary>首次显示还没画出来。这段时间的激活不读 SQL 页。</summary>
+        private bool _opening;
+
+        /// <summary>首次读取正在把重名和错误留到窗体显示之后。</summary>
+        private bool _deferScanNotices;
+
+        /// <summary>首次读取时延后的重名警告和错误详情，窗体显示后再按原顺序弹出。</summary>
+        private readonly List<Action> _deferredScanNotices = new List<Action>();
+
+        /// <summary>显示后紧接着的那次激活不再重扫，避免同一次打开读两遍 SQL 页。若没有这次激活，下一条界面消息会清掉标记。</summary>
         private bool _skipActivateScan;
         private string _scanSummary = "正在读取 SQL 页。";
 
@@ -244,19 +254,56 @@ namespace DB2Sheet.UI
             UpdateModeLabel();
         }
 
+        /// <summary>首次显示在最终布局完成前保持完全透明。</summary>
+        protected override bool DeferFirstShow
+        {
+            get { return true; }
+        }
+
+        /// <summary>透明显示之前挡住激活，避免和准备阶段各读一遍 SQL 页。</summary>
+        protected override void OnFirstShowOpening()
+        {
+            _opening = true;
+        }
+
+        /// <summary>窗体已经画出来之后，再弹出首次读取留下的重名警告和错误详情。</summary>
+        /// <remarks>提示会进入自己的消息循环。打开标记保持到提示结束，避免对话框关掉时重扫。</remarks>
+        protected override void OnFirstShowRevealed()
+        {
+            try
+            {
+                ShowDeferredFirstScanNotices();
+            }
+            finally
+            {
+                _opening = false;
+                _skipActivateScan = true;
+                if (IsHandleCreated && !IsDisposed)
+                    BeginInvoke(new Action(ReleaseSkippedActivateScan));
+            }
+        }
+
         /// <summary>
-        /// 窗口仍隐藏时按最终宽度摆分栏，并读完 SQL 页任务。
-        /// 显示之后再改分割条或逐行填表，会把上一帧留在屏幕上。
+        /// 窗口已经按最终宽度显示，但仍然完全透明。
+        /// 在这里摆分栏并读完 SQL 页任务。显示之后再改分割条或逐行填表，会把上一帧留在屏幕上。
         /// </summary>
         protected override void PrepareFirstShow()
         {
             ApplySplit();
-            ScanTasks();
-            _skipActivateScan = true;
+            _deferScanNotices = true;
+            try
+            {
+                ScanTasks();
+            }
+            finally
+            {
+                _deferScanNotices = false;
+            }
         }
 
         private void SheetRefreshFormActivated(object sender, EventArgs e)
         {
+            if (_opening) return;
             if (_skipActivateScan)
             {
                 _skipActivateScan = false;
@@ -335,8 +382,16 @@ namespace DB2Sheet.UI
         }
 
         /// <summary>弹出错误详情时先挡住激活事件，避免对话框关闭后立刻重扫并打断当前编辑。</summary>
+        /// <remarks>首次读取时窗体还是透明的，只记下异常，等窗体显示后再弹。</remarks>
         private void ShowOwnedError(Exception exception)
         {
+            if (_deferScanNotices)
+            {
+                Exception captured = exception;
+                _deferredScanNotices.Add(() => ShowOwnedError(captured));
+                return;
+            }
+
             PushActivateSuppress();
             try
             {
@@ -360,10 +415,34 @@ namespace DB2Sheet.UI
             if (_activateSuppressDepth > 0) _activateSuppressDepth--;
         }
 
+        /// <summary>清掉“显示后跳过一次激活重扫”的标记。窗体已经释放时什么也不做。</summary>
+        private void ReleaseSkippedActivateScan()
+        {
+            if (IsDisposed) return;
+            _skipActivateScan = false;
+        }
+
+        /// <summary>按首次读取时的顺序弹出延后的重名警告和错误详情。</summary>
+        private void ShowDeferredFirstScanNotices()
+        {
+            if (_deferredScanNotices.Count == 0) return;
+            Action[] notices = _deferredScanNotices.ToArray();
+            _deferredScanNotices.Clear();
+            foreach (Action notice in notices)
+                notice();
+        }
+
+        /// <summary>目标表重名时提示。首次读取先记下，等窗体显示后再弹。</summary>
         private void ShowDuplicateWarning()
         {
             string message = SqlSheetHeader.DescribeDuplicateTargets(_rows.Select(item => item.Task).ToList());
             if (string.IsNullOrEmpty(message)) return;
+            if (_deferScanNotices)
+            {
+                _deferredScanNotices.Add(ShowDuplicateWarning);
+                return;
+            }
+
             PushActivateSuppress();
             try
             {

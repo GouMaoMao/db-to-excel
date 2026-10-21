@@ -23,6 +23,7 @@ namespace DB2Sheet.UI
     /// 用户输入包括连接方案、SQL 和方案名称。写入时另问目标工作表，并可把 SQL 写入 SQL 页。
     /// 预览右键把已显示的结果复制到剪贴板，或另存为 xlsx。另存不重新查询，也不修改当前工作簿。
     /// 输出副作用包括保存查询方案和修改当前工作簿。页签在界面线程上增减，不访问 Excel。
+    /// 第一次显示保持透明，分栏按最终尺寸摆完后再画出来。
     /// </remarks>
     public sealed class QueryEditorForm : AppForm
     {
@@ -961,9 +962,15 @@ namespace DB2Sheet.UI
             TrySetSplitterDistance(_resultsSplit, available / 2);
         }
 
+        /// <summary>首次显示在最终布局完成前保持完全透明。</summary>
+        protected override bool DeferFirstShow
+        {
+            get { return true; }
+        }
+
         /// <summary>
-        /// 窗口仍隐藏时按最终客户区摆左右分栏，并把左栏上下分成两半。
-        /// 显示之后再改分割条会把旧位置留在屏幕上。
+        /// 窗口已经按最终尺寸显示，但仍然完全透明。
+        /// 在这里摆左右分栏，并把左栏上下分成两半。显示之后再改分割条会把旧位置留在屏幕上。
         /// </summary>
         protected override void PrepareFirstShow()
         {
