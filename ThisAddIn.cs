@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Drawing;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
 using DB2Sheet.Excel;
@@ -177,15 +178,20 @@ namespace DB2Sheet
         /// <param name="create">创建窗体并挂上关闭回调。</param>
         /// <param name="opened">窗体已经显示但仍透明时收下实例。失败关闭会先于这一步，或在关闭回调里清掉。</param>
         /// <remarks>
-        /// 必须在 Excel 界面线程调用。打开过程只显示功能窗体本身。
+        /// 必须在 Excel 界面线程调用。首开准备期间会显示轻量无边框提示窗，主窗体完成首次展示后立即关闭。
         /// 创建或显示失败时关掉已经创建的窗体，再把异常交给调用方。仍透明时的后续失败同样关掉窗体。
         /// </remarks>
         private static void OpenPreparedForm(Func<AppForm> create, Action<AppForm> opened)
         {
             if (create == null) throw new ArgumentNullException(nameof(create));
             AppForm form = null;
+            OpeningHintForm hint = null;
             try
             {
+                hint = new OpeningHintForm();
+                hint.PlaceCenter(Rectangle.Empty);
+                hint.Show();
+                hint.Refresh();
                 form = create();
                 if (form == null) throw new InvalidOperationException("没有创建窗体。");
                 form.Show();
@@ -194,6 +200,7 @@ namespace DB2Sheet
             catch (Exception)
             {
                 CloseOpeningForm(form);
+                CloseOpeningHint(hint);
                 throw;
             }
 
@@ -207,6 +214,10 @@ namespace DB2Sheet
                 if (!form.IsDisposed && form.Opacity < 1)
                     CloseOpeningForm(form);
                 throw;
+            }
+            finally
+            {
+                CloseOpeningHint(hint);
             }
         }
 
@@ -223,6 +234,21 @@ namespace DB2Sheet
             catch (Exception)
             {
                 // 打开已经失败。关闭时的异常不能盖住原来的错误。
+            }
+        }
+
+        /// <summary>结束首开提示层。清理失败时忽略异常，避免遮盖主流程结果。</summary>
+        /// <param name="hint">可能为空或已释放的提示窗。</param>
+        private static void CloseOpeningHint(Form hint)
+        {
+            if (hint == null || hint.IsDisposed) return;
+            try
+            {
+                hint.Close();
+            }
+            catch (Exception)
+            {
+                // 仅用于清理提示层，不能影响主窗体打开结果。
             }
         }
 

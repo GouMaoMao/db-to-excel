@@ -263,6 +263,9 @@
     </Compile>
     <Compile Include="UI\FormSizeMemory.cs" />
     <Compile Include="UI\AppPresentation.cs" />
+	<Compile Include="UI\OpeningHintForm.cs">
+		<SubType>Form</SubType>
+	</Compile>
     <Compile Include="UI\DatabaseTreeImageCatalog.cs" />
     <Compile Include="UI\SqlEditorControl.cs">
       <SubType>UserControl</SubType>

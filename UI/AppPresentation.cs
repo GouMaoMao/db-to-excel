@@ -20,6 +20,9 @@ namespace DB2Sheet.UI
         public const string LogFontName = "Consolas";
         public const float LogFontSize = 9F;
 
+        /// <summary>功能窗体首开准备期间的轻量提示文案。</summary>
+        public const string OpeningHintText = "正在打开…";
+
         /// <summary>SQL 工作表单元格和 SQL 编辑器使用的等宽字体。</summary>
         public const string SqlSheetFontName = "Cascadia Code Light";
 
