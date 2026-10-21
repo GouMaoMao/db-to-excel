@@ -27,6 +27,8 @@ namespace DB2Sheet.UI
             new[] { "zhipu", "llm_zhipu.png" },
             new[] { "智谱", "llm_zhipu.png" },
             new[] { "glm", "llm_zhipu.png" },
+            new[] { "doubao", "llm_doubao.png" },
+            new[] { "豆包", "llm_doubao.png" },
             new[] { "openai", "llm_openai.png" },
             new[] { "gpt", "llm_openai.png" }
         };

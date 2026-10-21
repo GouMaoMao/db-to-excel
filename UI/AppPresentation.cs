@@ -188,7 +188,7 @@ namespace DB2Sheet.UI
 
         /// <summary>模型设置窗顶部的协议说明。不做成可选模板。</summary>
         public const string AiProtocolHelp =
-            "OpenAI 兼容：OpenAI、DeepSeek、MiniMax、Kimi、通义千问、智谱，以及大多数兼容网关。\r\n"
+            "OpenAI 兼容：OpenAI、DeepSeek、MiniMax、Kimi、通义千问、智谱、豆包，以及大多数兼容网关。\r\n"
             + "Claude：Anthropic 官方接口上的 Claude。\r\n"
             + "Gemini：Google 官方 generateContent 接口上的 Gemini。\r\n"
             + "Claude 或 Gemini 若通过 OpenAI 兼容网关接入，协议仍选 OpenAI 兼容。";
@@ -318,7 +318,8 @@ namespace DB2Sheet.UI
             "复制AI生成的SQL代码到SQL编辑器区域执行。使用者必须理解SQL代码逻辑，再使用。",
             "模型切换：不同模型在生成质量、响应速度、Token消耗上存在区别。",
             "Skills：为AI注入场景知识，显著提升生成SQL的准确性。",
-            "Token：对话文本的计费单位，描述越简洁消耗越低；不建议引用MB级别的文件给AI，会大幅增加token消耗。"
+            "Token：对话文本的计费单位，描述越简洁消耗越低；不建议引用MB级别的文件给AI，会大幅增加token消耗。",
+            "对话过长、更换业务查询需求时建议新开对话，减少历史对话干扰，降低Token开销。"
         };
 
         private static readonly Random HintRandom = new Random();
