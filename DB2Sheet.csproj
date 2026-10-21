@@ -313,6 +313,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="UI\CloseMark.cs" />
+    <Compile Include="UI\DropDownCloser.cs" />
     <Compile Include="UI\HintButton.cs" />
     <Compile Include="UI\LightBorder.cs" />
     <Compile Include="UI\AiModelIcons.cs" />

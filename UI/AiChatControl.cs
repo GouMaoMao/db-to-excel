@@ -101,6 +101,7 @@ namespace DB2Sheet.UI
         private readonly List<string> _skillIds = new List<string>();
         private bool _skillChoiceLoaded;
         private bool _keepSkillMenu;
+        private Form _host;
         private string _pendingConversationId;
         private string _pendingUser;
         private List<AiSentSection> _pendingSent;
@@ -163,12 +164,14 @@ namespace DB2Sheet.UI
             _modelButton.TextImageRelation = TextImageRelation.ImageBeforeText;
             _modelButton.Padding = new Padding(2, 0, 10, 0);
             _skillButton.TextImageRelation = TextImageRelation.ImageBeforeText;
-            _modelButton.Click += (sender, args) => _modelMenu.Show(_modelButton, new Point(0, 0), ToolStripDropDownDirection.AboveRight);
-            _skillButton.Click += (sender, args) => _skillMenu.Show(_skillButton, new Point(0, _skillButton.Height));
+            DropDownCloser.BindToggle(_modelButton, _modelMenu, () => _modelMenu.Show(_modelButton, new Point(0, 0), ToolStripDropDownDirection.AboveRight));
+            DropDownCloser.BindToggle(_skillButton, _skillMenu, () => _skillMenu.Show(_skillButton, new Point(0, _skillButton.Height)));
+            _skillMenu.ItemClicked += SkillMenuItemClicked;
             _skillMenu.Closing += SkillMenuClosing;
             _sqlRef.MouseDown += SqlRefMouseDown;
             _input.KeyDown += InputKeyDown;
             _input.TextChanged += InputTextChanged;
+            _input.LostFocus += (sender, args) => BeginInvoke(new Action(HideMentionUnlessInside));
             _send.Click += SendButtonClick;
             _mention = new MentionPopup(AcceptMention, MentionIcon);
             _emptyButton = HintButton.Create(AppPresentation.EmptyConversationCaption);
@@ -253,7 +256,8 @@ namespace DB2Sheet.UI
             _tabs.Dock = DockStyle.Fill;
             tabBar.Controls.Add(_tabs);
             tabBar.Controls.Add(TabIconButton("icon_session_add.png", AppPresentation.AiNewConversationTip, (sender, args) => StartConversation("新对话", string.Empty, false)));
-            Button historyButton = TabIconButton("icon_session_history.png", AppPresentation.AiArchivedTip, (sender, args) => ShowHistoryMenu((Control)sender));
+            Button historyButton = TabIconButton("icon_session_history.png", AppPresentation.AiArchivedTip, null);
+            DropDownCloser.BindToggle(historyButton, _historyMenu, () => ShowHistoryMenu(historyButton));
             tabBar.Controls.Add(historyButton);
             if (_closePanel != null)
                 tabBar.Controls.Add(TabIconButton("icon_close.png", AppPresentation.AiCloseChatTip, (sender, args) => _closePanel()));
@@ -358,6 +362,8 @@ namespace DB2Sheet.UI
                 _assistant.Conversations.Changed -= ConversationsChanged;
                 _assistant.Models.Changed -= ChoicesChanged;
                 _assistant.Skills.Changed -= ChoicesChanged;
+                if (_host != null)
+                    _host.Move -= HostMoved;
                 _tips.Dispose();
                 _view.Dispose();
                 _tabMenu.Dispose();
@@ -388,8 +394,21 @@ namespace DB2Sheet.UI
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            Form host = FindForm();
+            if (host != null && _host == null)
+            {
+                _host = host;
+                _host.Move += HostMoved;
+            }
+
             if (IsHandleCreated)
                 BeginInvoke(new Action(BeginBrowser));
+        }
+
+        /// <summary>宿主窗体移动后引用弹窗会错位，直接收起。</summary>
+        private void HostMoved(object sender, EventArgs e)
+        {
+            HideMention();
         }
 
         private async void BeginBrowser()
@@ -404,10 +423,12 @@ namespace DB2Sheet.UI
                 if (IsDisposed || _view.CoreWebView2 == null) return;
                 CoreWebView2Settings settings = _view.CoreWebView2.Settings;
                 settings.AreDefaultScriptDialogsEnabled = false;
-                settings.IsWebMessageEnabled = false;
+                // 只用来接收页面「按下鼠标」的通知，宿主不开放任何对象。
+                settings.IsWebMessageEnabled = true;
                 settings.AreHostObjectsAllowed = false;
                 settings.AreDevToolsEnabled = false;
                 settings.IsStatusBarEnabled = false;
+                _view.CoreWebView2.WebMessageReceived += TranscriptMessageReceived;
                 _view.CoreWebView2.NewWindowRequested += (sender, args) => { args.Handled = true; };
                 _view.CoreWebView2.NavigationStarting += (sender, args) =>
                 {
@@ -1038,6 +1059,36 @@ namespace DB2Sheet.UI
                 _mention.Hide();
         }
 
+        /// <summary>输入框失去焦点后收起引用弹窗。鼠标正点在弹窗上时保留，让单击能选中条目。</summary>
+        /// <remarks>由 <see cref="Control.BeginInvoke(Delegate)"/> 延后调用，此时焦点已经落到新位置。</remarks>
+        private void HideMentionUnlessInside()
+        {
+            if (IsDisposed || _mention == null || !_mention.Visible || _input.Focused) return;
+            if (_mention.Bounds.Contains(Cursor.Position)) return;
+            HideMention();
+        }
+
+        /// <summary>对话正文是另一个进程的窗口，点在那里 WinForms 收不到，由页面脚本通知后在这里收起下拉和引用弹窗。</summary>
+        /// <param name="sender">WebView2 核心对象。</param>
+        /// <param name="e">页面消息。只认固定的 pointerdown，其余忽略。</param>
+        private void TranscriptMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            string message;
+            try
+            {
+                message = e.TryGetWebMessageAsString();
+            }
+            catch (ArgumentException)
+            {
+                // 页面发来的不是字符串，与本功能无关，直接忽略。
+                return;
+            }
+
+            if (!string.Equals(message, "pointerdown", StringComparison.Ordinal)) return;
+            DropDownCloser.CloseAll();
+            HideMention();
+        }
+
         private void AcceptMention(MentionChoice choice)
         {
             HideMention();
@@ -1274,7 +1325,7 @@ namespace DB2Sheet.UI
         /// <summary>页签条右侧的图标按钮。图像由本控件在释放时丢掉。</summary>
         /// <param name="fileName">Resources 下的文件名。</param>
         /// <param name="tip">悬浮说明。</param>
-        /// <param name="click">点击动作。</param>
+        /// <param name="click">点击动作。为 null 时由调用方另行绑定，例如与下拉配对的开合切换。</param>
         /// <returns>停靠在右侧、宽 40 的平按钮。高度随 40 像素页签条，点按区域是正方形。</returns>
         private Button TabIconButton(string fileName, string tip, EventHandler click)
         {
@@ -1705,19 +1756,17 @@ namespace DB2Sheet.UI
             _settings.Set(CoreSettings.AiModelChoice, _modelId + "|" + _modelName);
         }
 
-        /// <summary>勾选或取消一条 Skill。点「不使用」则清掉全部并让菜单收起。</summary>
+        /// <summary>勾选或取消一条 Skill。点「不使用」则清掉全部。菜单是否收起由 <see cref="SkillMenuItemClicked"/> 决定。</summary>
         /// <param name="clear">为 true 时清掉全部勾选。</param>
         /// <param name="id">要切换的 Skill 标识。清掉时忽略。</param>
         private void ToggleSkill(bool clear, string id)
         {
             if (clear)
             {
-                _keepSkillMenu = false;
                 _skillIds.Clear();
             }
             else
             {
-                _keepSkillMenu = true;
                 if (SkillChosen(id))
                     _skillIds.RemoveAll(existing => string.Equals(existing, id, StringComparison.OrdinalIgnoreCase));
                 else if (!string.IsNullOrEmpty(id))
@@ -1729,7 +1778,16 @@ namespace DB2Sheet.UI
             RememberSkillChoice();
         }
 
-        /// <summary>勾选 Skill 时不收起菜单，方便连续勾。点「不使用」或末项时照常收起。</summary>
+        /// <summary>记下这次点的是不是某条 Skill。菜单在本事件之后、菜单项单击之前关闭，所以要在这里判断。</summary>
+        /// <param name="sender">Skill 菜单。</param>
+        /// <param name="e">被点的菜单项。</param>
+        private void SkillMenuItemClicked(object sender, ToolStripItemClickedEventArgs e)
+        {
+            int index = _skillMenu.Items.IndexOf(e.ClickedItem);
+            _keepSkillMenu = index >= 0 && index < _skills.Count && _skills[index].Skill != null;
+        }
+
+        /// <summary>勾选 Skill 时不收起菜单，方便连续勾。点「不使用」、末项或菜单外面时照常收起。</summary>
         /// <param name="sender">Skill 菜单。</param>
         /// <param name="e">关闭原因。取消后菜单留在原处。</param>
         private void SkillMenuClosing(object sender, ToolStripDropDownClosingEventArgs e)

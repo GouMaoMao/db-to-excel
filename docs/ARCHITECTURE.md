@@ -108,7 +108,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `LocalDataForm`：只列出连接、查询、Skill 等本机路径，不改保存位置。
 - `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」、「AI 设置」（模型设置、Skill 设置）、「JDBC 环境」和「本地数据」。关于组显示版本。
 - `AiModelSettingsForm` / `AiSkillSettingsForm`：模型与 Skill。协议和发送边界见 `.github/copilot-instructions.md` 的「AI 助手」。
-- `AiChatControl`：SQL 查询窗右侧的对话，以及报错时弹出的 `AiChatForm`。正文用 WebView2 显示。只提问，不执行 SQL。
+- `AiChatControl`：SQL 查询窗右侧的对话，以及报错时弹出的 `AiChatForm`。正文用 WebView2 显示。只提问，不执行 SQL。正文页只向宿主发 `pointerdown` 一种消息，宿主借此通过 `DropDownCloser` 收起本线程的下拉菜单和 @ 引用弹窗，因为点在 WebView2 里 WinForms 收不到。
 
 窗体和按钮的细则见 `.github/copilot-instructions.md`。
 

@@ -89,11 +89,12 @@ namespace DB2Sheet.Services
                 + "</body></html>";
         }
 
-        /// <summary>复制按钮的脚本。成功或失败都在图标旁提示，约 1.5 秒后消失，不弹出窗体。</summary>
+        /// <summary>页面脚本：按下鼠标时通知宿主收起下拉；复制按钮成功或失败都在图标旁提示，约 1.5 秒后消失，不弹出窗体。</summary>
         /// <returns>含滚动到底部的脚本标签。</returns>
         private static string CopyScript()
         {
             return "<script>"
+                + "document.addEventListener('pointerdown',function(){if(window.chrome&&chrome.webview)chrome.webview.postMessage('pointerdown');},true);"
                 + "document.addEventListener('click',function(e){"
                 + "var node=e.target;while(node&&(!node.classList||!node.classList.contains('copy')))node=node.parentNode;"
                 + "if(!node)return;var box=node.parentNode;var pre=box?box.querySelector('pre'):null;if(!pre)return;"
