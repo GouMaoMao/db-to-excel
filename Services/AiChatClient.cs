@@ -2,8 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using DB2Sheet.Models;
 
@@ -80,11 +82,32 @@ namespace DB2Sheet.Services
     }
 
     /// <summary>按三种协议把已经拼好的消息发给用户指定的地址。</summary>
-    /// <remarks>不知道数据库连接。调用方负责脱敏，并在发送前写好审计日志。</remarks>
+    /// <remarks>
+    /// 不知道数据库连接。调用方负责脱敏，并在发送前写好审计日志。
+    /// 副作用：首次使用时向进程级 <see cref="ServicePointManager.SecurityProtocol"/> 追加 TLS 1.2/1.3。
+    /// Excel 不是新版 .NET 应用，默认只协商老协议，而 AI 服务商通常只接受 TLS 1.2 及以上。
+    /// </remarks>
     public sealed class AiChatClient
     {
+        private const SecurityProtocolType Tls12 = (SecurityProtocolType)3072;
+        private const SecurityProtocolType Tls13 = (SecurityProtocolType)12288;
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+
+        static AiChatClient()
+        {
+            // 只增不减；当前系统不支持的协议会抛 NotSupportedException，此时保留已有设置即可，真正的失败由请求报错说明。
+            foreach (SecurityProtocolType protocol in new[] { Tls12, Tls13 })
+            {
+                try
+                {
+                    ServicePointManager.SecurityProtocol |= protocol;
+                }
+                catch (NotSupportedException)
+                {
+                }
+            }
+        }
 
         /// <summary>一次尚未发出的 HTTP 调用。标头里的密钥不会写入审计日志。</summary>
         public sealed class OutboundCall
@@ -249,6 +272,16 @@ namespace DB2Sheet.Services
                         request.Headers.TryAddWithoutValidation(header.Key, header.Value);
                 }
 
+                return await ExchangeAsync(request).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>发出请求并读完响应。网络层失败统一在这里转成带地址、协议和排查提示的异常。</summary>
+        /// <exception cref="InvalidOperationException">无法完成请求；原异常保留为 InnerException。</exception>
+        private static async System.Threading.Tasks.Task<HttpResult> ExchangeAsync(HttpRequestMessage request)
+        {
+            try
+            {
                 using (HttpResponseMessage response = await Http.SendAsync(request).ConfigureAwait(false))
                 {
                     string body = response.Content == null
@@ -257,6 +290,45 @@ namespace DB2Sheet.Services
                     return new HttpResult((int)response.StatusCode, body);
                 }
             }
+            catch (Exception exception) when (exception is HttpRequestException || exception is TaskCanceledException)
+            {
+                throw new InvalidOperationException(DescribeFailure(request.Method.Method, request.RequestUri, exception), exception);
+            }
+        }
+
+        /// <summary>把网络失败写成多行说明：动作与地址、内部异常链、当前环境、排查提示。不含请求头和密钥。</summary>
+        /// <param name="method">HTTP 方法。</param>
+        /// <param name="uri">已去掉密钥查询参数的请求地址。</param>
+        /// <param name="exception">网络层抛出的异常。</param>
+        /// <returns>用于异常 Message 的文字。</returns>
+        public static string DescribeFailure(string method, Uri uri, Exception exception)
+        {
+            StringBuilder text = new StringBuilder();
+            bool timeout = exception is TaskCanceledException;
+            text.Append(timeout ? "请求超时（" + Http.Timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " 秒内没有收到响应）。" : "无法完成请求。");
+            text.AppendLine();
+            text.AppendLine("请求：" + method + " " + (uri == null ? string.Empty : uri.GetLeftPart(UriPartial.Path)));
+            text.AppendLine("原因链：");
+            bool tls = false;
+            for (Exception inner = exception; inner != null; inner = inner.InnerException)
+            {
+                WebException web = inner as WebException;
+                text.AppendLine("  " + inner.GetType().Name + (web == null ? string.Empty : "（" + web.Status.ToString() + "）") + "：" + inner.Message);
+                tls |= (web != null && web.Status == WebExceptionStatus.SecureChannelFailure)
+                    || inner.Message.IndexOf("SSL", StringComparison.OrdinalIgnoreCase) >= 0
+                    || inner.Message.IndexOf("TLS", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+
+            text.AppendLine("环境：已启用 TLS 协议 " + ServicePointManager.SecurityProtocol.ToString()
+                + "；系统 " + Environment.OSVersion.VersionString + "；.NET " + Environment.Version.ToString());
+            if (timeout)
+                text.Append("提示：检查网络、代理，或服务商是否响应过慢。");
+            else if (tls)
+                text.Append("提示：HTTPS 握手失败。常见原因：服务商要求的 TLS 版本或加密套件本机系统不支持（旧系统需安装更新）；"
+                    + "公司代理或安全软件替换了证书；系统时间不正确；地址写成 https 但服务实际是 http。");
+            else
+                text.Append("提示：检查接口地址是否正确、域名能否解析、网络或代理是否放行。");
+            return text.ToString();
         }
 
         /// <summary>从成功响应里取出助手文字。</summary>
@@ -530,13 +602,7 @@ namespace DB2Sheet.Services
                         request.Headers.TryAddWithoutValidation(header.Key, header.Value);
                 }
 
-                using (HttpResponseMessage response = await Http.SendAsync(request).ConfigureAwait(false))
-                {
-                    string body = response.Content == null
-                        ? string.Empty
-                        : await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    return new HttpResult((int)response.StatusCode, body);
-                }
+                return await ExchangeAsync(request).ConfigureAwait(false);
             }
         }
 
