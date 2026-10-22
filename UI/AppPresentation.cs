@@ -311,8 +311,13 @@ namespace DB2Sheet.UI
             "引用\r\n"
             + "这次会发给模型的内容。点末尾「×」后去掉。";
 
-        /// <summary>输入框下方轮换的灰色说明。多行文本框不能显示空框提示，所以单独放一行。</summary>
-        /// <remarks>每次创建对话栏抽一条，本次打开期间不换。有多条时不连续抽到同一条。</remarks>
+        /// <summary>未勾选 Skill 时替换输入框下方说明的提醒，不阻止发送。</summary>
+        public const string AiNoSkillHint =
+            "本次未附带 Skill，AI 大模型可能不了解库表结构和含义，生成的 SQL 可用性可能较差。"
+            + "建议前往「设置 → AI 设置 → Skill 设置」配置针对具体业务场景的 Skill，并在发送前勾选。";
+
+        /// <summary>输入框下方可用的灰色说明。多行文本框不能显示空框提示，所以单独放一行。</summary>
+        /// <remarks>每次创建对话栏抽一条，勾选 Skill 时显示；未勾选时由风险提醒替代。有多条时不连续抽到同一条。</remarks>
         public static readonly string[] AiComposerHints =
         {
             "输入 @ 可附加查询方案、文件或当前预览。",
@@ -327,8 +332,8 @@ namespace DB2Sheet.UI
         private static int _lastAiComposerHint = -1;
 
         /// <summary>抽一条与上次不同的输入框说明。</summary>
-        /// <remarks>只在创建对话栏的界面线程上调用。对话栏按返回的这一句显示到关掉为止。</remarks>
-        /// <returns>这次对话栏固定显示的那一句。</returns>
+        /// <remarks>只在创建对话栏的界面线程上调用。返回值在本窗口内保留，勾选 Skill 后恢复显示，不重新抽取。</remarks>
+        /// <returns>这次对话栏在勾选 Skill 时显示的说明。</returns>
         public static string PickAiComposerHint()
         {
             int count = AiComposerHints.Length;

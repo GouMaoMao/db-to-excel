@@ -72,6 +72,7 @@ namespace DB2Sheet.UI
         private readonly Image _sendIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_send.png", 24);
         private readonly Image _sendIconGray = DatabaseTreeImageCatalog.LoadActionIcon("icon_send.png", 24, true);
         private readonly Label _mentionHint;
+        private readonly string _composerHint = AppPresentation.PickAiComposerHint();
         private Panel _modelRow;
         private readonly ContextMenuStrip _tabMenu = new ContextMenuStrip();
         private readonly ToolStripMenuItem _renameItem;
@@ -210,7 +211,7 @@ namespace DB2Sheet.UI
             {
                 Dock = DockStyle.Top,
                 Height = 20,
-                Text = AppPresentation.PickAiComposerHint(),
+                Text = _composerHint,
                 Font = _chipFont,
                 ForeColor = SystemColors.GrayText,
                 TextAlign = ContentAlignment.TopLeft,
@@ -1212,7 +1213,7 @@ namespace DB2Sheet.UI
         }
 
         /// <summary>按当前宽度重算引用行、灰色说明和模型行的高度，再把底栏撑到刚好放下。</summary>
-        /// <remarks>说明在创建时已抽定，这里只换行，不改文字。测量比文字区略窄并多留几像素，避免末行被挡住。宽度还没有时不改。</remarks>
+        /// <remarks>这里仅测量当前说明，不切换文字。测量比文字区略窄并多留几像素，避免末行被挡住。宽度还没有时不改。</remarks>
         private void LayoutComposer()
         {
             if (_composer == null || _chipRow == null || _mentionHint == null || _modelRow == null) return;
@@ -1828,6 +1829,8 @@ namespace DB2Sheet.UI
             return chosen.Count.ToString() + " 个 Skill";
         }
 
+        /// <summary>同步模型与 Skill 芯片，并在未勾选 Skill 时用风险提醒替换原说明。</summary>
+        /// <remarks>在界面线程调用；恢复说明时沿用本窗口抽中的文字，随后重算底栏高度，不影响发送。</remarks>
         private void ApplyChoiceButtons()
         {
             ModelPick model = CurrentModel();
@@ -1838,6 +1841,8 @@ namespace DB2Sheet.UI
             bool skillOn = SelectedSkills().Count > 0;
             _skillButton.Text = CurrentSkillText() + "  ﹀";
             _skillButton.Image = AiModelIcons.Skill(skillOn);
+            _mentionHint.Text = skillOn ? _composerHint : AppPresentation.AiNoSkillHint;
+            _mentionHint.ForeColor = skillOn ? SystemColors.GrayText : Color.Red;
             LayoutComposer();
         }
 
