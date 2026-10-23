@@ -15,11 +15,13 @@ namespace DB2Sheet.UI
 
         /// <summary>创建弹出的对话窗。</summary>
         /// <param name="assistant">模型、Skill、对话和审计。</param>
+        /// <param name="operationRunner">模型连接测试进度窗体运行器。</param>
         /// <param name="settings">记住窗体尺寸。</param>
         /// <param name="readEditor">发送时读取查询窗当前页签。</param>
         /// <param name="readMentions">输入 @ 时列出查询方案和当前预览。</param>
         public AiChatForm(
             AiAssistant assistant,
+            IOperationRunner operationRunner,
             ISettingsStore settings,
             Func<AiEditorSnapshot> readEditor,
             Func<AiMentionSource> readMentions)
@@ -31,7 +33,7 @@ namespace DB2Sheet.UI
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
             FormSizeMemory.Attach(this, settings, "AiChat");
-            _chat = new AiChatControl(assistant, settings, readEditor, readMentions, null) { Dock = DockStyle.Fill };
+            _chat = new AiChatControl(assistant, operationRunner, settings, readEditor, readMentions, null) { Dock = DockStyle.Fill };
             Controls.Add(_chat);
         }
 

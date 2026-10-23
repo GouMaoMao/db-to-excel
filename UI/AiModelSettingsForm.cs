@@ -21,6 +21,7 @@ namespace DB2Sheet.UI
         private const int SeparatorBand = 8;
 
         private readonly AiAssistant _assistant;
+        private readonly IOperationRunner _operationRunner;
         private readonly Image _addIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_add.png");
         private readonly ToolTip _tips = new ToolTip();
         private readonly ContextMenuStrip _listMenu = new ContextMenuStrip();
@@ -52,10 +53,12 @@ namespace DB2Sheet.UI
 
         /// <summary>创建模型设置窗体。</summary>
         /// <param name="assistant">模型存储、拉列表和探测用的助手。</param>
+        /// <param name="operationRunner">显示测试连接进度的运行器。</param>
         /// <param name="settings">记住窗体尺寸。</param>
-        public AiModelSettingsForm(AiAssistant assistant, ISettingsStore settings)
+        public AiModelSettingsForm(AiAssistant assistant, IOperationRunner operationRunner, ISettingsStore settings)
         {
             _assistant = assistant ?? throw new ArgumentNullException(nameof(assistant));
+            _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             Text = AppPresentation.WindowTitle("模型设置");
             Width = 780;
             Height = 560;
@@ -283,20 +286,40 @@ namespace DB2Sheet.UI
                 string apiKey = ResolveKey();
                 string fingerprint = Fingerprint(profile, apiKey);
                 AiProtocol protocol = AiProtocolNames.Parse(profile.Protocol);
-                IReadOnlyList<string> ids = await _assistant.ListModelsAsync(protocol, profile.Endpoint, apiKey);
-                string probe = AiAssistant.ChooseProbeModel(ids);
-                AiAuditEntry entry = new AiAuditEntry
-                {
-                    Action = "model.test",
-                    ModelDisplayName = AiModelCaption.Audit(profile.DisplayName, probe),
-                    Protocol = profile.Protocol,
-                    Endpoint = AiEndpoints.Describe(profile.Endpoint),
-                    UserText = "Reply with the single word ok.",
-                    Redaction = "无",
-                    HasTab = false,
-                    Detail = "测试不含业务文本。探测型号=" + probe
-                };
-                await _assistant.AskAsync(profile, apiKey, probe, entry, null, null, entry.UserText);
+                IReadOnlyList<string> ids = await _operationRunner.RunAsync(
+                    this,
+                    "测试模型连接",
+                    false,
+                    async (progress, cancellationToken) =>
+                    {
+                        progress.Report(new OperationProgress
+                        {
+                            Stage = OperationStage.Connecting,
+                            Message = "正在读取可用型号…",
+                            IsIndeterminate = true
+                        });
+                        IReadOnlyList<string> availableIds = await _assistant.ListModelsAsync(protocol, profile.Endpoint, apiKey);
+                        string probe = AiAssistant.ChooseProbeModel(availableIds);
+                        progress.Report(new OperationProgress
+                        {
+                            Stage = OperationStage.Executing,
+                            Message = "正在探测模型响应…",
+                            IsIndeterminate = true
+                        });
+                        AiAuditEntry entry = new AiAuditEntry
+                        {
+                            Action = "model.test",
+                            ModelDisplayName = AiModelCaption.Audit(profile.DisplayName, probe),
+                            Protocol = profile.Protocol,
+                            Endpoint = AiEndpoints.Describe(profile.Endpoint),
+                            UserText = "Reply with the single word ok.",
+                            Redaction = "无",
+                            HasTab = false,
+                            Detail = "测试不含业务文本。探测型号=" + probe
+                        };
+                        await _assistant.AskAsync(profile, apiKey, probe, entry, null, null, entry.UserText);
+                        return availableIds;
+                    });
                 _testedIds = new List<string>(ids);
                 _testedFingerprint = fingerprint;
                 _saveButton.Enabled = true;

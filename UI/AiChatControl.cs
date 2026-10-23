@@ -28,6 +28,7 @@ namespace DB2Sheet.UI
         private const int ConversationTabIconUnread = 3;
 
         private readonly AiAssistant _assistant;
+        private readonly IOperationRunner _operationRunner;
         private readonly ISettingsStore _settings;
         private readonly Func<AiEditorSnapshot> _readEditor;
         private readonly Func<AiMentionSource> _readMentions;
@@ -136,18 +137,21 @@ namespace DB2Sheet.UI
 
         /// <summary>创建对话控件。</summary>
         /// <param name="assistant">模型、Skill、对话和审计。</param>
+        /// <param name="operationRunner">模型连接测试进度窗体运行器。</param>
         /// <param name="settings">记住上次选中的子型号。</param>
         /// <param name="readEditor">点击发送时读取当前页签。由查询窗提供。</param>
         /// <param name="readMentions">输入 @ 时列出查询方案和当前预览。</param>
         /// <param name="closePanel">右上角关闭图标要做的事。弹出的对话窗不传，那里用窗体自己的关闭。</param>
         public AiChatControl(
             AiAssistant assistant,
+            IOperationRunner operationRunner,
             ISettingsStore settings,
             Func<AiEditorSnapshot> readEditor,
             Func<AiMentionSource> readMentions,
             Action closePanel)
         {
             _assistant = assistant ?? throw new ArgumentNullException(nameof(assistant));
+            _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _readEditor = readEditor ?? throw new ArgumentNullException(nameof(readEditor));
             _readMentions = readMentions ?? throw new ArgumentNullException(nameof(readMentions));
@@ -1721,7 +1725,7 @@ namespace DB2Sheet.UI
         /// <remarks>必须在界面线程调用。所有者是查询窗或报错对话窗。关闭后由模型存储的变更事件刷新菜单。</remarks>
         private void OpenModelSettings()
         {
-            using (AiModelSettingsForm form = new AiModelSettingsForm(_assistant, _settings))
+            using (AiModelSettingsForm form = new AiModelSettingsForm(_assistant, _operationRunner, _settings))
                 form.ShowDialog(FindForm());
         }
 

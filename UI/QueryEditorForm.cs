@@ -330,7 +330,7 @@ namespace DB2Sheet.UI
             _resultsSplit.Panel1.Controls.Add(LightBorder.Wrap(sqlPanel));
             _resultsSplit.Panel2.Controls.Add(LightBorder.Wrap(previewPanel));
 
-            _aiChat = new AiChatControl(_assistant, _settings, ReadEditorForAi, ReadMentions, ToggleAiPanel);
+            _aiChat = new AiChatControl(_assistant, _operationRunner, _settings, ReadEditorForAi, ReadMentions, ToggleAiPanel);
             _editorSplit = new SplitContainer
             {
                 Dock = DockStyle.Fill,
@@ -1260,7 +1260,7 @@ namespace DB2Sheet.UI
         {
             if (_aiChatForm == null || _aiChatForm.IsDisposed)
             {
-                _aiChatForm = new AiChatForm(_assistant, _settings, ReadEditorForAi, ReadMentions);
+                _aiChatForm = new AiChatForm(_assistant, _operationRunner, _settings, ReadEditorForAi, ReadMentions);
                 _aiChatForm.FormClosed += (sender, args) => _aiChatForm = null;
             }
 

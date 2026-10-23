@@ -296,7 +296,7 @@ namespace DB2Sheet
         {
             ExecuteUiAction(() =>
             {
-                using (AiModelSettingsForm form = new AiModelSettingsForm(_assistant, _settings))
+                using (AiModelSettingsForm form = new AiModelSettingsForm(_assistant, _operationRunner, _settings))
                     form.ShowDialog();
             });
         }
