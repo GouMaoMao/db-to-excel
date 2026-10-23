@@ -34,7 +34,7 @@ namespace DB2Sheet.UI
         {
             Text = AppPresentation.WindowTitle("请求详情");
             Width = 640;
-            Height = 1040;
+            Height = 900;
             MinimumSize = new Size(420, 320);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
