@@ -359,6 +359,8 @@
     <EmbeddedResource Include="Resources\icon_info.png" />
     <EmbeddedResource Include="Resources\icon_robot.png" />
     <EmbeddedResource Include="Resources\icon_skills.png" />
+    <EmbeddedResource Include="Resources\icon_reasoning_effort.png" />
+    <EmbeddedResource Include="Resources\ai-thinking-mappings.json" />
     <EmbeddedResource Include="Resources\icon_copy.png" />
     <EmbeddedResource Include="Resources\icon_add.png" />
     <EmbeddedResource Include="Resources\icon_file.png" />

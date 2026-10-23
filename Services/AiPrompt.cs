@@ -22,12 +22,26 @@ namespace DB2Sheet.Services
         private static readonly string ContextTemplate = Read("sql-assistant.context.md");
         private static readonly string TitleTemplate = Read("sql-assistant.title.md");
 
-        /// <summary>产品自带的系统说明，不含 Skill。填入本次调用的子型号。</summary>
+        /// <summary>产品自带的系统说明，不含 Skill。填入模型配置、子型号和所选思考强度。</summary>
+        /// <param name="modelDisplayName">用户为当前模型配置填写的显示名。</param>
         /// <param name="modelId">对话里选中的子型号。模型按原文写入 SQL 注释，不是配置显示名。</param>
-        /// <returns>已替换 <c>{{model}}</c> 的系统说明。</returns>
+        /// <param name="thinkingLevel">当前 UI 选择的思考强度。</param>
+        /// <returns>已替换模型配置、子型号和思考强度槽位的系统说明。</returns>
+        public static string SystemText(string modelDisplayName, string modelId, string thinkingLevel)
+        {
+            return Fill(
+                SystemTemplate,
+                "modelDisplayName", modelDisplayName,
+                "model", modelId,
+                "thinkingLevel", thinkingLevel);
+        }
+
+        /// <summary>兼容只传子型号的调用，使用默认显示名和自动思考强度。</summary>
+        /// <param name="modelId">对话里选中的子型号。</param>
+        /// <returns>已替换提示词槽位的系统说明。</returns>
         public static string SystemText(string modelId)
         {
-            return Fill(SystemTemplate, "model", modelId);
+            return SystemText(string.Empty, modelId, "自动");
         }
 
         /// <summary>把 Skill 文档填上名称和正文。</summary>

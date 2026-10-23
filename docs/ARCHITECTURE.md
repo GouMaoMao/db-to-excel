@@ -75,6 +75,7 @@
 - `jdbc-environment.json`
 - `queries\`：每个查询方案一个文件。旧版 `queries.json` 只在首次加载时迁入该目录。
 - `ai-models.json`：模型配置。密钥是当前 Windows 用户的 DPAPI 密文。测试通过后缓存该接口返回的型号 id。
+- `ai-thinking-mappings.json`：用户可编辑的思考强度 API 参数映射，按协议、接口主机和可选型号规则匹配。首次运行时从程序集默认配置生成。
 - `ai-skills\`：一份 Skill 一个文件，只作上下文。
 - `ai-conversations\`：一条对话一个文件。除可见问答外，还存本轮 token 计数，以及查看请求详情用的分类原文和这次调用的地址、协议、模型、发送时间、HTTP 状态与耗时。
 - `webview2\`：对话页 WebView2 的浏览器数据。
@@ -105,10 +106,11 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 - `QueryEditorForm`：交互式 SQL 查询。编辑器是 AvalonEdit，语法高亮使用其自带的 T-SQL 定义；SQL 页正文美化使用同一份定义。
 - `SheetRefreshForm`：SQL Sheet 任务展示和批量刷新。
 - `JdbcEnvironmentForm`：检测或指定本机 Java（搜索常见安装位置）。厂商驱动在连接编辑中选择。
-- `LocalDataForm`：只列出连接、查询、Skill 等本机路径，不改保存位置。
+- `LocalDataForm`：只列出连接、查询、Skill、AI 思考强度映射等本机路径，不改保存位置。
 - `DB2SheetRibbon`：Ribbon XML 和 Office 回调转发。查询组有「SQL 查询」「批量刷新」。管理组有「连接管理」，以及「设置」下拉里的「参数设置」、「AI 设置」（模型设置、Skill 设置）、「JDBC 环境」和「本地数据」。关于组显示版本。
-- `AiModelSettingsForm` / `AiSkillSettingsForm`：模型与 Skill。模型连接测试通过 `OperationRunner` 显示阶段进度；协议和发送边界见 `.github/copilot-instructions.md` 的「AI 助手」。
+- `AiModelSettingsForm` / `AiSkillSettingsForm`：模型与 Skill。模型列表和对话模型菜单按配置显示子型号；模型连接测试通过 `OperationRunner` 显示阶段进度。协议和发送边界见 `.github/copilot-instructions.md` 的「AI 助手」。
 - `AiChatControl`：SQL 查询窗右侧的对话，以及报错时弹出的 `AiChatForm`。正文用 WebView2 显示。只提问，不执行 SQL。共用控件根据 Skill 勾选状态切换底部说明，不拦截发送；交互细则见 `.github/copilot-instructions.md` 的「AI 助手」。正文页只向宿主发 `pointerdown` 一种消息，宿主借此通过 `DropDownCloser` 收起本线程的下拉菜单和 @ 引用弹窗，因为点在 WebView2 里 WinForms 收不到。
+- `AiThinkingMappingStore` / `AiChatClient`：从用户级 JSON 映射读取所选思考强度对应的请求参数，并将非消息参数摘要随对话保存供请求详情展示。自动档不依赖映射文件；手动档位的映射错误会阻止本次发送。具体行为见 `.github/copilot-instructions.md` 的「AI 助手」。
 
 窗体和按钮的细则见 `.github/copilot-instructions.md`。
 

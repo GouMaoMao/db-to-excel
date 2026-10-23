@@ -295,6 +295,8 @@ namespace DB2Sheet.Storage
                 Protocol = call.Protocol,
                 ModelDisplayName = call.ModelDisplayName,
                 ModelId = call.ModelId,
+                ThinkingLevel = call.ThinkingLevel,
+                ApiParametersJson = call.ApiParametersJson,
                 SentUtc = call.SentUtc,
                 HttpStatus = call.HttpStatus,
                 ElapsedMs = call.ElapsedMs

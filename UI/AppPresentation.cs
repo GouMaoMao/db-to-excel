@@ -126,6 +126,11 @@ namespace DB2Sheet.UI
             "模型配置\r\n"
             + "模型的显示名、协议和接口地址。密钥是当前 Windows 用户的 DPAPI 密文。";
 
+        /// <summary>AI 思考强度映射配置一行的悬浮说明。</summary>
+        public const string LocalDataThinkingMappingsTip =
+            "AI 思考强度映射\r\n"
+            + "把自动、低、中、高映射到 API 参数。可编辑 JSON 为自定义接口增加规则；下次发送时读取。";
+
         /// <summary>Skill 目录一行的悬浮提示。</summary>
         public const string LocalDataSkillsTip =
             "Skill\r\n"
@@ -156,13 +161,28 @@ namespace DB2Sheet.UI
             "新增\r\n"
             + "清空右侧，开始填写一条新的模型配置。测试通过后才能保存。";
 
+        /// <summary>模型配置父项的悬浮说明。</summary>
+        public const string AiModelGroupTip =
+            "模型配置\r\n"
+            + "点击展开或收起子型号，并载入右侧配置。";
+
+        /// <summary>对话模型选择菜单中配置分组的悬浮说明。</summary>
+        public const string AiModelChoiceGroupTip =
+            "模型配置\r\n"
+            + "展开后选择一个子型号，供后续对话使用。";
+
+        /// <summary>对话模型选择菜单中子型号的悬浮说明。</summary>
+        public const string AiModelChoiceTip =
+            "选择型号\r\n"
+            + "使用该型号发送后续对话请求。";
+
         /// <summary>模型设置列表右键「删除」的悬浮提示。</summary>
         public const string AiModelDeleteTip =
             "删除\r\n"
             + "删掉这条模型配置。已经保存的密钥一并移除。";
 
         /// <summary>模型设置里显示名下方的说明。</summary>
-        public const string AiModelNameNote = "备注名称，方便记忆和管理。";
+        public const string AiModelNameNote = "建议注明 API 来源（官方或平台），例如 DeepSeek 官方。";
 
         /// <summary>模型设置里协议下方的说明。</summary>
         public const string AiModelProtocolNote = "多数选 OpenAI 兼容。";
@@ -210,6 +230,11 @@ namespace DB2Sheet.UI
         public const string AiModelTip =
             "选择模型\r\n"
             + "这次提问用的子型号。名称末尾的下拉标记表示可以点开更换。点开可看到配置名称。菜单末项「新增其他模型」打开模型设置。到功能区「设置 → AI 设置 → 模型设置」也可以打开同一窗体。填写协议、接口地址和密钥，测试通过后保存。可用型号在测试时从接口读取。";
+
+        /// <summary>思考强度按钮的悬浮提示。</summary>
+        public const string AiThinkingTip =
+            "思考强度\r\n"
+            + "选择自动、低、中或高。自动不附加思考参数；其他档位按当前模型配置的协议、接口主机和型号匹配本机映射文件。映射不适用于该型号时，服务商会返回错误。可在「设置 → 本地数据」打开 AI 思考强度映射文件。";
 
         /// <summary>Skill 芯片的悬浮提示。第一行说明可以点开选择。</summary>
         public const string AiSkillTip =
@@ -282,6 +307,15 @@ namespace DB2Sheet.UI
 
         /// <summary>请求详情「模型」标题。</summary>
         public const string AiSentModel = "模型";
+
+        /// <summary>请求详情「思考强度」标题。</summary>
+        public const string AiSentThinking = "思考强度";
+
+        /// <summary>请求详情中 API 参数摘要的标题。</summary>
+        public const string AiSentApiParameters = "API 参数";
+
+        /// <summary>旧对话没有保存 API 参数摘要时显示的说明。</summary>
+        public const string AiSentNoApiParameters = "这次没有记录 API 参数。";
 
         /// <summary>请求详情「发送时间」标题。</summary>
         public const string AiSentTime = "发送时间";

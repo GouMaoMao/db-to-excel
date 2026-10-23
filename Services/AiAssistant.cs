@@ -20,6 +20,7 @@ namespace DB2Sheet.Services
     public sealed class AiAssistant
     {
         private readonly AiChatClient _client = new AiChatClient();
+        private readonly AiThinkingMappingStore _thinkingMappings;
 
         /// <summary>创建助手并打开本机存储。</summary>
         /// <param name="paths">本地数据目录。</param>
@@ -28,6 +29,7 @@ namespace DB2Sheet.Services
         {
             if (paths == null) throw new ArgumentNullException(nameof(paths));
             Models = new AiModelStore(paths);
+            _thinkingMappings = new AiThinkingMappingStore(paths);
             Skills = new AiSkillStore(paths);
             Conversations = new AiConversationStore(paths);
             Audit = new AiAuditLog(paths, logger);
@@ -57,6 +59,8 @@ namespace DB2Sheet.Services
         /// <param name="history">此前往来。测试时为空。</param>
         /// <param name="systemText">系统说明。测试时为空。</param>
         /// <param name="finalUserText">这一次发给模型的用户消息。</param>
+        /// <param name="thinkingLevel">automatic、low、medium 或 high。</param>
+        /// <param name="callDetails">可选的本机请求详情记录，会收到已脱除消息正文的 API 参数。</param>
         /// <returns>助手回复、可选的 token 计数，以及这次的 HTTP 状态和耗时。</returns>
         /// <exception cref="InvalidOperationException">地址、响应或结果审计失败。</exception>
         /// <remarks>
@@ -70,7 +74,9 @@ namespace DB2Sheet.Services
             AiAuditEntry entry,
             IList<AiChatTurn> history,
             string systemText,
-            string finalUserText)
+            string finalUserText,
+            string thinkingLevel,
+            AiSentCall callDetails)
         {
             if (profile == null) throw new ArgumentNullException(nameof(profile));
             if (entry == null) throw new ArgumentNullException(nameof(entry));
@@ -83,13 +89,21 @@ namespace DB2Sheet.Services
             turns.Add(new AiChatTurn { Role = "user", Text = finalUserText ?? string.Empty });
 
             AiProtocol protocol = AiProtocolNames.Parse(profile.Protocol);
+            IDictionary<string, object> parameters = _thinkingMappings.Resolve(
+                profile.Protocol,
+                profile.Endpoint,
+                modelName.Trim(),
+                thinkingLevel);
             AiChatClient.OutboundCall call = _client.Build(
                 protocol,
                 profile.Endpoint,
                 apiKey,
                 modelName.Trim(),
                 systemText,
-                turns);
+                turns,
+                parameters);
+            if (callDetails != null)
+                callDetails.ApiParametersJson = call.ApiParametersJson;
             entry.OperationId = string.IsNullOrWhiteSpace(entry.OperationId) ? Guid.NewGuid().ToString("N") : entry.OperationId;
             entry.RequestSha256 = AiAuditLog.Sha256(call.Body);
             entry.Phase = "pending";
@@ -225,7 +239,7 @@ namespace DB2Sheet.Services
             return AiPrompt.User(dialect, hasTab, tabName, tabSql, userText, context);
         }
 
-        /// <summary>把 Skill 接到系统说明后面。没有 Skill 时只返回已填入子型号的系统说明。</summary>
+        /// <summary>把 Skill 接到系统说明后面。没有 Skill 时只返回已填入模型信息的系统说明。</summary>
         /// <param name="modelId">对话里选中的子型号。</param>
         /// <param name="skillName">Skill 名称。</param>
         /// <param name="skillBody">Skill 正文。</param>
@@ -233,6 +247,25 @@ namespace DB2Sheet.Services
         public static string ComposeSystem(string modelId, string skillName, string skillBody)
         {
             string system = AiPrompt.SystemText(modelId);
+            if (string.IsNullOrWhiteSpace(skillBody)) return system;
+            return system + "\r\n\r\n" + AiPrompt.Skill(skillName, skillBody);
+        }
+
+        /// <summary>把 Skill 接到带模型配置显示名、子型号和思考强度的系统说明后面。</summary>
+        /// <param name="modelDisplayName">模型配置显示名。</param>
+        /// <param name="modelId">对话里选中的子型号。</param>
+        /// <param name="thinkingLevel">自动、低、中或高。</param>
+        /// <param name="skillName">Skill 名称。</param>
+        /// <param name="skillBody">Skill 正文。</param>
+        /// <returns>已填入本次模型信息和可选 Skill 的系统说明。</returns>
+        public static string ComposeSystem(
+            string modelDisplayName,
+            string modelId,
+            string thinkingLevel,
+            string skillName,
+            string skillBody)
+        {
+            string system = AiPrompt.SystemText(modelDisplayName, modelId, thinkingLevel);
             if (string.IsNullOrWhiteSpace(skillBody)) return system;
             return system + "\r\n\r\n" + AiPrompt.Skill(skillName, skillBody);
         }

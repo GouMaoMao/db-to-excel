@@ -62,6 +62,7 @@ namespace DB2Sheet.UI
             AddItem("参数设置", paths.SettingsFile, false, AppPresentation.LocalDataSettingsTip);
             AddItem("JDBC 环境", paths.JdbcEnvironmentFile, false, AppPresentation.LocalDataJdbcTip);
             AddItem("模型配置", paths.AiModelsFile, false, AppPresentation.LocalDataModelsTip);
+            AddItem("AI 思考强度映射", paths.AiThinkingMappingsFile, false, AppPresentation.LocalDataThinkingMappingsTip);
             AddItem("Skill", paths.AiSkillsDirectory, true, AppPresentation.LocalDataSkillsTip);
             AddItem("对话", paths.AiConversationsDirectory, true, AppPresentation.LocalDataConversationsTip);
             AddItem("日志", paths.LogsDirectory, true, AppPresentation.LocalDataLogsTip);

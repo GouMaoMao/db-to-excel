@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "protocol": "openai",
+      "endpointHost": "api.deepseek.com",
+      "modelPattern": "*",
+      "levels": {
+        "low": {
+          "thinking": { "type": "enabled" },
+          "reasoning_effort": "low"
+        },
+        "medium": {
+          "thinking": { "type": "enabled" },
+          "reasoning_effort": "high"
+        },
+        "high": {
+          "thinking": { "type": "enabled" },
+          "reasoning_effort": "max"
+        }
+      }
+    },
+    {
+      "protocol": "openai",
+      "endpointHost": "*",
+      "modelPattern": "*",
+      "levels": {
+        "low": { "reasoning_effort": "low" },
+        "medium": { "reasoning_effort": "medium" },
+        "high": { "reasoning_effort": "high" }
+      }
+    },
+    {
+      "protocol": "claude",
+      "endpointHost": "*",
+      "modelPattern": "*",
+      "levels": {
+        "low": {
+          "thinking": { "type": "enabled", "budget_tokens": 1024 }
+        },
+        "medium": {
+          "thinking": { "type": "enabled", "budget_tokens": 2048 }
+        },
+        "high": {
+          "thinking": { "type": "enabled", "budget_tokens": 3072 }
+        }
+      }
+    },
+    {
+      "protocol": "gemini",
+      "endpointHost": "*",
+      "modelPattern": "gemini-2.5*",
+      "levels": {
+        "low": {
+          "generationConfig": { "thinkingConfig": { "thinkingBudget": 1024 } }
+        },
+        "medium": {
+          "generationConfig": { "thinkingConfig": { "thinkingBudget": 4096 } }
+        },
+        "high": {
+          "generationConfig": { "thinkingConfig": { "thinkingBudget": 8192 } }
+        }
+      }
+    },
+    {
+      "protocol": "gemini",
+      "endpointHost": "*",
+      "modelPattern": "*",
+      "levels": {
+        "low": {
+          "generationConfig": { "thinkingConfig": { "thinkingLevel": "LOW" } }
+        },
+        "medium": {
+          "generationConfig": { "thinkingConfig": { "thinkingLevel": "MEDIUM" } }
+        },
+        "high": {
+          "generationConfig": { "thinkingConfig": { "thinkingLevel": "HIGH" } }
+        }
+      }
+    }
+  ]
+}

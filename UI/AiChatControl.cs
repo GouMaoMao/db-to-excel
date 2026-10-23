@@ -51,6 +51,7 @@ namespace DB2Sheet.UI
             Visible = false
         };
         private readonly Button _modelButton;
+        private readonly Button _thinkingButton;
         private readonly Button _skillButton;
         private readonly Button _sqlRef;
         private readonly FlowLayoutPanel _chipRow;
@@ -81,12 +82,14 @@ namespace DB2Sheet.UI
         private readonly ToolStripMenuItem _deleteItem;
         private readonly ToolStripMenuItem _archivedMenu;
         private readonly ContextMenuStrip _modelMenu = new ContextMenuStrip();
+        private readonly ContextMenuStrip _thinkingMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _skillMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _historyMenu = new ContextMenuStrip();
         private readonly List<Image> _tabIcons = new List<Image>();
         private readonly HashSet<string> _errorConversationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _unreadConversationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Image _addIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_add.png");
+        private readonly Image _thinkingIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_reasoning_effort.png");
         private readonly List<ModelPick> _models = new List<ModelPick>();
         private readonly List<SkillPick> _skills = new List<SkillPick>();
         private bool _binding;
@@ -100,6 +103,7 @@ namespace DB2Sheet.UI
         private string _currentId;
         private string _modelId;
         private string _modelName;
+        private string _thinkingLevel = AiThinkingLevels.Automatic;
         private readonly List<string> _skillIds = new List<string>();
         private bool _skillChoiceLoaded;
         private bool _keepSkillMenu;
@@ -163,13 +167,17 @@ namespace DB2Sheet.UI
             BackColor = SystemColors.Window;
 
             _modelButton = QuietButton();
+            _thinkingButton = QuietButton();
             _skillButton = QuietButton();
             _sqlRef = ReferenceChip(MentionKind.Query);
             _sqlRef.Margin = new Padding(4, 2, 4, 0);
             _modelButton.TextImageRelation = TextImageRelation.ImageBeforeText;
+            _thinkingButton.TextImageRelation = TextImageRelation.ImageBeforeText;
             _modelButton.Padding = new Padding(2, 0, 10, 0);
+            _thinkingButton.Padding = new Padding(2, 0, 10, 0);
             _skillButton.TextImageRelation = TextImageRelation.ImageBeforeText;
             DropDownCloser.BindToggle(_modelButton, _modelMenu, () => _modelMenu.Show(_modelButton, new Point(0, 0), ToolStripDropDownDirection.AboveRight));
+            DropDownCloser.BindToggle(_thinkingButton, _thinkingMenu, () => _thinkingMenu.Show(_thinkingButton, new Point(0, _thinkingButton.Height)));
             DropDownCloser.BindToggle(_skillButton, _skillMenu, () => _skillMenu.Show(_skillButton, new Point(0, _skillButton.Height)));
             _skillMenu.ItemClicked += SkillMenuItemClicked;
             _skillMenu.Closing += SkillMenuClosing;
@@ -186,6 +194,7 @@ namespace DB2Sheet.UI
             _empty.Controls.Add(_emptyButton);
             _empty.Resize += (sender, args) => CenterEmptyButton();
             _tips.SetToolTip(_modelButton, AppPresentation.AiModelTip);
+            _tips.SetToolTip(_thinkingButton, AppPresentation.AiThinkingTip);
             _tips.SetToolTip(_skillButton, AppPresentation.AiSkillTip);
             _tips.SetToolTip(_sqlRef, AppPresentation.AiSqlRefTip);
             _tips.SetToolTip(_send, AppPresentation.AiSendHint);
@@ -241,7 +250,9 @@ namespace DB2Sheet.UI
                 BackColor = SystemColors.Control
             };
             _modelRow.Controls.Add(_modelButton);
+            _modelRow.Controls.Add(_thinkingButton);
             _modelRow.Controls.Add(_send);
+            _thinkingMenu.ItemClicked += ThinkingMenuItemClicked;
             _composer = new Panel { Dock = DockStyle.Bottom, Height = 156, BackColor = SystemColors.Control };
             _composer.Controls.Add(_modelRow);
             _composer.Controls.Add(_mentionHint);
@@ -319,6 +330,7 @@ namespace DB2Sheet.UI
         public void ReloadChoices()
         {
             if (IsDisposed) return;
+            _thinkingLevel = AiThinkingLevels.Normalize(_settings.Get(CoreSettings.AiThinkingChoice));
             _models.Clear();
             string stored = _settings.Get(CoreSettings.AiModelChoice) ?? string.Empty;
             int bar = stored.IndexOf('|');
@@ -355,6 +367,7 @@ namespace DB2Sheet.UI
             PruneSkillIds();
             FillChoiceMenu(_modelMenu, true);
             FillChoiceMenu(_skillMenu, false);
+            FillThinkingMenu();
             ApplyChoiceButtons();
         }
 
@@ -373,6 +386,7 @@ namespace DB2Sheet.UI
                 _view.Dispose();
                 _tabMenu.Dispose();
                 _modelMenu.Dispose();
+                _thinkingMenu.Dispose();
                 _skillMenu.Dispose();
                 _historyMenu.Dispose();
                 foreach (Image icon in _tabIcons)
@@ -384,6 +398,7 @@ namespace DB2Sheet.UI
                 _tabs.ImageList = null;
                 _conversationTabIcons.Dispose();
                 _addIcon.Dispose();
+                _thinkingIcon.Dispose();
                 _sendIcon.Dispose();
                 _sendIconGray.Dispose();
                 _chipFont.Dispose();
@@ -606,7 +621,8 @@ namespace DB2Sheet.UI
                     Title = AppPresentation.AiSentQuestion,
                     Body = raw
                 });
-                string systemBase = AiPrompt.SystemText(model.ModelId);
+                string thinkingDisplay = AiThinkingLevels.DisplayName(_thinkingLevel);
+                string systemBase = AiPrompt.SystemText(model.Profile.DisplayName, model.ModelId, thinkingDisplay);
                 sent.Add(new AiSentSection
                 {
                     Kind = AiSentSection.System,
@@ -692,6 +708,7 @@ namespace DB2Sheet.UI
                     Protocol = model.Profile.Protocol,
                     ModelDisplayName = model.Profile.DisplayName,
                     ModelId = model.ModelId,
+                    ThinkingLevel = _thinkingLevel,
                     SentUtc = DateTime.UtcNow.ToString("o")
                 };
                 _pendingSent = sent;
@@ -735,7 +752,9 @@ namespace DB2Sheet.UI
                     entry,
                     history,
                     system,
-                    finalUser);
+                    finalUser,
+                    _thinkingLevel,
+                    call);
                 RunOnUiThread(() =>
                 {
                     if (IsDisposed) return;
@@ -1244,11 +1263,56 @@ namespace DB2Sheet.UI
             if (_modelRow.Height != modelRowHeight)
                 _modelRow.Height = modelRowHeight;
             int modelY = Math.Max(0, (_modelRow.ClientSize.Height - _modelButton.Height) / 2);
-            if (_modelButton.Left != 8 || _modelButton.Top != modelY)
-                _modelButton.Location = new Point(8, modelY);
+            int modelLeft = 8;
+            Size preferredModel = _modelButton.GetPreferredSize(Size.Empty);
+            int sendLeft = _modelRow.ClientSize.Width - _modelRow.Padding.Right - _send.Width;
+            int modelWidth = Math.Max(0, Math.Min(
+                preferredModel.Width,
+                sendLeft - modelLeft - 4 - _thinkingButton.Width - 4));
+            int modelTextWidth = Math.Max(
+                0,
+                modelWidth - _modelButton.Padding.Horizontal - (_modelButton.Image == null ? 0 : _modelButton.Image.Width) - 4);
+            _modelButton.Text = FitModelCaption(CurrentModelText(), modelTextWidth);
+            if (_modelButton.AutoSize)
+                _modelButton.AutoSize = false;
+            if (_modelButton.Width != modelWidth || _modelButton.Height != preferredModel.Height)
+                _modelButton.Size = new Size(modelWidth, preferredModel.Height);
+            if (_modelButton.Left != modelLeft || _modelButton.Top != modelY)
+                _modelButton.Location = new Point(modelLeft, modelY);
+            int thinkingX = _modelButton.Right + 4;
+            int thinkingY = Math.Max(0, (_modelRow.ClientSize.Height - _thinkingButton.Height) / 2);
+            if (_thinkingButton.Left != thinkingX || _thinkingButton.Top != thinkingY)
+                _thinkingButton.Location = new Point(thinkingX, thinkingY);
             int next = _modelRow.Height + hint + 72 + chips + 8;
             if (_composer.Height != next)
                 _composer.Height = next;
+        }
+
+        /// <summary>按模型芯片可用宽度截短型号文字，同时保留下拉标记。</summary>
+        /// <param name="modelId">当前选择的子型号或未设置提示。</param>
+        /// <param name="availableWidth">扣除图标和内边距后的文字宽度。</param>
+        /// <returns>能放入按钮的型号文字。</returns>
+        private string FitModelCaption(string modelId, int availableWidth)
+        {
+            string suffix = "  ﹀";
+            string caption = (modelId ?? string.Empty) + suffix;
+            TextFormatFlags flags = TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
+            if (TextRenderer.MeasureText(caption, _modelButton.Font, Size.Empty, flags).Width <= availableWidth)
+                return caption;
+
+            string ellipsis = "…";
+            int length = modelId == null ? 0 : modelId.Length;
+            while (length > 0)
+            {
+                string shortened = modelId.Substring(0, length) + ellipsis + suffix;
+                if (TextRenderer.MeasureText(shortened, _modelButton.Font, Size.Empty, flags).Width <= availableWidth)
+                    return shortened;
+                length--;
+            }
+
+            return TextRenderer.MeasureText(ellipsis + suffix, _modelButton.Font, Size.Empty, flags).Width <= availableWidth
+                ? ellipsis + suffix
+                : "﹀";
         }
 
         /// <summary>发送按钮的宽度。系统首选宽度不含左侧图标，按图标、文字和左右空隙另算。</summary>
@@ -1462,7 +1526,9 @@ namespace DB2Sheet.UI
                     entry,
                     null,
                     null,
-                    prompt);
+                    prompt,
+                    AiThinkingLevels.Automatic,
+                    null);
                 if (serial != _titleSerial) return;
                 RunOnUiThread(() =>
                 {
@@ -1671,18 +1737,31 @@ namespace DB2Sheet.UI
             menu.Items.Clear();
             if (model)
             {
-                foreach (ModelPick pick in _models)
+                foreach (AiModelProfile profile in _assistant.Models.GetAll())
                 {
-                    ModelPick captured = pick;
-                    ToolStripMenuItem item = new ToolStripMenuItem(captured.MenuText, AiModelIcons.For(captured.Profile.DisplayName, new[] { captured.ModelId }), (sender, args) =>
+                    IReadOnlyList<string> modelIds = AiModelCatalog.Ids(profile);
+                    if (modelIds.Count == 0) continue;
+
+                    ToolStripMenuItem group = new ToolStripMenuItem(
+                        profile.DisplayName,
+                        AiModelIcons.For(profile.DisplayName, modelIds));
+                    group.ToolTipText = AppPresentation.AiModelChoiceGroupTip;
+                    foreach (string modelId in modelIds)
                     {
-                        _modelId = captured.Profile.Id;
-                        _modelName = captured.ModelId;
-                        RememberModel();
-                        ApplyChoiceButtons();
-                    });
-                    item.Checked = SameModel(captured);
-                    menu.Items.Add(item);
+                        ModelPick pick = new ModelPick(profile, modelId);
+                        ToolStripMenuItem item = new ToolStripMenuItem(modelId, null, (sender, args) =>
+                        {
+                            _modelId = pick.Profile.Id;
+                            _modelName = pick.ModelId;
+                            RememberModel();
+                            ApplyChoiceButtons();
+                        });
+                        item.ToolTipText = AppPresentation.AiModelChoiceTip;
+                        item.Checked = SameModel(pick);
+                        group.DropDownItems.Add(item);
+                    }
+
+                    menu.Items.Add(group);
                 }
 
                 AppendSettingsItem(menu, AppPresentation.AiAddModelMenu, OpenModelSettings);
@@ -1759,6 +1838,49 @@ namespace DB2Sheet.UI
         {
             if (string.IsNullOrEmpty(_modelId) || string.IsNullOrEmpty(_modelName)) return;
             _settings.Set(CoreSettings.AiModelChoice, _modelId + "|" + _modelName);
+        }
+
+        private void FillThinkingMenu()
+        {
+            _thinkingMenu.Items.Clear();
+            AddThinkingMenuItem(AiThinkingLevels.Automatic);
+            AddThinkingMenuItem(AiThinkingLevels.Low);
+            AddThinkingMenuItem(AiThinkingLevels.Medium);
+            AddThinkingMenuItem(AiThinkingLevels.High);
+            SyncThinkingMenu();
+        }
+
+        private void AddThinkingMenuItem(string level)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(AiThinkingLevels.DisplayName(level))
+            {
+                Tag = level,
+                ToolTipText = AppPresentation.AiThinkingTip,
+                Checked = string.Equals(level, _thinkingLevel, StringComparison.OrdinalIgnoreCase)
+            };
+            _thinkingMenu.Items.Add(item);
+        }
+
+        private void ThinkingMenuItemClicked(object sender, ToolStripItemClickedEventArgs e)
+        {
+            ToolStripMenuItem item = e.ClickedItem as ToolStripMenuItem;
+            string level = item == null ? null : item.Tag as string;
+            if (string.IsNullOrWhiteSpace(level)) return;
+            _thinkingLevel = AiThinkingLevels.Normalize(level);
+            _settings.Set(CoreSettings.AiThinkingChoice, _thinkingLevel);
+            SyncThinkingMenu();
+            ApplyChoiceButtons();
+        }
+
+        private void SyncThinkingMenu()
+        {
+            foreach (ToolStripMenuItem item in _thinkingMenu.Items)
+            {
+                item.Checked = string.Equals(
+                    item.Tag as string,
+                    _thinkingLevel,
+                    StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         /// <summary>勾选或取消一条 Skill。点「不使用」则清掉全部。菜单是否收起由 <see cref="SkillMenuItemClicked"/> 决定。</summary>
@@ -1842,6 +1964,8 @@ namespace DB2Sheet.UI
             _modelButton.Image = model == null
                 ? AiModelIcons.For(string.Empty, null)
                 : AiModelIcons.For(model.Profile.DisplayName, new[] { model.ModelId });
+            _thinkingButton.Text = AiThinkingLevels.DisplayName(_thinkingLevel) + "  ﹀";
+            _thinkingButton.Image = _thinkingIcon;
             bool skillOn = SelectedSkills().Count > 0;
             _skillButton.Text = CurrentSkillText() + "  ﹀";
             _skillButton.Image = AiModelIcons.Skill(skillOn);
@@ -2013,10 +2137,6 @@ namespace DB2Sheet.UI
 
             public AiModelProfile Profile { get; }
             public string ModelId { get; }
-            public string MenuText
-            {
-                get { return AiModelCaption.Menu(Profile == null ? string.Empty : Profile.DisplayName, ModelId); }
-            }
         }
 
         private sealed class SkillPick

@@ -80,6 +80,7 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.AiChatSplitRatio);
             registry.Register(CoreSettings.AiChatVisible);
             registry.Register(CoreSettings.AiModelChoice);
+            registry.Register(CoreSettings.AiThinkingChoice);
             registry.Register(CoreSettings.AiSkillChoice);
             return registry;
         }
@@ -186,6 +187,21 @@ namespace DB2Sheet.Services
             new SettingDefinition<string>(
                 "session.aiModelChoice", "AI 型号选择", "会话", string.Empty,
                 value => Tuple.Create(true, value ?? string.Empty));
+
+        /// <summary>AI 对话里上次选中的思考强度，不出现在参数设置里。</summary>
+        public static readonly SettingDefinition<string> AiThinkingChoice =
+            new SettingDefinition<string>(
+                "session.aiThinkingLevel", "AI 思考强度", "会话", AiThinkingLevels.Automatic,
+                value =>
+                {
+                    string normalized = AiThinkingLevels.Normalize(value);
+                    bool valid = string.IsNullOrWhiteSpace(value)
+                        || string.Equals(value, AiThinkingLevels.Automatic, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(value, AiThinkingLevels.Low, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(value, AiThinkingLevels.Medium, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(value, AiThinkingLevels.High, StringComparison.OrdinalIgnoreCase);
+                    return Tuple.Create(valid, normalized);
+                });
 
         /// <summary>对话里上次勾选的 Skill。多项用竖线分隔，一条都没勾时为空。不出现在参数设置里。</summary>
         public static readonly SettingDefinition<string> AiSkillChoice =

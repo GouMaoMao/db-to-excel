@@ -93,6 +93,18 @@ namespace DB2Sheet.Services
         private const SecurityProtocolType Tls13 = (SecurityProtocolType)12288;
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+        private static readonly HashSet<string> ProtectedParameterNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "model", "messages", "system", "contents", "systeminstruction", "prompt", "input",
+            "authorization", "xapikey", "apikey", "key", "accesstoken", "token", "password",
+            "secret", "secretkey", "credential"
+        };
+        private static readonly HashSet<string> ContentOrSecretParameterNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "messages", "system", "contents", "systeminstruction", "prompt", "input",
+            "authorization", "xapikey", "apikey", "key", "accesstoken", "token", "password",
+            "secret", "secretkey", "credential"
+        };
 
         static AiChatClient()
         {
@@ -120,6 +132,9 @@ namespace DB2Sheet.Services
 
             /// <summary>请求体 JSON。</summary>
             public string Body { get; set; }
+
+            /// <summary>剔除消息正文和认证信息后，可显示在请求详情中的 API 参数 JSON。</summary>
+            public string ApiParametersJson { get; set; }
         }
 
         /// <summary>模型返回的 HTTP 结果。正文尚未解析。</summary>
@@ -148,6 +163,7 @@ namespace DB2Sheet.Services
         /// <param name="modelName">模型名。</param>
         /// <param name="systemText">系统说明。测试请求可以为空。</param>
         /// <param name="turns">user 与 assistant 往来，最后一轮是本次用户消息。</param>
+        /// <param name="additionalParameters">已经通过用户映射配置验证的非内容请求参数。</param>
         /// <returns>待发送的调用。</returns>
         public OutboundCall Build(
             AiProtocol protocol,
@@ -155,7 +171,8 @@ namespace DB2Sheet.Services
             string apiKey,
             string modelName,
             string systemText,
-            IList<AiChatTurn> turns)
+            IList<AiChatTurn> turns,
+            IDictionary<string, object> additionalParameters = null)
         {
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException("请先填写密钥。");
@@ -166,11 +183,11 @@ namespace DB2Sheet.Services
             switch (protocol)
             {
                 case AiProtocol.Claude:
-                    return BuildClaude(url, apiKey, model, systemText, turns);
+                    return BuildClaude(url, apiKey, model, systemText, turns, additionalParameters);
                 case AiProtocol.Gemini:
-                    return BuildGemini(url, apiKey, model, systemText, turns);
+                    return BuildGemini(url, apiKey, model, systemText, turns, additionalParameters);
                 default:
-                    return BuildOpenAi(url, apiKey, model, systemText, turns);
+                    return BuildOpenAi(url, apiKey, model, systemText, turns, additionalParameters);
             }
         }
 
@@ -428,7 +445,13 @@ namespace DB2Sheet.Services
             return text.Length <= 2000 ? text : text.Substring(0, 2000);
         }
 
-        private OutboundCall BuildOpenAi(string url, string apiKey, string modelName, string systemText, IList<AiChatTurn> turns)
+        private OutboundCall BuildOpenAi(
+            string url,
+            string apiKey,
+            string modelName,
+            string systemText,
+            IList<AiChatTurn> turns,
+            IDictionary<string, object> additionalParameters)
         {
             List<Dictionary<string, string>> messages = new List<Dictionary<string, string>>();
             if (!string.IsNullOrWhiteSpace(systemText))
@@ -440,10 +463,12 @@ namespace DB2Sheet.Services
                 { "model", modelName },
                 { "messages", messages }
             };
+            AddParameters(payload, additionalParameters);
             return new OutboundCall
             {
                 Url = url,
                 Body = _serializer.Serialize(payload),
+                ApiParametersJson = ApiParametersJson(payload),
                 Headers = new List<KeyValuePair<string, string>>
                 {
                     new KeyValuePair<string, string>("Authorization", "Bearer " + apiKey)
@@ -451,7 +476,57 @@ namespace DB2Sheet.Services
             };
         }
 
-        private OutboundCall BuildClaude(string url, string apiKey, string modelName, string systemText, IList<AiChatTurn> turns)
+        private void AddParameters(
+            IDictionary<string, object> payload,
+            IDictionary<string, object> additionalParameters)
+        {
+            if (additionalParameters == null) return;
+            foreach (KeyValuePair<string, object> parameter in additionalParameters)
+            {
+                if (IsProtectedParameterKey(parameter.Key))
+                    throw new InvalidOperationException("思考强度映射不能设置受保护参数：" + parameter.Key + "。");
+                payload[parameter.Key] = parameter.Value;
+            }
+        }
+
+        private string ApiParametersJson(IDictionary<string, object> payload)
+        {
+            Dictionary<string, object> visible = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, object> parameter in payload)
+            {
+                if (IsContentOrSecretKey(parameter.Key)) continue;
+                visible.Add(parameter.Key, parameter.Value);
+            }
+
+            return _serializer.Serialize(visible);
+        }
+
+        private static bool IsProtectedParameterKey(string key)
+        {
+            return ProtectedParameterNames.Contains(NormalizeParameterName(key));
+        }
+
+        private static bool IsContentOrSecretKey(string key)
+        {
+            return ContentOrSecretParameterNames.Contains(NormalizeParameterName(key));
+        }
+
+        private static string NormalizeParameterName(string key)
+        {
+            return (key ?? string.Empty)
+                .Replace("_", string.Empty)
+                .Replace("-", string.Empty)
+                .Replace(".", string.Empty)
+                .ToLowerInvariant();
+        }
+
+        private OutboundCall BuildClaude(
+            string url,
+            string apiKey,
+            string modelName,
+            string systemText,
+            IList<AiChatTurn> turns,
+            IDictionary<string, object> additionalParameters)
         {
             List<Dictionary<string, string>> messages = new List<Dictionary<string, string>>();
             foreach (AiChatTurn turn in Merge(turns))
@@ -468,10 +543,12 @@ namespace DB2Sheet.Services
             };
             if (!string.IsNullOrWhiteSpace(systemText))
                 payload["system"] = systemText;
+            AddParameters(payload, additionalParameters);
             return new OutboundCall
             {
                 Url = url,
                 Body = _serializer.Serialize(payload),
+                ApiParametersJson = ApiParametersJson(payload),
                 Headers = new List<KeyValuePair<string, string>>
                 {
                     new KeyValuePair<string, string>("x-api-key", apiKey),
@@ -480,7 +557,13 @@ namespace DB2Sheet.Services
             };
         }
 
-        private OutboundCall BuildGemini(string url, string apiKey, string modelName, string systemText, IList<AiChatTurn> turns)
+        private OutboundCall BuildGemini(
+            string url,
+            string apiKey,
+            string modelName,
+            string systemText,
+            IList<AiChatTurn> turns,
+            IDictionary<string, object> additionalParameters)
         {
             List<Dictionary<string, object>> contents = new List<Dictionary<string, object>>();
             foreach (AiChatTurn turn in Merge(turns))
@@ -502,10 +585,12 @@ namespace DB2Sheet.Services
                 };
             }
 
+            AddParameters(payload, additionalParameters);
             return new OutboundCall
             {
                 Url = url,
                 Body = _serializer.Serialize(payload),
+                ApiParametersJson = ApiParametersJson(payload),
                 Headers = new List<KeyValuePair<string, string>>
                 {
                     new KeyValuePair<string, string>("x-goog-api-key", apiKey)

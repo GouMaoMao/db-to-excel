@@ -83,7 +83,7 @@ namespace DB2Sheet.Models
     }
 
     /// <summary>查看请求详情时记下的这一次调用。只供本机查看，不进入审计日志。</summary>
-    /// <remarks>查询串里的密钥参数在记下地址之前已经去掉。请求头不保存。</remarks>
+    /// <remarks>查询串里的密钥参数在记下地址之前已经去掉。请求头和消息正文参数不保存。</remarks>
     public sealed class AiSentCall
     {
         /// <summary>实际 POST 的地址。</summary>
@@ -97,6 +97,12 @@ namespace DB2Sheet.Models
 
         /// <summary>这次实际调用的子型号。</summary>
         public string ModelId { get; set; }
+
+        /// <summary>发送当时选择的思考强度稳定值；旧对话为空。</summary>
+        public string ThinkingLevel { get; set; }
+
+        /// <summary>从实际请求体筛出的非内容参数 JSON；不含消息正文或认证信息。</summary>
+        public string ApiParametersJson { get; set; }
 
         /// <summary>点击发送的时间，圆点往返格式的 UTC。</summary>
         public string SentUtc { get; set; }
@@ -420,6 +426,7 @@ namespace DB2Sheet.Models
                 default:
                     return OpenAi;
             }
+
         }
 
         /// <summary>从存储值读协议。无法识别时当作 OpenAI 兼容。</summary>
@@ -448,6 +455,41 @@ namespace DB2Sheet.Models
                 default:
                     return "OpenAI 兼容";
             }
+        }
+    }
+
+    /// <summary>AI 思考强度选择的稳定会话值和界面文字。</summary>
+    public static class AiThinkingLevels
+    {
+        /// <summary>不额外指定思考参数的默认档位。</summary>
+        public const string Automatic = "automatic";
+        /// <summary>低思考强度档位。</summary>
+        public const string Low = "low";
+        /// <summary>中思考强度档位。</summary>
+        public const string Medium = "medium";
+        /// <summary>高思考强度档位。</summary>
+        public const string High = "high";
+
+        /// <summary>把会话值转换为中文界面文字。</summary>
+        /// <param name="value">automatic、low、medium 或 high。</param>
+        /// <returns>自动、低、中或高。</returns>
+        public static string DisplayName(string value)
+        {
+            if (string.Equals(value, Low, StringComparison.OrdinalIgnoreCase)) return "低";
+            if (string.Equals(value, Medium, StringComparison.OrdinalIgnoreCase)) return "中";
+            if (string.Equals(value, High, StringComparison.OrdinalIgnoreCase)) return "高";
+            return "自动";
+        }
+
+        /// <summary>把未知或空的会话值归一为默认自动档位。</summary>
+        /// <param name="value">设置文件中的档位值。</param>
+        /// <returns>有效的稳定档位值。</returns>
+        public static string Normalize(string value)
+        {
+            if (string.Equals(value, Low, StringComparison.OrdinalIgnoreCase)) return Low;
+            if (string.Equals(value, Medium, StringComparison.OrdinalIgnoreCase)) return Medium;
+            if (string.Equals(value, High, StringComparison.OrdinalIgnoreCase)) return High;
+            return Automatic;
         }
     }
 }

@@ -12,7 +12,7 @@ namespace DB2Sheet.UI
     /// <remarks>
     /// 不在这里填写子型号。测试会向接口拉取型号，并用其中一个发一句不含业务内容的话。
     /// 只有这次测试成功，保存才可用。已保存的密钥以固定掩码显示，不明文解出。
-    /// 左侧列表末项是「新增」。上面已有配置时，该项顶部有一条分隔线。点中后这一行保持选中高亮。删除在配置行的右键菜单里。
+    /// 左侧列表按配置分组，父项展开后缩进显示子型号；子型号仅供查看。列表末项是「新增」，删除在配置行的右键菜单里。
     /// </remarks>
     public sealed class AiModelSettingsForm : AppForm
     {
@@ -27,6 +27,8 @@ namespace DB2Sheet.UI
         private readonly ContextMenuStrip _listMenu = new ContextMenuStrip();
         private readonly AddModelItem _addItem = new AddModelItem();
         private readonly ModelListBox _list = new ModelListBox();
+        private readonly List<AiModelProfile> _profiles = new List<AiModelProfile>();
+        private readonly HashSet<string> _expandedProfileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly TextBox _name = new TextBox { BorderStyle = BorderStyle.FixedSingle };
         private readonly ComboBox _protocol = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly TextBox _endpoint = new TextBox { BorderStyle = BorderStyle.FixedSingle };
@@ -77,6 +79,7 @@ namespace DB2Sheet.UI
             _protocol.SelectedIndex = 0;
             _list.MeasureItem += ListMeasureItem;
             _list.DrawItem += ListDrawItem;
+            _list.KeyDown += ListKeyDown;
             _list.MouseMove += ListMouseMove;
             _list.MouseLeave += ListMouseLeave;
             _list.MouseUp += ListMouseUp;
@@ -317,7 +320,16 @@ namespace DB2Sheet.UI
                             HasTab = false,
                             Detail = "测试不含业务文本。探测型号=" + probe
                         };
-                        await _assistant.AskAsync(profile, apiKey, probe, entry, null, null, entry.UserText);
+                        await _assistant.AskAsync(
+                            profile,
+                            apiKey,
+                            probe,
+                            entry,
+                            null,
+                            null,
+                            entry.UserText,
+                            AiThinkingLevels.Automatic,
+                            null);
                         return availableIds;
                     });
                 _testedIds = new List<string>(ids);
@@ -426,36 +438,66 @@ namespace DB2Sheet.UI
         /// <param name="selectId">要选中的配置。为空时有配置就选第一条，没有就进入新建。</param>
         private void Reload(string selectId)
         {
+            _profiles.Clear();
+            _profiles.AddRange(_assistant.Models.GetAll());
+            _expandedProfileIds.Clear();
+            RebuildVisibleItems(selectId, true);
+            if (_profiles.Count == 0 || (!string.IsNullOrEmpty(selectId) && _list.SelectedIndex < 0))
+            {
+                BeginNew();
+                return;
+            }
+
+        }
+
+        /// <summary>按展开状态重建配置列表，并保留指定父项的选择。</summary>
+        /// <param name="selectId">要保持选择的配置标识；为空时选择第一项。</param>
+        /// <param name="loadEditor">是否将所选配置重新载入右侧编辑区。</param>
+        private void RebuildVisibleItems(string selectId, bool loadEditor)
+        {
             _binding = true;
             _list.Items.Clear();
-            bool any = false;
-            foreach (AiModelProfile profile in _assistant.Models.GetAll())
+            int selectedIndex = -1;
+            foreach (AiModelProfile profile in _profiles)
             {
-                _list.Items.Add(new ProfileItem(profile));
-                any = true;
+                int profileIndex = _list.Items.Add(new ProfileItem(profile));
+                if (selectedIndex < 0
+                    && (string.IsNullOrEmpty(selectId) || string.Equals(profile.Id, selectId, StringComparison.OrdinalIgnoreCase)))
+                    selectedIndex = profileIndex;
+
+                if (_expandedProfileIds.Contains(profile.Id))
+                {
+                    foreach (string modelId in AiModelCatalog.Ids(profile))
+                        _list.Items.Add(new ModelIdItem(profile, modelId));
+                }
             }
 
             _list.Items.Add(_addItem);
+            if (selectedIndex >= 0)
+                _list.SelectedIndex = selectedIndex;
             _binding = false;
-            if (string.IsNullOrEmpty(selectId))
-            {
-                if (!any) BeginNew();
-                else _list.SelectedIndex = 0;
-                return;
-            }
 
+            _anchorIndex = selectedIndex;
+            if (loadEditor && selectedIndex >= 0)
+                ListSelectedIndexChanged(_list, EventArgs.Empty);
+        }
+
+        /// <summary>按配置标识查找当前可见的父项行。</summary>
+        /// <param name="profileId">模型配置标识。</param>
+        /// <returns>父项行号；未找到时为 -1。</returns>
+        private int FindProfileIndex(string profileId)
+        {
             for (int index = 0; index < _list.Items.Count; index++)
             {
                 ProfileItem item = _list.Items[index] as ProfileItem;
-                if (item == null || !string.Equals(item.Profile.Id, selectId, StringComparison.OrdinalIgnoreCase)) continue;
-                _list.SelectedIndex = index;
-                return;
+                if (item != null && string.Equals(item.Profile.Id, profileId, StringComparison.OrdinalIgnoreCase))
+                    return index;
             }
 
-            BeginNew();
+            return -1;
         }
 
-        /// <summary>点「新增」进入新建。右键落在「新增」上时保持原来的选中，不弹出删除。</summary>
+        /// <summary>处理配置、子型号和「新增」行的选择变化。</summary>
         private void ListSelectedIndexChanged(object sender, EventArgs e)
         {
             if (_binding) return;
@@ -477,6 +519,20 @@ namespace DB2Sheet.UI
                 return;
             }
 
+            if (_list.SelectedItem is ModelIdItem)
+            {
+                ModelIdItem modelItem = (ModelIdItem)_list.SelectedItem;
+                int profileIndex = FindProfileIndex(modelItem.Profile.Id);
+                if (profileIndex >= 0)
+                {
+                    _binding = true;
+                    _list.SelectedIndex = profileIndex;
+                    _binding = false;
+                    _anchorIndex = profileIndex;
+                }
+                return;
+            }
+
             ProfileItem item = _list.SelectedItem as ProfileItem;
             if (item == null) return;
             _anchorIndex = _list.SelectedIndex;
@@ -495,20 +551,38 @@ namespace DB2Sheet.UI
             _status.Text = AppPresentation.SaveRequiresTestHint;
         }
 
-        /// <summary>有配置时，「新增」上方多出一条分隔线的高度。</summary>
+        /// <summary>为配置、子型号行及「新增」分隔线设置各自的行高。</summary>
         private void ListMeasureItem(object sender, MeasureItemEventArgs e)
         {
+            if (e.Index < 0 || e.Index >= _list.Items.Count)
+            {
+                e.ItemHeight = RowHeight;
+                return;
+            }
+
             bool separated = e.Index > 0 && e.Index < _list.Items.Count && _list.Items[e.Index] is AddModelItem;
-            e.ItemHeight = separated ? RowHeight + SeparatorBand : RowHeight;
+            e.ItemHeight = separated ? RowHeight + SeparatorBand
+                : _list.Items[e.Index] is ModelIdItem ? RowHeight - 2
+                : RowHeight;
         }
 
-        /// <summary>鼠标停在「新增」上时显示悬浮说明，停在配置上则收起。</summary>
+        /// <summary>鼠标停在新增项或可展开配置上时显示对应说明。</summary>
         private void ListMouseMove(object sender, MouseEventArgs e)
         {
             int index = _list.IndexFromPoint(e.Location);
-            string tip = index >= 0 && index < _list.Items.Count && _list.Items[index] is AddModelItem
-                ? AppPresentation.AiModelAddTip
-                : string.Empty;
+            string tip = string.Empty;
+            if (index >= 0 && index < _list.Items.Count)
+            {
+                if (_list.Items[index] is AddModelItem)
+                    tip = AppPresentation.AiModelAddTip;
+                else
+                {
+                    ProfileItem profileItem = _list.Items[index] as ProfileItem;
+                    if (profileItem != null && AiModelCatalog.Ids(profileItem.Profile).Count > 0)
+                        tip = AppPresentation.AiModelGroupTip;
+                }
+            }
+
             if (string.Equals(tip, _listTip, StringComparison.Ordinal)) return;
             _listTip = tip;
             _tips.SetToolTip(_list, tip);
@@ -521,12 +595,55 @@ namespace DB2Sheet.UI
             _tips.SetToolTip(_list, string.Empty);
         }
 
-        /// <summary>只在某一条配置上弹出删除。点在「新增」或空白处不弹出。</summary>
+        /// <summary>键盘上下移动时跳过仅展示的子型号行。</summary>
+        /// <param name="sender">模型列表。</param>
+        /// <param name="e">按键事件。</param>
+        private void ListKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Up && e.KeyCode != Keys.Down && e.KeyCode != Keys.Home && e.KeyCode != Keys.End)
+                return;
+
+            int index = _list.SelectedIndex;
+            if (e.KeyCode == Keys.Home)
+            {
+                index = 0;
+            }
+            else if (e.KeyCode == Keys.End)
+            {
+                index = _list.Items.Count - 1;
+            }
+            else
+            {
+                int direction = e.KeyCode == Keys.Down ? 1 : -1;
+                do
+                {
+                    index += direction;
+                }
+                while (index >= 0 && index < _list.Items.Count && _list.Items[index] is ModelIdItem);
+            }
+
+            if (index >= 0 && index < _list.Items.Count)
+                _list.SelectedIndex = index;
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        /// <summary>左键展开或收起配置子型号；右键只在配置父项上弹出删除。</summary>
         private void ListMouseUp(object sender, MouseEventArgs e)
         {
-            if (e.Button != MouseButtons.Right) return;
             int index = _list.IndexFromPoint(e.Location);
             if (index < 0 || index >= _list.Items.Count || !(_list.Items[index] is ProfileItem)) return;
+            ProfileItem profileItem = (ProfileItem)_list.Items[index];
+            if (e.Button == MouseButtons.Left)
+            {
+                if (AiModelCatalog.Ids(profileItem.Profile).Count == 0) return;
+                if (!_expandedProfileIds.Add(profileItem.Profile.Id))
+                    _expandedProfileIds.Remove(profileItem.Profile.Id);
+                RebuildVisibleItems(profileItem.Profile.Id, false);
+                return;
+            }
+
+            if (e.Button != MouseButtons.Right) return;
             if (_list.SelectedIndex != index)
                 _list.SelectedIndex = index;
             _listMenu.Show(_list, e.Location);
@@ -540,7 +657,7 @@ namespace DB2Sheet.UI
             return item is ProfileItem || item is AddModelItem ? _anchorIndex : -1;
         }
 
-        /// <summary>画出配置行，或末项「新增」及其上方的分隔线。</summary>
+        /// <summary>画出配置父项、子型号行，或末项「新增」及其上方的分隔线。</summary>
         private void ListDrawItem(object sender, DrawItemEventArgs e)
         {
             if (e.Index < 0 || e.Index >= _list.Items.Count) return;
@@ -551,10 +668,45 @@ namespace DB2Sheet.UI
             }
 
             e.DrawBackground();
+            ModelIdItem modelItem = _list.Items[e.Index] as ModelIdItem;
+            if (modelItem != null)
+            {
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    modelItem.ModelId,
+                    e.Font,
+                    new Rectangle(e.Bounds.Left + 42, e.Bounds.Top, Math.Max(0, e.Bounds.Width - 46), e.Bounds.Height),
+                    SystemColors.ControlText,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.Left);
+                return;
+            }
+
             ProfileItem item = _list.Items[e.Index] as ProfileItem;
             if (item == null) return;
             bool selected = (e.State & DrawItemState.Selected) != 0;
-            DrawEntry(e.Graphics, e.Font, e.Bounds, item.ToString(), AiModelIcons.For(item.Profile.DisplayName, AiModelCatalog.Ids(item.Profile)), selected);
+            IReadOnlyList<string> modelIds = AiModelCatalog.Ids(item.Profile);
+            if (modelIds.Count > 0)
+            {
+                string arrow = _expandedProfileIds.Contains(item.Profile.Id) ? "﹀" : "›";
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    arrow,
+                    e.Font,
+                    new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, 14, e.Bounds.Height),
+                    selected ? SystemColors.HighlightText : SystemColors.ControlText,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+            }
+
+            Image icon = AiModelIcons.For(item.Profile.DisplayName, modelIds);
+            if (icon != null)
+                e.Graphics.DrawImage(icon, e.Bounds.Left + 20, e.Bounds.Top + (e.Bounds.Height - icon.Height) / 2, icon.Width, icon.Height);
+            TextRenderer.DrawText(
+                e.Graphics,
+                item.ToString(),
+                e.Font,
+                new Rectangle(e.Bounds.Left + 42, e.Bounds.Top, Math.Max(0, e.Bounds.Width - 46), e.Bounds.Height),
+                selected ? SystemColors.HighlightText : SystemColors.ControlText,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.Left);
             e.DrawFocusRectangle();
         }
 
@@ -694,6 +846,24 @@ namespace DB2Sheet.UI
             {
                 return AiModelCaption.Format(Profile);
             }
+        }
+
+        /// <summary>列表中只展示、不单独编辑的子型号行。</summary>
+        private sealed class ModelIdItem
+        {
+            /// <summary>创建只展示的子型号行。</summary>
+            /// <param name="profile">所属模型配置。</param>
+            /// <param name="modelId">接口返回的子型号标识。</param>
+            public ModelIdItem(AiModelProfile profile, string modelId)
+            {
+                Profile = profile;
+                ModelId = modelId;
+            }
+
+            /// <summary>获取该子型号所属的模型配置。</summary>
+            public AiModelProfile Profile { get; }
+            /// <summary>获取接口返回的子型号标识。</summary>
+            public string ModelId { get; }
         }
     }
 }

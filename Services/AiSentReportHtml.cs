@@ -106,8 +106,16 @@ namespace DB2Sheet.Services
             AppendFact(body, AppPresentation.AiSentUrl, PostUrl(call));
             AppendFact(body, AppPresentation.AiSentProtocol, ProtocolName(call));
             AppendFact(body, AppPresentation.AiSentModel, AiModelCaption.Audit(call.ModelDisplayName, call.ModelId));
+            AppendFact(body, AppPresentation.AiSentThinking, ThinkingLevel(call));
             AppendFact(body, AppPresentation.AiSentTime, FormatSent(call.SentUtc));
             AppendFact(body, AppPresentation.AiSentResponse, FormatResponse(call));
+            body.Append("<div class=\"api-parameters\"><div class=\"api-title\">")
+                .Append(WebUtility.HtmlEncode(AppPresentation.AiSentApiParameters))
+                .Append("</div><pre>");
+            body.Append(WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(call.ApiParametersJson)
+                ? AppPresentation.AiSentNoApiParameters
+                : call.ApiParametersJson));
+            body.Append("</pre></div>");
             body.Append("</div>");
         }
 
@@ -131,9 +139,21 @@ namespace DB2Sheet.Services
             text.Append(AppPresentation.AiSentUrl).Append("  ").AppendLine(PostUrl(call));
             text.Append(AppPresentation.AiSentProtocol).Append("  ").AppendLine(ProtocolName(call));
             text.Append(AppPresentation.AiSentModel).Append("  ").AppendLine(AiModelCaption.Audit(call.ModelDisplayName, call.ModelId));
+            text.Append(AppPresentation.AiSentThinking).Append("  ").AppendLine(ThinkingLevel(call));
             text.Append(AppPresentation.AiSentTime).Append("  ").AppendLine(FormatSent(call.SentUtc));
             text.Append(AppPresentation.AiSentResponse).Append("  ").AppendLine(FormatResponse(call));
+            text.Append(AppPresentation.AiSentApiParameters).AppendLine(":");
+            text.AppendLine(string.IsNullOrWhiteSpace(call.ApiParametersJson)
+                ? AppPresentation.AiSentNoApiParameters
+                : call.ApiParametersJson);
             text.AppendLine();
+        }
+
+        private static string ThinkingLevel(AiSentCall call)
+        {
+            return string.IsNullOrWhiteSpace(call.ThinkingLevel)
+                ? AppPresentation.AiSentEmpty
+                : AiThinkingLevels.DisplayName(call.ThinkingLevel);
         }
 
         /// <summary>地址前面加上 POST，标明这次发出的方法。</summary>

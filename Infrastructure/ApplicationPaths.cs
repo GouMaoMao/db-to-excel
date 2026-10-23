@@ -34,6 +34,9 @@ namespace DB2Sheet.Infrastructure
         /// <summary>获取模型配置文件路径。密钥在文件里是 DPAPI 密文。</summary>
         public string AiModelsFile => Path.Combine(RootDirectory, "ai-models.json");
 
+        /// <summary>获取用户可编辑的 AI 思考强度 API 参数映射文件路径。</summary>
+        public string AiThinkingMappingsFile => Path.Combine(RootDirectory, "ai-thinking-mappings.json");
+
         /// <summary>获取 Skill 目录。一份 Skill 一个文件，只作上下文。</summary>
         public string AiSkillsDirectory => Path.Combine(RootDirectory, "ai-skills");
 
