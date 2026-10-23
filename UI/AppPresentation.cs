@@ -296,6 +296,18 @@ namespace DB2Sheet.UI
         /// <summary>旧对话没有记下调用信息时，请求详情顶部的说明。</summary>
         public const string AiSentMissingCall = "这次没有记下请求地址和模型。";
 
+        /// <summary>请求详情第一层区块，集中呈现本次请求的基本信息。</summary>
+        public const string AiSentOverview = "请求概览";
+
+        /// <summary>请求详情中 Token 占比和估算的区块标题。</summary>
+        public const string AiSentTokenUsage = "Token 用量";
+
+        /// <summary>请求详情中各类发送内容的区块标题。</summary>
+        public const string AiSentContent = "发送内容";
+
+        /// <summary>Token 占比条下方的分类图例标题。</summary>
+        public const string AiSentBreakdown = "各部分占比";
+
         /// <summary>请求详情「请求地址」标题。</summary>
         public const string AiSentUrl = "请求地址";
 

@@ -34,7 +34,13 @@ namespace DB2Sheet.Services
             List<Slice> slices = Build(sections, inputTokens);
             StringBuilder body = new StringBuilder();
             AppendCall(body, call);
-            body.Append("<div class=\"bar\">");
+            body.Append("<section class=\"token-section\"><div class=\"section-heading\"><h2>")
+                .Append(WebUtility.HtmlEncode(AppPresentation.AiSentTokenUsage))
+                .Append("</h2><p class=\"note\">")
+                .Append(WebUtility.HtmlEncode(Note(inputTokens)))
+                .Append("</p></div><div class=\"bar\" role=\"img\" aria-label=\"")
+                .Append(WebUtility.HtmlEncode(AppPresentation.AiSentBreakdown))
+                .Append("\">");
             foreach (Slice slice in slices)
             {
                 if (slice.Tokens <= 0) continue;
@@ -42,29 +48,33 @@ namespace DB2Sheet.Services
                 body.Append(" 1 0;background:").Append(slice.Color).Append("\"></i>");
             }
 
-            body.Append("</div><p class=\"note\">").Append(WebUtility.HtmlEncode(Note(inputTokens))).Append("</p>");
+            body.Append("</div></section><section class=\"content-section\"><h2>")
+                .Append(WebUtility.HtmlEncode(AppPresentation.AiSentContent))
+                .Append("</h2>");
             foreach (Slice slice in slices)
                 AppendDetails(body, slice);
+            body.Append("</section>");
             return "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
                 + "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">"
                 + "<style>"
-                + "body{font-family:\"Microsoft YaHei UI\",sans-serif;font-size:13px;line-height:1.5;margin:16px;color:#222;background:#fff;}"
-                + ".call{margin:0 0 16px;}"
-                + ".call div{display:flex;gap:12px;margin:0 0 6px;}"
-                + ".call .k{color:#888;flex:0 0 4.5em;}"
-                + ".call .v{flex:1;word-break:break-all;}"
-                + ".bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:#eee;}"
-                + ".bar i{display:block;height:10px;min-width:2px;}"
-                + ".note{color:#888;font-size:12px;margin:8px 0 16px;}"
-                + "details{border-bottom:1px solid #eee;}"
-                + "summary{display:flex;align-items:center;gap:8px;padding:8px 0;cursor:pointer;}"
-                + "summary::-webkit-details-marker{display:none;}"
-                + ".swatch{width:10px;height:10px;border-radius:2px;flex:0 0 auto;}"
-                + ".name{flex:1;}"
-                + ".count{color:#666;}"
-                + ".preface{color:#888;font-size:12px;margin:0 0 8px;}"
-                + ".piece-title{font-weight:600;margin:8px 0 4px;}"
-                + "pre{white-space:pre-wrap;word-break:break-word;font-family:Consolas,\"Microsoft YaHei UI\",sans-serif;font-size:12px;background:#f6f6f6;padding:8px;margin:0 0 12px;}"
+                + "body{font-family:\"Microsoft YaHei UI\",sans-serif;font-size:13px;line-height:1.5;margin:16px auto;max-width:900px;padding:0 8px;color:#222;background:#fff;}"
+                + "h1,h2,p{margin:0;}h1{font-size:16px;font-weight:600;}h2{font-size:14px;font-weight:600;margin:0 0 10px;}"
+                + ".request-card,.parameter-card{border:1px solid #e2e5e9;border-radius:5px;padding:12px 14px;margin:0 0 12px;}"
+                + ".request-card{background:#fafbfc;}.section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 10px;}"
+                + ".facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;}"
+                + ".fact{min-width:0;}.fact-wide{grid-column:1/-1;}.k{display:block;color:#777;font-size:11px;margin:0 0 2px;}"
+                + ".v{display:block;overflow-wrap:anywhere;}.parameter-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:Consolas,\"Microsoft YaHei UI\",sans-serif;font-size:12px;line-height:1.45;background:#f5f6f7;border:1px solid #e6e8eb;border-radius:3px;padding:9px 10px;margin:0;}"
+                + ".note{color:#777;font-size:12px;}.token-section{margin:16px 0 20px;}.token-section .section-heading{margin-bottom:8px;}"
+                + ".bar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#eee;}.bar i{display:block;height:8px;min-width:2px;}"
+                + ".swatch{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}"
+                + ".content-section{margin:0 0 12px;}.content-section>h2{margin:0 0 6px;}"
+                + "details{border:1px solid #e5e7ea;border-radius:4px;margin:0 0 6px;background:#fff;}"
+                + "summary{display:flex;align-items:center;gap:8px;padding:7px 9px;cursor:pointer;list-style:none;}"
+                + "summary::-webkit-details-marker{display:none;}summary:before{content:\"›\";color:#777;font-size:17px;line-height:1;transform:rotate(0);}"
+                + "details[open]>summary:before{transform:rotate(90deg);}.name{flex:1;}.count{color:#666;font-variant-numeric:tabular-nums;}"
+                + ".detail-body{padding:0 10px 9px 25px;}.preface{color:#777;font-size:12px;margin:0 0 8px;}"
+                + ".piece-title{font-weight:600;margin:8px 0 4px;}.detail-body pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:Consolas,\"Microsoft YaHei UI\",sans-serif;font-size:12px;background:#f6f7f8;border-radius:3px;padding:8px;margin:0 0 8px;}"
+                + "@media(max-width:520px){body{margin:10px auto;padding:0 4px;}.facts{grid-template-columns:1fr;}.section-heading{align-items:flex-start;flex-direction:column;gap:2px;}}"
                 + "</style></head><body>"
                 + body
                 + "</body></html>";
@@ -80,10 +90,16 @@ namespace DB2Sheet.Services
             List<Slice> slices = Build(sections, inputTokens);
             StringBuilder text = new StringBuilder();
             AppendCallPlain(text, call);
+            text.AppendLine(AppPresentation.AiSentTokenUsage);
             text.AppendLine(Note(inputTokens));
+            text.AppendLine(AppPresentation.AiSentBreakdown);
+            foreach (Slice slice in slices)
+                text.Append("  ").Append(slice.Title).Append("  ").AppendLine(CountText(slice));
+            text.AppendLine();
+            text.AppendLine(AppPresentation.AiSentContent);
             foreach (Slice slice in slices)
             {
-                text.Append(slice.Title).Append("  ").AppendLine(CountText(slice));
+                text.AppendLine(slice.Title);
                 if (!string.IsNullOrEmpty(slice.Preface))
                     text.AppendLine(slice.Preface);
                 AppendPlainPieces(text, slice);
@@ -102,27 +118,34 @@ namespace DB2Sheet.Services
                 return;
             }
 
-            body.Append("<div class=\"call\">");
-            AppendFact(body, AppPresentation.AiSentUrl, PostUrl(call));
+            body.Append("<section class=\"request-card\"><div class=\"section-heading\"><h1>")
+                .Append(WebUtility.HtmlEncode(AppPresentation.AiSentOverview))
+                .Append("</h1></div><div class=\"facts\">");
+            AppendFact(body, AppPresentation.AiSentUrl, PostUrl(call), true);
             AppendFact(body, AppPresentation.AiSentProtocol, ProtocolName(call));
             AppendFact(body, AppPresentation.AiSentModel, AiModelCaption.Audit(call.ModelDisplayName, call.ModelId));
             AppendFact(body, AppPresentation.AiSentThinking, ThinkingLevel(call));
             AppendFact(body, AppPresentation.AiSentTime, FormatSent(call.SentUtc));
             AppendFact(body, AppPresentation.AiSentResponse, FormatResponse(call));
-            body.Append("<div class=\"api-parameters\"><div class=\"api-title\">")
+            body.Append("</div></section><section class=\"parameter-card\"><h2>")
                 .Append(WebUtility.HtmlEncode(AppPresentation.AiSentApiParameters))
-                .Append("</div><pre>");
+                .Append("</h2><pre>");
             body.Append(WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(call.ApiParametersJson)
                 ? AppPresentation.AiSentNoApiParameters
                 : call.ApiParametersJson));
-            body.Append("</pre></div>");
-            body.Append("</div>");
+            body.Append("</pre></section>");
         }
 
-        /// <summary>调用信息里的一行。文字先转义。</summary>
-        private static void AppendFact(StringBuilder body, string label, string value)
+        /// <summary>请求概览中的一个字段。文字先转义，地址可横跨整行。</summary>
+        /// <param name="body">输出缓冲区。</param>
+        /// <param name="label">字段名称。</param>
+        /// <param name="value">字段内容。</param>
+        /// <param name="wide">为 true 时让字段占满概览卡片宽度。</param>
+        private static void AppendFact(StringBuilder body, string label, string value, bool wide = false)
         {
-            body.Append("<div><span class=\"k\">").Append(WebUtility.HtmlEncode(label)).Append("</span>");
+            body.Append("<div class=\"fact");
+            if (wide) body.Append(" fact-wide");
+            body.Append("\"><span class=\"k\">").Append(WebUtility.HtmlEncode(label)).Append("</span>");
             body.Append("<span class=\"v\">").Append(WebUtility.HtmlEncode(value)).Append("</span></div>");
         }
 
@@ -136,12 +159,14 @@ namespace DB2Sheet.Services
                 return;
             }
 
+            text.AppendLine(AppPresentation.AiSentOverview);
             text.Append(AppPresentation.AiSentUrl).Append("  ").AppendLine(PostUrl(call));
             text.Append(AppPresentation.AiSentProtocol).Append("  ").AppendLine(ProtocolName(call));
             text.Append(AppPresentation.AiSentModel).Append("  ").AppendLine(AiModelCaption.Audit(call.ModelDisplayName, call.ModelId));
             text.Append(AppPresentation.AiSentThinking).Append("  ").AppendLine(ThinkingLevel(call));
             text.Append(AppPresentation.AiSentTime).Append("  ").AppendLine(FormatSent(call.SentUtc));
             text.Append(AppPresentation.AiSentResponse).Append("  ").AppendLine(FormatResponse(call));
+            text.AppendLine();
             text.Append(AppPresentation.AiSentApiParameters).AppendLine(":");
             text.AppendLine(string.IsNullOrWhiteSpace(call.ApiParametersJson)
                 ? AppPresentation.AiSentNoApiParameters
@@ -195,7 +220,7 @@ namespace DB2Sheet.Services
         {
             body.Append("<details><summary><i class=\"swatch\" style=\"background:").Append(slice.Color).Append("\"></i>");
             body.Append("<span class=\"name\">").Append(WebUtility.HtmlEncode(slice.Title)).Append("</span>");
-            body.Append("<span class=\"count\">").Append(WebUtility.HtmlEncode(CountText(slice))).Append("</span></summary>");
+            body.Append("<span class=\"count\">").Append(WebUtility.HtmlEncode(CountText(slice))).Append("</span></summary><div class=\"detail-body\">");
             if (!string.IsNullOrEmpty(slice.Preface))
                 body.Append("<p class=\"preface\">").Append(WebUtility.HtmlEncode(slice.Preface)).Append("</p>");
             if (slice.Pieces.Count == 0)
@@ -210,7 +235,7 @@ namespace DB2Sheet.Services
                 }
             }
 
-            body.Append("</details>");
+            body.Append("</div></details>");
         }
 
         private static void AppendPlainPieces(StringBuilder text, Slice slice)
