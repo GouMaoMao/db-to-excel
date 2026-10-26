@@ -106,6 +106,15 @@ namespace DB2Sheet.Providers
                 });
                 JdbcConnectionTarget target = JdbcConnectionComposer.Compose(profile);
                 await _host.RequestAsync(CurrentLaunch(), CreateRequest("test", target, null, 0), cancellationToken).ConfigureAwait(false);
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Completed,
+                    ConnectionName = profile.Name,
+                    Message = string.Format("JDBC 连接测试成功，耗时 {0:N1} 秒。", stopwatch.Elapsed.TotalSeconds),
+                    Percent = 100,
+                    Elapsed = stopwatch.Elapsed,
+                    IsIndeterminate = false
+                });
                 return ConnectionTestResult.Success(stopwatch.Elapsed);
             }
             catch (OperationCanceledException)
@@ -114,6 +123,15 @@ namespace DB2Sheet.Providers
             }
             catch (Exception exception)
             {
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Failed,
+                    ConnectionName = profile.Name,
+                    Message = string.Format("JDBC 连接测试失败，耗时 {0:N1} 秒：{1}", stopwatch.Elapsed.TotalSeconds, exception.Message),
+                    Severity = LogSeverity.Error,
+                    Elapsed = stopwatch.Elapsed,
+                    IsIndeterminate = true
+                });
                 return ConnectionTestResult.Failure(exception.Message, stopwatch.Elapsed);
             }
         }
@@ -140,7 +158,7 @@ namespace DB2Sheet.Providers
             {
                 Stage = OperationStage.Connecting,
                 ConnectionName = request.Connection.Name,
-                Message = "正在连接 JDBC 数据源…",
+                Message = "Java 环境可用，正在连接 JDBC 数据源…",
                 IsIndeterminate = true
             });
             JdbcConnectionTarget target = JdbcConnectionComposer.Compose(request.Connection);

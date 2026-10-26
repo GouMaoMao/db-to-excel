@@ -58,7 +58,7 @@
 - `SettingsRegistry`：注册核心及未来扩展设置。
 - `SqlReadOnlyValidator`：去除注释和字面量后执行只读规则校验。
 - `DataSourceExecutionService`：统一调用 Provider。查询日志写入 SQL 正文和哈希；文件日志对密码类键脱敏。
-- `OperationRunner`：协调进度窗体、任务和取消。
+- `OperationRunner`：协调进度窗体、任务和取消。业务服务在真实阶段节点报告连接、执行、读取、写入、美化和最终摘要；高频读取与扫描日志由生产者节流，未知比例不虚构百分比。
 - `QueryBufferService`：将流式结果消费为多个二维数组块。
 - `BatchRefreshService`：串行或受限并行读取，并在 Excel UI 上下文串行写入。
 
@@ -133,7 +133,7 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 2. Provider 校验连接和只读 SQL。
 3. ADO.NET 提供程序打开连接并配置只读会话，用 `SequentialAccess` 执行 Reader，由 `DatabaseResultStream` 按块读取。JDBC 不走 ADO.NET，由进程外的 `java.exe` 执行，结果经 `JdbcResultStream` 按块读取。
 4. 预览经 `QueryBufferService` 缓冲后绑定到 DataGridView。预览右键可复制，或把已缓冲的预览存成 xlsx。写入 Sheet 和把 SQL 写入 SQL 页的细则见 `.github/copilot-instructions.md`。
-5. 进度通过 `IProgress<OperationProgress>` 上报；取消令牌触发命令取消。
+5. 进度通过 `IProgress<OperationProgress>` 上报；日志包含字段数、行数、分块数、目标表和耗时等非敏感摘要，不记录 SQL 正文、连接串或凭据；取消令牌触发命令取消。
 
 ## 批量刷新流程
 

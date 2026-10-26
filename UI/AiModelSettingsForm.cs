@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
 using DB2Sheet.Contracts;
@@ -295,6 +296,7 @@ namespace DB2Sheet.UI
                     false,
                     async (progress, cancellationToken) =>
                     {
+                        Stopwatch stopwatch = Stopwatch.StartNew();
                         progress.Report(new OperationProgress
                         {
                             Stage = OperationStage.Connecting,
@@ -303,6 +305,12 @@ namespace DB2Sheet.UI
                         });
                         IReadOnlyList<string> availableIds = await _assistant.ListModelsAsync(protocol, profile.Endpoint, apiKey);
                         string probe = AiAssistant.ChooseProbeModel(availableIds);
+                        progress.Report(new OperationProgress
+                        {
+                            Stage = OperationStage.Connecting,
+                            Message = string.Format("已读取 {0:N0} 个型号，将使用“{1}”探测响应。", availableIds.Count, probe),
+                            IsIndeterminate = true
+                        });
                         progress.Report(new OperationProgress
                         {
                             Stage = OperationStage.Executing,
@@ -330,6 +338,14 @@ namespace DB2Sheet.UI
                             entry.UserText,
                             AiThinkingLevels.Automatic,
                             null);
+                        progress.Report(new OperationProgress
+                        {
+                            Stage = OperationStage.Completed,
+                            Message = string.Format("模型响应正常，测试完成，耗时 {0:N1} 秒。", stopwatch.Elapsed.TotalSeconds),
+                            Percent = 100,
+                            Elapsed = stopwatch.Elapsed,
+                            IsIndeterminate = false
+                        });
                         return availableIds;
                     });
                 _testedIds = new List<string>(ids);

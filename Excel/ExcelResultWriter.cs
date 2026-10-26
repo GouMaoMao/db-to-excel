@@ -95,6 +95,18 @@ namespace DB2Sheet.Excel
             bool previousScreenUpdating = true;
             try
             {
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Preparing,
+                    WorkbookName = workbookName,
+                    TargetSheetName = targetSheetName,
+                    Message = string.Format(
+                        "目标区域已确认，准备写入 {0:N0} 行、{1:N0} 列。",
+                        result.RowCount,
+                        result.Columns.Count),
+                    RowsRead = result.RowCount,
+                    IsIndeterminate = true
+                });
                 if (options.RevealTarget)
                 {
                     RevealTarget(worksheet, options.AnchorRow, options.AnchorColumn);
@@ -117,9 +129,20 @@ namespace DB2Sheet.Excel
                 cancellationToken.ThrowIfCancellationRequested();
                 int columnCount = result.Columns.Count;
                 ClearBeforeWrite(worksheet, options, columnCount);
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Writing,
+                    WorkbookName = workbookName,
+                    TargetSheetName = targetSheetName,
+                    Message = "目标区域已清理，正在写入字段标题…",
+                    RowsRead = result.RowCount,
+                    Percent = 0,
+                    IsIndeterminate = false
+                });
 
                 if (columnCount == 0)
                 {
+                    ReportWriteCompleted(progress, workbookName, targetSheetName, result, 0, writeWatch.Elapsed);
                     LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                     return 0;
                 }
@@ -161,6 +184,7 @@ namespace DB2Sheet.Excel
                 }
 
                 ApplyTableBorder(worksheet, options.AnchorRow, options.AnchorColumn, targetRow - 1, columnCount);
+                ReportWriteCompleted(progress, workbookName, targetSheetName, result, rowsWritten, writeWatch.Elapsed);
                 LogWriteCompleted(operationId, workbookName, targetSheetName, result, rowsWritten, totalBlocks, writeWatch.Elapsed);
                 return rowsWritten;
             }
@@ -183,6 +207,42 @@ namespace DB2Sheet.Excel
                 RestoreScreenUpdating(application, restoreScreenUpdating, previousScreenUpdating);
                 Marshal.FinalReleaseComObject(worksheet);
             }
+        }
+
+        /// <summary>向进度窗口报告工作表数据和边框均已写完。</summary>
+        /// <param name="progress">进度接收器，可为空。</param>
+        /// <param name="workbookName">目标工作簿名。</param>
+        /// <param name="targetSheetName">目标工作表名。</param>
+        /// <param name="result">本次缓冲结果。</param>
+        /// <param name="rowsWritten">已经写入的数据行数。</param>
+        /// <param name="elapsed">写入阶段耗时。</param>
+        private static void ReportWriteCompleted(
+            IProgress<OperationProgress> progress,
+            string workbookName,
+            string targetSheetName,
+            BufferedQueryResult result,
+            long rowsWritten,
+            TimeSpan elapsed)
+        {
+            progress?.Report(new OperationProgress
+            {
+                Stage = OperationStage.Writing,
+                WorkbookName = workbookName,
+                TargetSheetName = targetSheetName,
+                Message = string.Format(
+                    "数据与边框写入完成：{0:N0} 行、{1:N0} 列，耗时 {2:N1} 秒{3}",
+                    rowsWritten,
+                    result.Columns.Count,
+                    elapsed.TotalSeconds,
+                    result.IsTruncated ? "，结果已截断。" : "。"),
+                RowsRead = result.RowCount,
+                RowsWritten = rowsWritten,
+                Percent = 100,
+                IsTruncated = result.IsTruncated,
+                Severity = result.IsTruncated ? LogSeverity.Warning : LogSeverity.Information,
+                Elapsed = elapsed,
+                IsIndeterminate = false
+            });
         }
 
         /// <summary>激活目标表，并把锚点滚到当前窗口视口的左上角。</summary>

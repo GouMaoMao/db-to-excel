@@ -65,6 +65,20 @@ namespace DB2Sheet.Services
             Stopwatch stopwatch = Stopwatch.StartNew();
             List<RefreshTaskResult> results = new List<RefreshTaskResult>();
             List<RefreshTaskDefinition> executable = new List<RefreshTaskDefinition>(tasks);
+            progress?.Report(new OperationProgress
+            {
+                Stage = OperationStage.Preparing,
+                ConnectionName = connection.Name,
+                Message = string.Format(
+                    "准备刷新 {0:N0} 个任务，读取方式：{1}，最大导出 {2:N0} 行。",
+                    tasks.Count,
+                    mode == BatchExecutionMode.Parallel
+                        ? string.Format("并行（最多 {0:N0} 个）", Math.Max(1, maximumParallelism))
+                        : "串行",
+                    rowLimit),
+                TotalTasks = tasks.Count,
+                IsIndeterminate = true
+            });
             if (tasks.Count > 1)
             {
                 progress?.Report(new OperationProgress
@@ -90,6 +104,14 @@ namespace DB2Sheet.Services
                     cancellationToken.ThrowIfCancellationRequested();
                     if (item.Error != null)
                     {
+                        progress?.Report(CreateTaskOutcome(
+                            item.Task,
+                            "任务读取失败：" + item.Error.Message,
+                            results.Count + 1,
+                            tasks.Count,
+                            results,
+                            stopwatch.Elapsed,
+                            LogSeverity.Error));
                         results.Add(Failed(item.Task, item.Error));
                         continue;
                     }
@@ -121,15 +143,30 @@ namespace DB2Sheet.Services
                     {
                         _logger.Write(LogSeverity.Error, "批量刷新任务失败。", operationId, exception, SheetProperty(task));
                         ReportReadFinished(progress, task, results.Count + 1, tasks.Count, stopwatch);
+                        progress?.Report(CreateTaskOutcome(
+                            task,
+                            "任务失败：" + exception.Message,
+                            results.Count + 1,
+                            tasks.Count,
+                            results,
+                            stopwatch.Elapsed,
+                            LogSeverity.Error));
                         results.Add(Failed(task, exception));
                     }
                 }
             }
 
+            int succeeded = results.Count(item => item.Succeeded);
+            int failed = results.Count(item => !item.Succeeded && !item.Skipped);
             progress?.Report(CreateProgress(
                 OperationStage.Completed,
                 null,
-                "批量刷新完成。",
+                string.Format(
+                    "批量刷新完成：成功 {0:N0}，失败 {1:N0}，共写入 {2:N0} 行，耗时 {3:N1} 秒。",
+                    succeeded,
+                    failed,
+                    results.Sum(item => item.RowsWritten),
+                    stopwatch.Elapsed.TotalSeconds),
                 results.Count,
                 tasks.Count,
                 results,
@@ -284,6 +321,16 @@ namespace DB2Sheet.Services
                                 buffered.RowCount,
                                 rowLimit)
                             : "刷新成功。");
+                    progress?.Report(CreateTaskOutcome(
+                        task,
+                        buffered.IsTruncated
+                            ? string.Format("写入完成：{0:N0} 行，结果已截断。", rows)
+                            : string.Format("写入完成：{0:N0} 行。", rows),
+                        writeTask,
+                        totalTasks,
+                        completed,
+                        stopwatch.Elapsed,
+                        buffered.IsTruncated ? LogSeverity.Warning : LogSeverity.Information));
                 }
                 catch (Exception exception)
                 {
@@ -293,6 +340,14 @@ namespace DB2Sheet.Services
             if (error != null)
             {
                 _logger.Write(LogSeverity.Error, "写入 Excel 失败。", operationId + "-" + task.Id, error, SheetProperty(task));
+                progress?.Report(CreateTaskOutcome(
+                    task,
+                    "任务写入失败：" + error.Message,
+                    completed.Count + 1,
+                    totalTasks,
+                    completed,
+                    stopwatch.Elapsed,
+                    LogSeverity.Error));
                 return Failed(task, error);
             }
             return result;
@@ -337,6 +392,38 @@ namespace DB2Sheet.Services
         private static RefreshTaskResult Failed(RefreshTaskDefinition task, Exception exception)
         {
             return new RefreshTaskResult(task, false, false, 0, false, exception.Message);
+        }
+
+        /// <summary>创建单个批量任务的最终结果日志，不改变读取条或写入条。</summary>
+        /// <param name="task">当前任务。</param>
+        /// <param name="message">结果说明。</param>
+        /// <param name="currentTask">当前任务序号。</param>
+        /// <param name="totalTasks">任务总数。</param>
+        /// <param name="results">此前已经完成的结果。</param>
+        /// <param name="elapsed">批次累计耗时。</param>
+        /// <param name="severity">日志级别。</param>
+        /// <returns>只用于日志和标题的进度快照。</returns>
+        private static OperationProgress CreateTaskOutcome(
+            RefreshTaskDefinition task,
+            string message,
+            int currentTask,
+            int totalTasks,
+            IReadOnlyList<RefreshTaskResult> results,
+            TimeSpan elapsed,
+            LogSeverity severity)
+        {
+            OperationProgress value = CreateProgress(
+                OperationStage.Writing,
+                task,
+                message,
+                currentTask,
+                totalTasks,
+                results,
+                elapsed);
+            value.Severity = severity;
+            value.WriteTaskCount = null;
+            value.WritePercent = null;
+            return value;
         }
 
         private static OperationProgress CreateProgress(

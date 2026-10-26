@@ -58,6 +58,8 @@ namespace DB2Sheet.Excel
             bool previousScreenUpdating = true;
             try
             {
+                Report(progress, 1, columns.Count, worksheet.Name, 0,
+                    string.Format("检测到 {0:N0} 列，正在清空 SQL 页原有格式…", columns.Count));
                 try
                 {
                     application = worksheet.Application;
@@ -74,6 +76,7 @@ namespace DB2Sheet.Excel
 
                 cancellationToken.ThrowIfCancellationRequested();
                 ClearSheetFormats(worksheet);
+                Report(progress, 1, columns.Count, worksheet.Name, 0, "原有格式已清空，开始逐列美化。");
                 for (int index = 0; index < columns.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -86,8 +89,12 @@ namespace DB2Sheet.Excel
                     await Task.Yield();
                 }
 
+                Report(progress, columns.Count, columns.Count, worksheet.Name, 100,
+                    "所有列已美化，正在冻结首行并设置工作表标签颜色…");
                 TryFreezeHeader(worksheet);
                 SetTabColor(worksheet, palette.Tab);
+                Report(progress, columns.Count, columns.Count, worksheet.Name, 100,
+                    string.Format("SQL 页美化完成，共处理 {0:N0} 列。", columns.Count));
                 return columns.Count;
             }
             finally

@@ -836,7 +836,25 @@ namespace DB2Sheet.UI
                     truncated = result.IsTruncated;
                     long written = _writer.WriteResult(_workbook, targetSheet, result, progress, token, operationId);
                     if (writeSql)
+                    {
+                        progress.Report(new OperationProgress
+                        {
+                            Stage = OperationStage.Writing,
+                            TargetSheetName = "SQL",
+                            Message = "结果已写入，正在保存本次 SQL 任务列…",
+                            Percent = 100,
+                            IsIndeterminate = false
+                        });
                         _taskReader.WriteTaskColumn(_workbook, targetSheet, sqlText);
+                        progress.Report(new OperationProgress
+                        {
+                            Stage = OperationStage.Completed,
+                            TargetSheetName = "SQL",
+                            Message = "SQL 任务列保存完成。",
+                            Percent = 100,
+                            IsIndeterminate = false
+                        });
+                    }
                     return written;
                 });
                 SavedSqlBeautify beautify = writeSql ? BeautifySavedSql() : SavedSqlBeautify.Skipped;
@@ -1834,6 +1852,13 @@ namespace DB2Sheet.UI
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Preparing,
+                    TargetSheetName = sheetName,
+                    Message = "正在创建临时工作簿…",
+                    IsIndeterminate = true
+                });
                 temp = application.Workbooks.Add();
                 if (restoreAlerts)
                     KeepOnlyFirstSheet(temp);
@@ -1846,6 +1871,14 @@ namespace DB2Sheet.UI
                     cancellationToken,
                     Guid.NewGuid().ToString("N"));
                 cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Writing,
+                    TargetSheetName = sheetName,
+                    Message = "预览数据已写入，正在保存 xlsx 文件…",
+                    Percent = 100,
+                    IsIndeterminate = false
+                });
                 temp.SaveAs(
                     Filename: path,
                     FileFormat: 51,
@@ -1865,6 +1898,14 @@ namespace DB2Sheet.UI
                 CloseWorkbook(temp);
                 temp = null;
                 EnsureXlsxFile(path);
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Completed,
+                    TargetSheetName = sheetName,
+                    Message = "xlsx 文件已保存并通过格式校验。",
+                    Percent = 100,
+                    IsIndeterminate = false
+                });
                 return written;
             }
             finally

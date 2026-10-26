@@ -113,6 +113,16 @@ namespace DB2Sheet.Providers
                     await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
                 }
 
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Completed,
+                    ConnectionName = profile.Name,
+                    Message = string.Format("连接测试成功，耗时 {0:N1} 秒。", stopwatch.Elapsed.TotalSeconds),
+                    Percent = 100,
+                    Elapsed = stopwatch.Elapsed,
+                    IsIndeterminate = false
+                });
+
                 return ConnectionTestResult.Success(stopwatch.Elapsed);
             }
             catch (OperationCanceledException)
@@ -121,6 +131,15 @@ namespace DB2Sheet.Providers
             }
             catch (Exception exception)
             {
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Failed,
+                    ConnectionName = profile.Name,
+                    Message = string.Format("连接测试失败，耗时 {0:N1} 秒：{1}", stopwatch.Elapsed.TotalSeconds, exception.Message),
+                    Severity = LogSeverity.Error,
+                    Elapsed = stopwatch.Elapsed,
+                    IsIndeterminate = true
+                });
                 return ConnectionTestResult.Failure(exception.Message, stopwatch.Elapsed);
             }
         }
@@ -229,6 +248,13 @@ namespace DB2Sheet.Providers
                 });
                 connection = CreateConnection(request.Connection);
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Connecting,
+                    ConnectionName = request.Connection.Name,
+                    Message = "数据源连接已建立，正在配置只读会话…",
+                    IsIndeterminate = true
+                });
                 await ConfigureReadOnlySessionAsync(connection, cancellationToken).ConfigureAwait(false);
                 if (request.Purpose == ExecutionPurpose.Preview && request.RowLimit > 0)
                 {
@@ -245,6 +271,13 @@ namespace DB2Sheet.Providers
                 });
                 command = CreateCommand(connection, request.QueryText, request.TimeoutSeconds);
                 reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Reading,
+                    ConnectionName = request.Connection.Name,
+                    Message = string.Format("查询已返回，检测到 {0:N0} 个字段，开始读取结果…", reader.FieldCount),
+                    IsIndeterminate = true
+                });
                 return new DatabaseResultStream(
                     connection,
                     command,

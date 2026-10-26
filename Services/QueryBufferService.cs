@@ -56,6 +56,23 @@ namespace DB2Sheet.Services
                         "结果读取完成。",
                         operationId,
                         properties: ReadProperties(request, stream, blocks.Count, readWatch.Elapsed, includeRate: true));
+                    progress?.Report(new OperationProgress
+                    {
+                        Stage = OperationStage.Reading,
+                        ConnectionName = request.Connection.Name,
+                        Message = string.Format(
+                            "结果读取完成：{0:N0} 行、{1:N0} 列、{2:N0} 个数据块，耗时 {3:N1} 秒{4}",
+                            stream.RowsRead,
+                            stream.Columns == null ? 0 : stream.Columns.Count,
+                            blocks.Count,
+                            readWatch.Elapsed.TotalSeconds,
+                            stream.IsTruncated ? "，结果已截断。" : "。"),
+                        RowsRead = stream.RowsRead,
+                        IsTruncated = stream.IsTruncated,
+                        Severity = stream.IsTruncated ? LogSeverity.Warning : LogSeverity.Information,
+                        Elapsed = readWatch.Elapsed,
+                        IsIndeterminate = true
+                    });
                     return new BufferedQueryResult(stream.Columns, blocks.AsReadOnly(), stream.RowsRead, stream.IsTruncated);
                 }
                 catch (OperationCanceledException)
@@ -75,6 +92,20 @@ namespace DB2Sheet.Services
                         operationId,
                         exception,
                         ReadOutcome(stream.RowsRead, blocks.Count, readWatch.Elapsed, includeBlockCount: true));
+                    progress?.Report(new OperationProgress
+                    {
+                        Stage = OperationStage.Failed,
+                        ConnectionName = request.Connection.Name,
+                        Message = string.Format(
+                            "结果读取失败：已读取 {0:N0} 行，耗时 {1:N1} 秒。{2}",
+                            stream.RowsRead,
+                            readWatch.Elapsed.TotalSeconds,
+                            exception.Message),
+                        RowsRead = stream.RowsRead,
+                        Severity = LogSeverity.Error,
+                        Elapsed = readWatch.Elapsed,
+                        IsIndeterminate = true
+                    });
                     throw;
                 }
             }

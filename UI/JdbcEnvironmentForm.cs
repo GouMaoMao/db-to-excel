@@ -184,6 +184,14 @@ namespace DB2Sheet.UI
             JavaResolution found = JavaRuntimeProbe.Search(preferred, true, progress, cancellationToken);
             if (!found.Found)
             {
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Completed,
+                    Message = "Java 搜索完成，未找到可用的 java.exe。",
+                    Percent = 100,
+                    Severity = LogSeverity.Warning,
+                    IsIndeterminate = false
+                });
                 return new JavaDetectResult(found, string.Empty);
             }
 
@@ -199,6 +207,16 @@ namespace DB2Sheet.UI
                 });
             }
             string version = JavaRuntimeProbe.TryReadVersion(found.Executable);
+            progress?.Report(new OperationProgress
+            {
+                Stage = OperationStage.Completed,
+                Message = string.IsNullOrWhiteSpace(version)
+                    ? "已找到 java.exe，但未能读取版本信息。"
+                    : "Java 检测完成：" + version,
+                Percent = 100,
+                Severity = string.IsNullOrWhiteSpace(version) ? LogSeverity.Warning : LogSeverity.Information,
+                IsIndeterminate = false
+            });
             return new JavaDetectResult(found, version);
         }
 

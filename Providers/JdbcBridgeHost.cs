@@ -230,6 +230,13 @@ namespace DB2Sheet.Providers
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
             await EnsureReadyAsync(launch, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new OperationProgress
+            {
+                Stage = OperationStage.Connecting,
+                ConnectionName = connectionName,
+                Message = "JDBC 转接程序已就绪，正在提交查询…",
+                IsIndeterminate = true
+            });
             string id = Guid.NewGuid().ToString("N");
             JdbcReplyQueue queue = Register(id);
             JdbcResultStream stream = new JdbcResultStream(this, id, queue, rowLimit, connectionName, progress, cancellationToken);
@@ -258,6 +265,13 @@ namespace DB2Sheet.Providers
                     TimeoutSeconds = timeoutSeconds
                 });
                 await stream.InitializeAsync(cancellationToken).ConfigureAwait(false);
+                progress?.Report(new OperationProgress
+                {
+                    Stage = OperationStage.Reading,
+                    ConnectionName = connectionName,
+                    Message = string.Format("查询已返回，检测到 {0:N0} 个字段，开始读取结果…", stream.Columns.Count),
+                    IsIndeterminate = true
+                });
                 return stream;
             }
             catch
