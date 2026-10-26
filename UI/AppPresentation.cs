@@ -193,6 +193,11 @@ namespace DB2Sheet.UI
         /// <summary>模型设置里密钥下方的说明。</summary>
         public const string AiModelKeyNote = "在服务商的 API 平台生成。";
 
+        /// <summary>模型设置里「检测模型」按钮的悬浮提示。</summary>
+        public const string AiModelTestTip =
+            "检测模型\r\n"
+            + "连接接口读取最新型号列表，并用其中一个探测响应。成功后点击「保存」更新配置。";
+
         /// <summary>Skill 设置列表末项「新增」的悬浮提示。</summary>
         public const string AiSkillAddTip =
             "新增\r\n"

@@ -106,7 +106,8 @@ namespace DB2Sheet.UI
             _protocol.SelectedIndexChanged += (sender, args) => RefreshSaveState();
 
             _saveButton = ButtonOf("保存");
-            Button testButton = ButtonOf("测试");
+            Button testButton = ButtonOf("检测模型");
+            _tips.SetToolTip(testButton, AppPresentation.AiModelTestTip);
             Button closeButton = ButtonOf("关闭");
             closeButton.DialogResult = DialogResult.Cancel;
             _saveButton.Click += (sender, args) => SaveSelected();
@@ -352,7 +353,10 @@ namespace DB2Sheet.UI
                 _testedFingerprint = fingerprint;
                 _saveButton.Enabled = true;
                 _status.Text = "测试成功，可以保存。共 " + ids.Count.ToString() + " 个型号。";
-                MessageBox.Show(this, "测试成功。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                TextPromptDialog.ShowText(
+                    this,
+                    "检测结果",
+                    string.Format("接口返回 {0:N0} 个型号：\r\n\r\n{1}", ids.Count, string.Join("\r\n", ids)));
             }
             catch (Exception exception)
             {
