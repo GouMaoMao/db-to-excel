@@ -57,6 +57,7 @@
 - `ProviderRegistry`：注册和解析 Provider。
 - `SettingsRegistry`：注册核心及未来扩展设置。
 - `SqlReadOnlyValidator`：去除注释和字面量后执行只读规则校验。
+- `SqlFormattingService`：以 Poor Man's T-SQL Formatter 的成熟解析器生成紧凑排版。字段、CASE 和 BETWEEN 保持紧凑，布尔条件分行并保留行尾注释；非 T-SQL 方言依赖其容错解析。
 - `DataSourceExecutionService`：统一调用 Provider。查询日志写入 SQL 正文和哈希；文件日志对密码类键脱敏。
 - `OperationRunner`：协调进度窗体、任务和取消。业务服务在真实阶段节点报告连接、执行、读取、写入、美化和最终摘要；高频读取与扫描日志由生产者节流，未知比例不虚构百分比。
 - `QueryBufferService`：将流式结果消费为多个二维数组块。
