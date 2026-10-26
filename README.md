@@ -134,3 +134,7 @@ db-to-excel 是嵌入 Windows  Excel / WPS 表格的插件，在表格内部直�
 - 数据库连接配置、查询方案、运行日志均保存在本机目录： `%LocalAppData%\DB2Sheet`。
   > 说明：该目录仅存放本地配置与日志，不会上传数据库账号、查询数据至外部服务器。
 
+## 开源许可证
+
+本项目采用 [GNU Affero General Public License v3.0](LICENSE) 授权。第三方软件信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
