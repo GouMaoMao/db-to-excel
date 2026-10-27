@@ -49,14 +49,19 @@ function Invoke-External {
         [string[]]$ArgumentList
     )
     $previous = $ErrorActionPreference
+    $previousEncoding = [Console]::OutputEncoding
     $ErrorActionPreference = "Continue"
+    # gh 返回 UTF-8 编码的 JSON。默认按本机 ANSI 码页解码中文会吃掉后续字节，JSON 随之失效。
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
     try {
         $lines = & $File @ArgumentList 2>&1
         $code = $LASTEXITCODE
-        $output = @($lines) | Out-String
+        # 不用 Out-String：它会按终端宽度折行，把 GitHub 返回的单行 JSON 断在字符串中间，导致 ConvertFrom-Json 失败。
+        $output = (@($lines) | ForEach-Object { [string]$_ }) -join "`n"
         return @{ Code = $code; Output = $output }
     }
     finally {
+        [Console]::OutputEncoding = $previousEncoding
         $ErrorActionPreference = $previous
     }
 }
