@@ -40,6 +40,7 @@ packages/
 *.log
 *.tmp
 *.bak
+Logs/release-status.json
 
 # OS files
 .DS_Store
