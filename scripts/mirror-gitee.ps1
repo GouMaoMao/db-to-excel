@@ -646,7 +646,6 @@ if ($args.Count -gt 0) {
 
 Set-Location $Root
 Read-GiteeConfig
-Set-Stage "同步分支与标签"
 if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
     Stop-Mirror "找不到 curl.exe，无法把 Release 同步到 Gitee。"
 }
