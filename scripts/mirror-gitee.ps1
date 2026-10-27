@@ -9,10 +9,21 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$script:Stage = "读取配置"
+$script:NetworkFailure = $false
 
-function Stop-Mirror([string]$Message) {
-    Write-Error $Message
-    exit 1
+function Stop-Mirror([string]$Message, [int]$Code) {
+    if (-not $PSBoundParameters.ContainsKey("Code")) {
+        # 传输类失败用退出码 2，其余（配置、状态、校验）用 3，方便调用方判断要不要改东西再跑。
+        $Code = if ($script:NetworkFailure) { 2 } else { 3 }
+    }
+    Write-Host "镜像在「$($script:Stage)」阶段失败：$Message"
+    exit $Code
+}
+
+function Set-Stage([string]$Name) {
+    $script:Stage = $Name
+    Write-Host "== $Name =="
 }
 
 function Hide-GiteeSecret([string]$Text) {
@@ -58,6 +69,9 @@ function Invoke-External {
         $code = $LASTEXITCODE
         # 不用 Out-String：它会按终端宽度折行，把 GitHub 返回的单行 JSON 断在字符串中间，导致 ConvertFrom-Json 失败。
         $output = (@($lines) | ForEach-Object { [string]$_ }) -join "`n"
+        if ($code -ne 0 -and $output -match 'Could not resolve|Failed to connect|Connection (reset|refused|timed out)|timed out|TLS|SSL|unable to access|RPC failed') {
+            $script:NetworkFailure = $true
+        }
         return @{ Code = $code; Output = $output }
     }
     finally {
@@ -75,7 +89,8 @@ function Invoke-GiteeCurl {
     )
     $out = Join-Path ([System.IO.Path]::GetTempPath()) ("gitee-" + [guid]::NewGuid().ToString("N") + ".json")
     $code = "000"
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
+    # 网络类失败最多试两次：首次加一次重试，仍失败就停止，不做无意义的重跑。
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
         $curlArgs = @(
             "-sS", "--connect-timeout", "20", "--max-time", "$MaxTime",
             "-o", $out, "-w", "%{http_code}", "-X", $Method
@@ -99,7 +114,8 @@ function Invoke-GiteeCurl {
         if ($code -notmatch '^[0-9]{3}$') { $code = "000" }
         $retry = $exit -ne 0 -or $code -in @("000", "408", "429", "500", "502", "503", "504")
         if (-not $retry) { return @{ Code = $code; Body = $out } }
-        if ($attempt -lt 3) {
+        $script:NetworkFailure = $true
+        if ($attempt -lt 2) {
             Write-Host "Gitee 接口暂时没有响应（HTTP $code），5 秒后重试。"
             Start-Sleep -Seconds 5
         }
@@ -107,25 +123,20 @@ function Invoke-GiteeCurl {
     return @{ Code = $code; Body = $out }
 }
 
-function Invoke-GiteeGitPush([string]$Refspec) {
-    $instead = "url.https://oauth2:$($script:GiteeToken)@gitee.com/.insteadOf=https://gitee.com/"
-    $remote = "https://gitee.com/$($script:GiteeRepo).git"
-    $destination = $Refspec
-    $colon = $Refspec.IndexOf(":")
-    if ($colon -ge 0) { $destination = $Refspec.Substring($colon + 1) }
-    Write-Host "正在强制推送 $destination。"
+function Get-GiteeGitConfig {
+    # 令牌只通过本次 git 调用的 insteadOf 注入，不写 git 配置，也不打印到日志。
+    return @(
+        "-c", "credential.helper=",
+        "-c", "url.https://oauth2:$($script:GiteeToken)@gitee.com/.insteadOf=https://gitee.com/"
+    )
+}
+
+function Invoke-GiteeGit([string[]]$ArgumentList) {
+    $gitArgs = (Get-GiteeGitConfig) + $ArgumentList
     $previousPrompt = $env:GIT_TERMINAL_PROMPT
     $env:GIT_TERMINAL_PROMPT = "0"
     try {
-        $pushed = Invoke-External -File "git" -ArgumentList @(
-            "-c", "credential.helper=", "-c", $instead, "push", "--force", $remote, $Refspec
-        )
-        if (-not [string]::IsNullOrWhiteSpace($pushed.Output)) {
-            Write-Host (Hide-GiteeSecret $pushed.Output.TrimEnd())
-        }
-        if ($pushed.Code -ne 0) {
-            Stop-Mirror "推送到 Gitee 失败。"
-        }
+        return Invoke-External -File "git" -ArgumentList $gitArgs
     }
     finally {
         if ($null -eq $previousPrompt) {
@@ -134,6 +145,25 @@ function Invoke-GiteeGitPush([string]$Refspec) {
         else {
             $env:GIT_TERMINAL_PROMPT = $previousPrompt
         }
+    }
+}
+
+function Invoke-GiteeGitPush([string[]]$Refspec) {
+    $remote = "https://gitee.com/$($script:GiteeRepo).git"
+    $targets = @()
+    foreach ($item in @($Refspec)) {
+        $destination = $item
+        $colon = $item.IndexOf(":")
+        if ($colon -ge 0) { $destination = $item.Substring($colon + 1) }
+        $targets += $destination
+    }
+    Write-Host ("正在强制推送 " + ($targets -join "、") + "。")
+    $pushed = Invoke-GiteeGit (@("push", "--force", "--no-verify", $remote) + @($Refspec))
+    if (-not [string]::IsNullOrWhiteSpace($pushed.Output)) {
+        Write-Host (Hide-GiteeSecret $pushed.Output.TrimEnd())
+    }
+    if ($pushed.Code -ne 0) {
+        Stop-Mirror "推送到 Gitee 失败。"
     }
 }
 
@@ -257,7 +287,31 @@ function Read-GiteeConfig {
     }
 }
 
+function Get-RemoteTagMap($Listing, [string]$Source) {
+    if ($Listing.Code -ne 0) {
+        if (-not [string]::IsNullOrWhiteSpace($Listing.Output)) { Write-Host $Listing.Output.TrimEnd() }
+        Stop-Mirror "无法读取 $Source 标签。"
+    }
+    # 注解标签会同时列出标签对象和解引用后的提交，用后者比较才能判断两边是不是同一个版本。
+    $map = @{}
+    foreach ($line in @($Listing.Output -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
+        $tab = ([string]$line).IndexOf("`t")
+        if ($tab -lt 0) { continue }
+        $sha = ([string]$line).Substring(0, $tab).Trim()
+        $ref = ([string]$line).Substring($tab + 1).Trim()
+        $isPeeled = $ref.EndsWith("^{}")
+        if ($isPeeled) { $ref = $ref.Substring(0, $ref.Length - 3) }
+        if (-not $ref.StartsWith("refs/tags/")) { continue }
+        $name = $ref.Substring("refs/tags/".Length)
+        if (-not [regex]::IsMatch($name, $script:MirrorTagRegex)) { continue }
+        if ($isPeeled -or -not $map.ContainsKey($name)) { $map[$name] = $sha }
+    }
+    return $map
+}
+
 function Sync-GitRefs {
+    Set-Stage "同步分支与标签"
     Write-Host "正在从 GitHub 读取 $($script:MirrorBranch)。"
     $fetched = Invoke-External -File "git" -ArgumentList @(
         "fetch", "origin", "+refs/heads/$($script:MirrorBranch):refs/remotes/origin/$($script:MirrorBranch)"
@@ -269,33 +323,33 @@ function Sync-GitRefs {
     Invoke-GiteeGitPush "refs/remotes/origin/$($script:MirrorBranch):refs/heads/$($script:MirrorBranch)"
 
     Write-Host "正在读取 GitHub 上的标签。"
-    $listed = Invoke-External -File "git" -ArgumentList @("ls-remote", "--tags", "origin")
-    if ($listed.Code -ne 0) {
-        if (-not [string]::IsNullOrWhiteSpace($listed.Output)) { Write-Host $listed.Output.TrimEnd() }
-        Stop-Mirror "无法读取 GitHub 标签。"
-    }
-    $remoteTags = $listed.Output -split "`r?`n"
-    $matched = $false
-    foreach ($line in @($remoteTags)) {
-        if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
-        $tab = ([string]$line).IndexOf("`t")
-        if ($tab -lt 0) { continue }
-        $ref = ([string]$line).Substring($tab + 1).Trim()
-        if ($ref.EndsWith("^{}")) { continue }
-        if (-not $ref.StartsWith("refs/tags/")) { continue }
-        $name = $ref.Substring("refs/tags/".Length)
-        if (-not [regex]::IsMatch($name, $script:MirrorTagRegex)) { continue }
-        $matched = $true
-        $tagFetch = Invoke-External -File "git" -ArgumentList @("fetch", "origin", "+refs/tags/${name}:refs/tags/${name}")
-        if ($tagFetch.Code -ne 0) {
-            if (-not [string]::IsNullOrWhiteSpace($tagFetch.Output)) { Write-Host $tagFetch.Output.TrimEnd() }
-            Stop-Mirror "无法从 GitHub 读取标签 $name。"
-        }
-        Invoke-GiteeGitPush "refs/tags/${name}:refs/tags/${name}"
-    }
-    if (-not $matched) {
+    $githubTags = Get-RemoteTagMap -Listing (Invoke-External -File "git" -ArgumentList @("ls-remote", "--tags", "origin")) -Source "GitHub"
+    $names = @($githubTags.Keys | Sort-Object)
+    if ($names.Count -eq 0) {
         Write-Host "没有符合规则的标签。"
+        return
     }
+
+    # 一次取回全部符合规则的标签，再一次性比较 Gitee；逐个标签推送每次都要一次网络往返。
+    $fetchArgs = @("fetch", "origin") + ($names | ForEach-Object { "+refs/tags/$($_):refs/tags/$($_)" })
+    $tagFetch = Invoke-External -File "git" -ArgumentList $fetchArgs
+    if ($tagFetch.Code -ne 0) {
+        if (-not [string]::IsNullOrWhiteSpace($tagFetch.Output)) { Write-Host $tagFetch.Output.TrimEnd() }
+        Stop-Mirror "无法从 GitHub 读取标签。"
+    }
+
+    $giteeUrl = "https://gitee.com/$($script:GiteeRepo).git"
+    $giteeTags = Get-RemoteTagMap -Listing (Invoke-GiteeGit @("ls-remote", "--tags", $giteeUrl)) -Source "Gitee"
+    $refspecs = @()
+    foreach ($name in $names) {
+        if ($giteeTags.ContainsKey($name) -and $giteeTags[$name] -eq $githubTags[$name]) { continue }
+        $refspecs += "refs/tags/$($name):refs/tags/$($name)"
+    }
+    if ($refspecs.Count -eq 0) {
+        Write-Host "标签与 Gitee 一致，跳过推送。"
+        return
+    }
+    Invoke-GiteeGitPush $refspecs
 }
 
 function Get-GitHubRepo {
@@ -417,7 +471,7 @@ function Get-ReleaseMeta([string]$Tag, [string]$Title, [string]$BodyPath, [bool]
 
 function New-GiteeRelease([string]$Tag, [string[]]$Meta) {
     $releaseId = ""
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
         $created = Invoke-GiteeCurl -Method POST -Url "$($script:GiteeApi)/releases" -ArgumentList $Meta
         $createdRelease = $null
         $createdBody = Read-GiteeBody $created.Body
@@ -466,28 +520,46 @@ function Copy-GitHubAssets([string]$Tag, [string]$ReleaseId, $GitHubFiles, $Exis
     New-Item -ItemType Directory -Path $dest | Out-Null
     try {
         Write-Host "正在下载 GitHub Release $Tag 的附件。"
-        $downloaded = $null
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $downloaded = Invoke-External -File "gh" -ArgumentList @("release", "download", $Tag, "--dir", $dest, "--clobber")
-            if ($downloaded.Code -eq 0) { break }
-            if ($attempt -lt 3) {
-                Write-Host "下载 GitHub Release $Tag 的附件未成功，5 秒后重试。"
-                Start-Sleep -Seconds 5
-            }
-        }
-        if ($null -eq $downloaded -or $downloaded.Code -ne 0) {
-            if ($downloaded -and -not [string]::IsNullOrWhiteSpace($downloaded.Output)) { Write-Host $downloaded.Output.TrimEnd() }
-            Stop-Mirror "下载 GitHub Release $Tag 的附件失败。"
-        }
-        Remove-GiteeAssets -ReleaseId $ReleaseId -Files $ExistingFiles
+        $paths = [ordered]@{}
         foreach ($file in $files) {
             $fileName = Get-FileName $file
-            $path = Join-Path $dest $fileName
-            if (-not (Test-Path -LiteralPath $path)) {
-                Stop-Mirror "GitHub Release $Tag 的附件 $fileName 没有下载到。"
+            $expected = Get-FileSize $file
+            $url = [string]$file.browser_download_url
+            if ([string]::IsNullOrWhiteSpace($fileName) -or [string]::IsNullOrWhiteSpace($url)) {
+                Stop-Mirror "GitHub Release $Tag 的附件缺少文件名或下载地址。"
             }
-            Write-Host "正在上传 $fileName 到 Gitee Release $Tag。"
-            Send-GiteeAsset -ReleaseId $ReleaseId -Tag $Tag -FilePath $path -FileName $fileName
+            $path = Join-Path $dest $fileName
+            $ok = $false
+            # 网络类失败最多试两次，仍失败就停止，不再整轮重跑。
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+                # 用 curl 而不是 gh release download：连接、总时长和低速都能设上限，慢连接不会一直挂着。
+                $download = Invoke-External -File "curl.exe" -ArgumentList @(
+                    "-sS", "-L", "--fail", "--connect-timeout", "15", "--max-time", "600",
+                    "--speed-limit", "1024", "--speed-time", "60", "-o", $path, $url
+                )
+                if ($download.Code -eq 0 -and (Test-Path -LiteralPath $path)) {
+                    $size = (Get-Item -LiteralPath $path).Length
+                    if ($null -eq $expected -or $size -eq $expected) { $ok = $true; break }
+                    Write-Host "下载的 $fileName 是 $size 字节，GitHub 记录 $expected 字节。"
+                }
+                elseif (-not [string]::IsNullOrWhiteSpace($download.Output)) {
+                    Write-Host $download.Output.TrimEnd()
+                }
+                if ($attempt -lt 2) {
+                    Write-Host "下载 $fileName 未成功，5 秒后重试。"
+                    Start-Sleep -Seconds 5
+                }
+            }
+            if (-not $ok) {
+                $script:NetworkFailure = $true
+                Stop-Mirror "下载 GitHub Release $Tag 的附件 $fileName 失败。"
+            }
+            $paths[$fileName] = $path
+        }
+        Remove-GiteeAssets -ReleaseId $ReleaseId -Files $ExistingFiles
+        foreach ($name in $paths.Keys) {
+            Write-Host "正在上传 $name 到 Gitee Release $Tag。"
+            Send-GiteeAsset -ReleaseId $ReleaseId -Tag $Tag -FilePath $paths[$name] -FileName $name
         }
     }
     finally {
@@ -543,6 +615,7 @@ function Sync-OneRelease($GitHubRelease, $Existing) {
 }
 
 function Sync-Releases {
+    Set-Stage "同步 Release"
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         Stop-Mirror "找不到 GitHub CLI（gh）。安装并登录后再镜像。"
     }
@@ -573,6 +646,7 @@ if ($args.Count -gt 0) {
 
 Set-Location $Root
 Read-GiteeConfig
+Set-Stage "同步分支与标签"
 if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
     Stop-Mirror "找不到 curl.exe，无法把 Release 同步到 Gitee。"
 }

@@ -1,8 +1,16 @@
 ﻿# 按 AssemblyFileVersion 做 Release 构建，用 installer\db-to-excel.aip 生成 exe，并挂到 GitHub Release。
 # GitHub 发布成功后执行 scripts\mirror-gitee.ps1，由它把分支、版本标签和 Release 对齐到 Gitee。
 # 不修改版本号，不签名，不提交 installer、证书或 bin。
+# -CheckOnly 只做只读预检；-ResetTag 重建上次失败留下、从未发布过的本地标签；-SkipMirror 只发 GitHub。
+
+param(
+    [switch]$CheckOnly,
+    [switch]$ResetTag,
+    [switch]$SkipMirror
+)
 
 $ErrorActionPreference = "Stop"
+$script:Stage = "准备"
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
@@ -15,19 +23,25 @@ $ReleaseDir = Join-Path $Root "bin\Release"
 $SetupDir = Join-Path $Root "installer\Setup Files"
 $SqliteInterop = Join-Path $ReleaseDir "x64\SQLite.Interop.dll"
 
-function Stop-Release([string]$Message) {
-    Write-Error $Message
-    exit 1
+function Stop-Release([string]$Message, [int]$Code = 3) {
+    Write-Host "发布在「$($script:Stage)」阶段失败：$Message"
+    exit $Code
+}
+
+function Set-Stage([string]$Name) {
+    $script:Stage = $Name
+    Write-Host "== $Name =="
 }
 
 function Invoke-Native {
     param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$Command
+        [Parameter(Mandatory = $true, Position = 0)]
+        [scriptblock]$Command,
+        [int]$Code = 3
     )
     & $Command
     if ($LASTEXITCODE -ne 0) {
-        Stop-Release "命令失败，退出码 $LASTEXITCODE。"
+        Stop-Release "命令失败，退出码 $LASTEXITCODE。" $Code
     }
 }
 
@@ -65,6 +79,38 @@ function Get-ThreePartVersion([string]$Text, [string]$AttributeName) {
     return $value
 }
 
+function Test-GitHubReleaseExists([string]$Tag) {
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh -eq $null) { return $false }
+    & gh release view $Tag --json tagName 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Resolve-ReleaseTag([string]$Tag, [switch]$Repair) {
+    $head = (git rev-parse HEAD).Trim()
+    $remote = (git ls-remote --tags origin "refs/tags/$Tag").Trim()
+    $remoteExists = -not [string]::IsNullOrWhiteSpace($remote)
+    git rev-parse --verify --quiet "refs/tags/$Tag" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        if ($remoteExists) {
+            Stop-Release "远端已有标签 $Tag，但本地没有。先 fetch 标签再发布。"
+        }
+        return "create"
+    }
+    $tagged = (git rev-list -n 1 $Tag).Trim()
+    if ($tagged -eq $head) { return "reuse" }
+    if ($remoteExists -or (Test-GitHubReleaseExists $Tag)) {
+        Stop-Release "标签 $Tag 已发布并指向 $tagged，当前提交是 $head。请改版本号后发布，不要移动已发布的标签。"
+    }
+    if (-not $Repair) {
+        Stop-Release "本地标签 $Tag 指向 $tagged，不是当前提交 $head；远端没有该标签和 Release，像是上次发布失败留下的。确认后加 -ResetTag 重建。"
+    }
+    Write-Host "删除上次失败留下的本地标签 $Tag，随后在当前提交重建。"
+    git tag -d $Tag | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-Release "删除本地标签 $Tag 失败。" }
+    return "create"
+}
+
 function Assert-GiteeMirrorConfig {
     $giteeLocal = Join-Path $Root ".github\gitee.local"
     if (-not (Test-Path -LiteralPath $giteeLocal)) {
@@ -91,6 +137,7 @@ function Assert-GiteeMirrorConfig {
 
 Set-Location $Root
 Assert-GiteeMirrorConfig
+Set-Stage "检查工作区"
 
 $dirty = git status --porcelain
 if ($LASTEXITCODE -ne 0) { Stop-Release "无法读取 git 状态。" }
@@ -110,6 +157,7 @@ $assemblyVersion = Get-ThreePartVersion $assemblyText "AssemblyVersion"
 if ($fileVersion -ne $assemblyVersion) {
     Stop-Release "AssemblyVersion ($assemblyVersion) 与 AssemblyFileVersion ($fileVersion) 不一致。"
 }
+$tag = "v$fileVersion"
 
 if (-not (Test-Path $InstallerProject)) {
     Stop-Release "找不到安装工程 $InstallerProject。"
@@ -124,6 +172,27 @@ if (-not $msbuild) {
     Stop-Release "找不到 MSBuild。"
 }
 
+Set-Stage "检查标签"
+$tagAction = Resolve-ReleaseTag $tag -Repair:$ResetTag.IsPresent
+
+if ($CheckOnly) {
+    Set-Stage "预检"
+    $ghTool = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghTool -eq $null) { Stop-Release "找不到 GitHub CLI（gh）。安装并登录后再发布。" }
+    & gh auth status | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-Release "gh 未登录。" }
+    $remoteHead = ((git ls-remote origin refs/heads/main) -split "`t")[0].Trim()
+    $head = (git rev-parse HEAD).Trim()
+    if ($remoteHead -ne $head) {
+        Write-Host "提示：GitHub main 是 $remoteHead，本地 HEAD 是 $head；正式发布会推送本地提交。"
+    }
+    $tagText = if ($tagAction -eq "create") { "将创建" } else { "已指向当前提交，可直接复用" }
+    Write-Host "预检通过：版本 $fileVersion，标签 $tag $tagText。"
+    Write-Host "预检不检查 Advanced Installer 的实际安装与 ProductVersion 对齐，那一步在正式发布里做。"
+    exit 0
+}
+
+Set-Stage "构建 Release"
 Write-Host "正在构建 Release $fileVersion。"
 Invoke-Native { & $msbuild $Project /t:Build /p:Configuration=Release /v:minimal /nologo }
 
@@ -185,6 +254,7 @@ if ($installerVersion -lt $productVersion) {
     Invoke-Native { & $advancedInstaller /edit $InstallerProject /SetVersion $fileVersion }
 }
 
+Set-Stage "生成安装包"
 $buildStarted = Get-Date
 Write-Host "正在生成安装包。"
 Invoke-Native { & $advancedInstaller /rebuild $InstallerProject -buildslist DefaultBuild }
@@ -200,17 +270,8 @@ if ($package -eq $null) {
     Stop-Release "安装包目录里没有新生成的 exe：$SetupDir。"
 }
 
-$tag = "v$fileVersion"
-git rev-parse --verify --quiet "refs/tags/$tag" | Out-Null
-if ($LASTEXITCODE -ne 0) {
+if ($tagAction -eq "create") {
     Invoke-Native { git tag -a $tag -m $fileVersion }
-}
-else {
-    $tagged = (git rev-list -n 1 $tag).Trim()
-    $head = (git rev-parse HEAD).Trim()
-    if ($tagged -ne $head) {
-        Stop-Release "标签 $tag 指向 $tagged，不是当前提交 $head。"
-    }
 }
 
 $previous = $null
@@ -242,9 +303,25 @@ $notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "db2sheet-release-$file
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($notesFile, $notes.ToString().TrimEnd(), $utf8)
 
+Set-Stage "推送分支与标签"
 Write-Host "正在推送 $tag。"
-Invoke-Native { git push origin HEAD }
-Invoke-Native { git push origin $tag }
+$previousPrompt = $env:GIT_TERMINAL_PROMPT
+$env:GIT_TERMINAL_PROMPT = "0"
+try {
+    # 低速 30 秒即失败，避免网络异常时一直挂着。
+    Invoke-Native { git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 push origin HEAD } 2
+    Invoke-Native { git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 push origin $tag } 2
+}
+finally {
+    if ($null -eq $previousPrompt) {
+        Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:GIT_TERMINAL_PROMPT = $previousPrompt
+    }
+}
+
+Set-Stage "创建 GitHub Release"
 
 $gh = Get-Command gh -ErrorAction SilentlyContinue
 if ($gh -eq $null) {
@@ -255,19 +332,49 @@ if ($LASTEXITCODE -ne 0) {
     Stop-Release "gh 未登录。"
 }
 
-& gh release view $tag --json tagName | Out-Null
-if ($LASTEXITCODE -eq 0) {
-    Invoke-Native { gh release edit $tag --title $fileVersion --notes-file $notesFile }
-    Invoke-Native { gh release upload $tag $package.FullName --clobber }
+$previousEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+try {
+    $releaseJson = (& gh release view $tag --json tagName,assets) -join "`n"
+    $releaseCode = $LASTEXITCODE
+}
+finally {
+    [Console]::OutputEncoding = $previousEncoding
+}
+if ($releaseCode -eq 0) {
+    Invoke-Native { gh release edit $tag --title $fileVersion --notes-file $notesFile } 2
+    $asset = $null
+    try {
+        $release = $releaseJson | ConvertFrom-Json
+        $asset = @($release.assets) | Where-Object { $_.name -eq $package.Name } | Select-Object -First 1
+    }
+    catch {
+        # 解析失败时按没有附件处理，走重新上传；这里吞异常只为让上传兜底，失败仍会在上传步骤报错。
+        $asset = $null
+    }
+    if ($null -ne $asset -and $asset.size -eq $package.Length) {
+        Write-Host "GitHub Release 已有同名同大小的附件，跳过上传。"
+    }
+    else {
+        Invoke-Native { gh release upload $tag $package.FullName --clobber } 2
+    }
 }
 else {
-    Invoke-Native { gh release create $tag --title $fileVersion --notes-file $notesFile --target main $package.FullName }
+    Invoke-Native { gh release create $tag --title $fileVersion --notes-file $notesFile --target main $package.FullName } 2
 }
 
 Write-Host "已发布 $fileVersion：$($package.FullName)"
+if ($SkipMirror) {
+    Write-Host "已跳过 Gitee 镜像。需要时运行 scripts\mirror-gitee.ps1。"
+    exit 0
+}
+Set-Stage "镜像到 Gitee"
 Write-Host "正在把 GitHub 镜像到 Gitee。"
 $mirror = Join-Path $Root "scripts\mirror-gitee.ps1"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $mirror
 if ($LASTEXITCODE -ne 0) {
-    Stop-Release "镜像到 Gitee 失败。"
+    $mirrorCode = $LASTEXITCODE
+    Write-Host "GitHub 侧已发布完成，只有 Gitee 镜像失败。排查后只重跑 scripts\mirror-gitee.ps1，不要重跑整轮发布。"
+    exit $mirrorCode
 }
+Write-Host "发布完成：GitHub 与 Gitee 均已就绪。"
