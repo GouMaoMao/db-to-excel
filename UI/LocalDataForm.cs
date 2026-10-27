@@ -41,8 +41,12 @@ namespace DB2Sheet.UI
             {
                 Text = AppPresentation.LocalDataIntro,
                 AutoSize = true,
+                MaximumSize = new Size(Math.Max(120, ClientSize.Width - 48), 0),
                 Padding = new Padding(0, 0, 0, 8)
             };
+            // 长句按窗宽换行：不设最大宽度时只会横向撑出窗体，窄窗里被裁掉半句。
+            Resize += (sender, args) =>
+                intro.MaximumSize = new Size(Math.Max(120, ClientSize.Width - 48), 0);
 
             _list = new ListView
             {

@@ -38,6 +38,33 @@ namespace DB2Sheet.UI
             return Screen.FromPoint(Cursor.Position).WorkingArea;
         }
 
+        /// <summary>把窗体宽高收进光标所在屏幕的工作区，使小屏或高缩放下也能看全界面。</summary>
+        /// <param name="form">要收敛的窗体。可以还没有句柄。</param>
+        /// <param name="margin">四周预留的边距，避免贴着任务栏或屏幕边缘。</param>
+        /// <remarks>
+        /// 只缩小、不放大：内容本来就放得下时不动。最小化或最大化时跳过，否则会改掉还原尺寸。
+        /// 缩小后按「功能窗体相对工作区居中」的约定重新居中，避免窗口缩到左上角。
+        /// 低于 <see cref="Form.MinimumSize"/> 的值由 WinForms 自己抬到最小值，这里不再重复判断。
+        /// </remarks>
+        internal static void ClampToWorkingArea(Form form, int margin = 8)
+        {
+            if (form == null || form.IsDisposed) return;
+            if (form.WindowState != FormWindowState.Normal) return;
+
+            Rectangle area = CursorWorkingArea();
+            int width = Math.Min(form.Width, Math.Max(0, area.Width - (margin * 2)));
+            int height = Math.Min(form.Height, Math.Max(0, area.Height - (margin * 2)));
+            if (width <= 0 || height <= 0) return;
+            if (width == form.Width && height == form.Height) return;
+            form.Size = new Size(width, height);
+            if (form.StartPosition == FormStartPosition.Manual)
+            {
+                form.Location = new Point(
+                    area.Left + Math.Max(0, (area.Width - form.Width) / 2),
+                    area.Top + Math.Max(0, (area.Height - form.Height) / 2));
+            }
+        }
+
         private static void Restore(Form form, ISettingsStore store, string key)
         {
             if (!TryRead(store, key, out int width, out int height, out bool maximized))

@@ -15,7 +15,8 @@ namespace DB2Sheet.UI
     /// <remarks>
     /// 厂商驱动不在此配置，而在连接方案中选择。窗体记住宽高。
     /// 「检测 Java」通过进度窗搜索本机；常见位置没有时继续扫描 C 盘。不提供一键下载安装。
-    /// 说明高出可见区域时，分组内出现纵向滚动条；保存和关闭固定在底部。
+    /// 只有上方的说明会随内容滚动；检测、路径、下载和状态固定在说明下方，任何窗口高度下都看得到。
+    /// 保存和关闭固定在底部。
     /// </remarks>
     public sealed class JdbcEnvironmentForm : AppForm
     {
@@ -40,7 +41,7 @@ namespace DB2Sheet.UI
 
             Text = AppPresentation.WindowTitle("JDBC 环境");
             Width = 720;
-            Height = 520;
+            Height = 560;
             MinimumSize = new Size(560, 460);
             StartPosition = FormStartPosition.Manual;
             FormSizeMemory.Attach(this, settings, "JdbcEnvironment");
@@ -62,36 +63,63 @@ namespace DB2Sheet.UI
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 1,
-                RowCount = 6,
+                RowCount = 1,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
             javaLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int index = 0; index < 6; index++)
-            {
-                javaLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            }
+            javaLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             Control guide = CreateGuide();
             guide.SizeChanged += GuideSizeChanged;
             javaLayout.Controls.Add(guide, 0, 0);
-            FlowLayoutPanel detectActions = CreateActions();
-            detectActions.Controls.Add(_detectJavaButton);
-            javaLayout.Controls.Add(detectActions, 0, 1);
-            javaLayout.Controls.Add(CreatePathRow(_javaPath, _browseJava), 0, 2);
-            FlowLayoutPanel downloadActions = CreateActions();
-            downloadActions.Controls.Add(_openDownloadButton);
-            javaLayout.Controls.Add(downloadActions, 0, 3);
-            javaLayout.Controls.Add(_javaStatus, 0, 4);
 
             Panel scrollHost = new Panel
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = true
+                AutoScroll = true,
+                MinimumSize = new Size(0, 60)
             };
             scrollHost.Controls.Add(javaLayout);
             scrollHost.Resize += (sender, args) => FitScrollContent(scrollHost, javaLayout);
-            javaGroup.Controls.Add(scrollHost);
+
+            // 按钮和状态行固定在这块面板里，始终留在可见区域；只有上面的说明会滚动。
+            TableLayoutPanel controls = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 6, 0, 0)
+            };
+            controls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int index = 0; index < 4; index++)
+            {
+                controls.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
+
+            FlowLayoutPanel detectActions = CreateActions();
+            detectActions.Controls.Add(_detectJavaButton);
+            controls.Controls.Add(detectActions, 0, 0);
+            controls.Controls.Add(CreatePathRow(_javaPath, _browseJava), 0, 1);
+            FlowLayoutPanel downloadActions = CreateActions();
+            downloadActions.Controls.Add(_openDownloadButton);
+            controls.Controls.Add(downloadActions, 0, 2);
+            controls.Controls.Add(_javaStatus, 0, 3);
+
+            TableLayoutPanel javaBody = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2
+            };
+            javaBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            javaBody.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            javaBody.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            javaBody.Controls.Add(scrollHost, 0, 0);
+            javaBody.Controls.Add(controls, 0, 1);
+            javaGroup.Controls.Add(javaBody);
 
             Button saveButton = new Button { Text = "保存", AutoSize = true };
             Button closeButton = new Button { Text = "关闭", AutoSize = true, DialogResult = DialogResult.Cancel };

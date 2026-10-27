@@ -695,11 +695,13 @@ namespace DB2Sheet.UI
             ApplyHintWidths();
         }
 
-        /// <summary>把类型介绍、缺 Java 横幅和框下说明收窄到可用宽度，避免长句横向撑出窗体。</summary>
+        /// <summary>把类型介绍、按钮上方的状态提示、缺 Java 横幅和框下说明收窄到可用宽度，避免长句横向撑出窗体。</summary>
         private void ApplyHintWidths()
         {
             int width = Math.Max(120, ClientSize.Width - 48);
             _providerHint.MaximumSize = new Size(width, 0);
+            // 按钮上方的提示（缺 Java、测试失败等）会给长句，不收窄就会横着撑出去被窗体截断。
+            _status.MaximumSize = new Size(width, 0);
             _jdbcBannerLabel.MaximumSize = new Size(Math.Max(120, width - 16), 0);
             _jdbcBanner.Height = _jdbcBannerLabel.PreferredHeight + 12;
 

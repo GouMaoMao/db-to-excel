@@ -83,9 +83,11 @@ namespace DB2Sheet.UI
 
             FlowLayoutPanel actions = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Padding = new Padding(0, 8, 0, 0)
             };
             actions.Controls.Add(closeButton);
@@ -129,7 +131,7 @@ namespace DB2Sheet.UI
             };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.Controls.Add(help, 0, 0);
             root.Controls.Add(split, 0, 1);
             root.Controls.Add(actions, 0, 2);

@@ -37,11 +37,12 @@ namespace DB2Sheet.UI
         private readonly CheckBox _default = new CheckBox { Text = "作为默认模型", AutoSize = true, UseVisualStyleBackColor = true };
         private readonly Label _status = new Label
         {
-            AutoSize = false,
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Dock = DockStyle.Top,
             Margin = new Padding(0),
             ForeColor = SystemColors.GrayText,
-            TextAlign = ContentAlignment.MiddleLeft
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(0, 6, 0, 6)
         };
         private readonly Button _saveButton;
         private bool _binding;
@@ -116,9 +117,12 @@ namespace DB2Sheet.UI
 
             FlowLayoutPanel actions = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.RightToLeft,
-                WrapContents = false
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(0, 8, 0, 0)
             };
             actions.Controls.Add(closeButton);
             actions.Controls.Add(testButton);
@@ -141,6 +145,17 @@ namespace DB2Sheet.UI
             editor.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             editor.Controls.Add(_default, 1, row);
 
+            // 右侧字段比窗口矮时无法压下任何一行，包一层自动滚动面板，矮窗里也能逐项滚到。
+            editor.AutoSize = true;
+            editor.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            editor.Dock = DockStyle.Top;
+            Panel editorScroll = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true
+            };
+            editorScroll.Controls.Add(editor);
+
             SplitContainer split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
@@ -148,7 +163,7 @@ namespace DB2Sheet.UI
                 SplitterWidth = 6
             };
             split.Panel1.Controls.Add(_list);
-            split.Panel2.Controls.Add(editor);
+            split.Panel2.Controls.Add(editorScroll);
 
             TableLayoutPanel root = new TableLayoutPanel
             {
@@ -159,8 +174,8 @@ namespace DB2Sheet.UI
             };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.Controls.Add(help, 0, 0);
             root.Controls.Add(split, 0, 1);
             root.Controls.Add(_status, 0, 2);

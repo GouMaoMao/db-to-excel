@@ -81,6 +81,8 @@ namespace DB2Sheet.UI
             if (value && !_preparedFirstShow)
             {
                 _preparedFirstShow = true;
+                // 句柄还没建：先把窗口收进当前屏幕的工作区，小屏和高缩放下也看得到底部按钮。
+                FormSizeMemory.ClampToWorkingArea(this);
                 if (DeferFirstShow)
                 {
                     Opacity = 0;
