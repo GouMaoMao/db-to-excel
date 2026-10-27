@@ -47,16 +47,18 @@ namespace DB2Sheet.UI
         public OperationProgressForm(string title, bool canCancel, LogSeverity minimumSeverity)
         {
             _minimumSeverity = minimumSeverity;
-            Text = AppPresentation.WindowTitle(title);
-            Width = 680;
-            Height = 400;
-            MinimumSize = new Size(560, 320);
-            StartPosition = FormStartPosition.CenterParent;
+            InitializeWindow(
+                AppPresentation.WindowTitle(title),
+                680,
+                400,
+                new Size(560, 320),
+                FormStartPosition.CenterParent);
             FormBorderStyle = FormBorderStyle.Sizable;
             TopMost = true;
 
-            _stageLabel = new Label { AutoSize = true, Text = "正在准备…", Font = new Font(Font, FontStyle.Bold) };
-            _detailLabel = new Label { AutoSize = true, Text = string.Empty };
+            _stageLabel = new WrapLabel { Text = "正在准备…", Font = new Font(Font, FontStyle.Bold) };
+            _detailLabel = new WrapLabel { Text = string.Empty };
+            _detailLabel.MaximumSize = new Size(0, Math.Max(Font.Height * 3, 48));
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee, Height = 18 };
             _readRow = CreateMeterRow("读取", out _readCaption, out _readBar);
             _writeRow = CreateMeterRow("写入", out _writeCaption, out _writeBar);
@@ -89,48 +91,21 @@ namespace DB2Sheet.UI
             };
             _closeButton.Click += (sender, args) => Close();
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 5
-            };
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            _meterRow = new RowStyle(SizeType.Absolute, 22);
-            root.RowStyles.Add(_meterRow);
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.Absolute, 22),
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize));
+            _meterRow = root.RowStyles[2];
             root.Controls.Add(_stageLabel, 0, 0);
             root.Controls.Add(_detailLabel, 0, 1);
             root.Controls.Add(_meterHost, 0, 2);
             root.Controls.Add(_logBox, 0, 3);
 
-            FlowLayoutPanel actions = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.RightToLeft,
-                AutoSize = true
-            };
-            actions.Controls.Add(_closeButton);
-            actions.Controls.Add(_cancelButton);
+            FlowLayoutPanel actions = CreateActionBar(_closeButton, _cancelButton);
             root.Controls.Add(actions, 0, 4);
             Controls.Add(root);
-            Resize += (sender, args) => ApplyWrappedLabelWidth();
-            ApplyWrappedLabelWidth();
-        }
-
-        /// <summary>把阶段标题、详情和日志限制在客户区宽度内，详情最多约三行。</summary>
-        /// <remarks>宽度跟窗体走。详情超出三行后不再长高；日志在同一宽度内换行，完整内容仍可滚动查看。</remarks>
-        private void ApplyWrappedLabelWidth()
-        {
-            int width = ClientSize.Width - 24;
-            if (width < 80) return;
-            _stageLabel.MaximumSize = new Size(width, 0);
-            _detailLabel.MaximumSize = new Size(width, Math.Max(Font.Height * 3, 48));
-            _logBox.MaximumSize = new Size(width, 0);
         }
 
         /// <summary>用户点击取消按钮时触发；订阅方应取消对应令牌。</summary>

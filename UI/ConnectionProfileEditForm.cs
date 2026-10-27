@@ -43,7 +43,6 @@ namespace DB2Sheet.UI
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly Action _openJdbcEnvironment;
         private readonly Button _jdbcEnvironmentButton;
-        private readonly List<Label> _fieldNotes = new List<Label>();
         private readonly string _profileId;
         private readonly bool _isNew;
         private bool _loading;
@@ -79,11 +78,12 @@ namespace DB2Sheet.UI
             _isNew = profile == null;
             _nameOwnedByUser = !_isNew && !string.IsNullOrWhiteSpace(profile.Name);
 
-            Text = AppPresentation.WindowTitle(_isNew ? "新建连接方案" : "编辑连接方案");
-            Width = 1000;
-            Height = 640;
-            MinimumSize = new Size(800, 480);
-            StartPosition = FormStartPosition.CenterParent;
+            InitializeWindow(
+                AppPresentation.WindowTitle(_isNew ? "新建连接方案" : "编辑连接方案"),
+                1000,
+                640,
+                new Size(800, 480),
+                FormStartPosition.CenterParent);
 
             _name = new TextBox { Dock = DockStyle.Fill };
             _provider = new ComboBox
@@ -94,16 +94,14 @@ namespace DB2Sheet.UI
             };
             _nameLabel = new Label { Text = "显示名称", AutoSize = true, Anchor = AnchorStyles.Left };
             _providerLabel = new Label { Text = "数据源类型", AutoSize = true, Anchor = AnchorStyles.Left };
-            _providerHint = new Label
+            _providerHint = new WrapLabel
             {
-                AutoSize = true,
                 Dock = DockStyle.Fill,
                 ForeColor = SystemColors.GrayText,
                 Padding = new Padding(0, 2, 0, 4)
             };
-            _jdbcBannerLabel = new Label
+            _jdbcBannerLabel = new WrapLabel
             {
-                AutoSize = true,
                 Dock = DockStyle.Fill,
                 ForeColor = Color.DarkRed,
                 Padding = new Padding(8, 6, 8, 6)
@@ -127,9 +125,8 @@ namespace DB2Sheet.UI
             _parameters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             _parameters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             _parameters.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            _status = new Label
+            _status = new WrapLabel
             {
-                AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Padding = new Padding(0, 6, 0, 6)
             };
@@ -169,30 +166,14 @@ namespace DB2Sheet.UI
             parameterHost.Controls.Add(_parameters);
             parameterHost.Controls.Add(_jdbcBanner);
 
-            FlowLayoutPanel actions = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft,
-                WrapContents = false
-            };
-            actions.Controls.Add(cancelButton);
-            actions.Controls.Add(_saveButton);
-            actions.Controls.Add(_saveHint);
-            actions.Controls.Add(_testButton);
-            actions.Controls.Add(_jdbcEnvironmentButton);
+            FlowLayoutPanel actions = CreateActionBar(
+                cancelButton, _saveButton, _saveHint, _testButton, _jdbcEnvironmentButton);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 4
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(header, 0, 0);
             root.Controls.Add(parameterHost, 0, 1);
             root.Controls.Add(_status, 0, 2);
@@ -210,18 +191,12 @@ namespace DB2Sheet.UI
             _jdbcEnvironmentButton.Click += JdbcEnvironmentButtonClick;
             _testButton.Click += TestButtonClick;
             _saveButton.Click += SaveButtonClick;
-            Shown += (sender, args) =>
-            {
-                ApplyHintWidths();
-                RefreshJdbcJavaUi(false);
-            };
-            Resize += (sender, args) => ApplyHintWidths();
+            Shown += (sender, args) => RefreshJdbcJavaUi(false);
             FormClosed += (sender, args) => _tips.Dispose();
             AcceptButton = _saveButton;
             CancelButton = cancelButton;
 
             LoadProviders(profile);
-            ApplyHintWidths();
         }
 
         /// <summary>获取用户验证并确认后的连接方案；取消或尚未保存时为空。</summary>
@@ -332,7 +307,6 @@ namespace DB2Sheet.UI
                 _parameters.RowStyles.Clear();
                 _parameters.RowCount = 0;
                 _editors.Clear();
-                _fieldNotes.Clear();
 
                 IDataSourceProvider provider = SelectedProvider;
                 if (provider == null)
@@ -692,38 +666,6 @@ namespace DB2Sheet.UI
         private void UpdateProviderHint()
         {
             _providerHint.Text = AppPresentation.ConnectionProviderHint(SelectedProvider?.ProviderId);
-            ApplyHintWidths();
-        }
-
-        /// <summary>把类型介绍、按钮上方的状态提示、缺 Java 横幅和框下说明收窄到可用宽度，避免长句横向撑出窗体。</summary>
-        private void ApplyHintWidths()
-        {
-            int width = Math.Max(120, ClientSize.Width - 48);
-            _providerHint.MaximumSize = new Size(width, 0);
-            // 按钮上方的提示（缺 Java、测试失败等）会给长句，不收窄就会横着撑出去被窗体截断。
-            _status.MaximumSize = new Size(width, 0);
-            _jdbcBannerLabel.MaximumSize = new Size(Math.Max(120, width - 16), 0);
-            _jdbcBanner.Height = _jdbcBannerLabel.PreferredHeight + 12;
-
-            int noteWidth = FieldNoteWidth();
-            foreach (Label note in _fieldNotes)
-            {
-                if (note.IsDisposed || note.MaximumSize.Width == noteWidth) continue;
-                note.MaximumSize = new Size(noteWidth, 0);
-            }
-        }
-
-        /// <summary>框下说明放在参数表的输入列，宽度跟该列走；列宽尚未算出时按窗体宽度估算。</summary>
-        /// <returns>说明标签的最大宽度。</returns>
-        private int FieldNoteWidth()
-        {
-            int[] columns = _parameters.GetColumnWidths();
-            if (columns != null && columns.Length > 1 && columns[1] > 40)
-            {
-                return Math.Max(120, columns[1] - 8);
-            }
-
-            return Math.Max(120, ClientSize.Width - 220);
         }
 
         /// <summary>在当前字段下方追加灰色说明。该字段没有说明时不占行。</summary>
@@ -733,14 +675,12 @@ namespace DB2Sheet.UI
             string text = AppPresentation.ConnectionFieldNote(SelectedProvider?.ProviderId, fieldKey);
             if (string.IsNullOrEmpty(text)) return;
 
-            Label note = new Label
+            Label note = new WrapLabel
             {
                 Text = text,
-                AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Margin = new Padding(3, 0, 8, 6)
             };
-            _fieldNotes.Add(note);
             int row = _parameters.RowCount++;
             _parameters.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _parameters.Controls.Add(note, 1, row);
@@ -785,7 +725,6 @@ namespace DB2Sheet.UI
 
             _jdbcBannerLabel.Text = AppPresentation.JdbcJavaBanner;
             _jdbcBanner.Visible = true;
-            ApplyHintWidths();
 
             if (promptIfMissing && _openJdbcEnvironment != null)
             {

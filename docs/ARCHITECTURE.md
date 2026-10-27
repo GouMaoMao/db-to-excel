@@ -99,6 +99,10 @@ Excel COM 访问必须串行并位于 Excel UI 上下文。不要在后台线程
 
 ### UI
 
+- `AppForm`：所有窗体的公共基类。除字体和图标外，还提供 `InitializeWindow`（标题、初始/最小尺寸、居中或恢复尺寸）、`CreateRootTable`（12 像素内边距、单列铺满的根表格）和 `CreateActionBar`（右对齐、自适应高度的底部按钮栏）。子类只填内容，不重复摆骨架。
+- `WrapLabel`：按所在表格列宽或父容器可用宽度折行并自动撑高；设置、连接编辑、JDBC 环境、模型、Skill、本地数据和进度窗共用。
+- `AddItemListBox` / `AddItem`：带「新增」末项的自绘列表，统一右键状态、末项、分隔线、行高、退选锚点和图标文字绘制。模型设置与 Skill 设置通过 `EntryMeasure`/`EntryDraw` 保留各自的子型号行和缩进。
+- `TextPromptDialog`：普通单行输入、只读多行说明，以及带目标 Sheet 校验和「同时保存 SQL」勾选的写入确认。原 `ExportSheetDialog` 已并入。
 - `OperationProgressForm`：通用进度和取消窗口。
 - `DatabaseConnectionTree`：SQL 查询和批量刷新共用的连接树。
 - `ConnectionProfileEditForm`：由 Provider 参数元数据动态生成字段。

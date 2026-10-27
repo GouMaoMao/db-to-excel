@@ -264,6 +264,8 @@
     </Compile>
     <Compile Include="UI\FormSizeMemory.cs" />
     <Compile Include="UI\AppPresentation.cs" />
+    <Compile Include="UI\AddItemList.cs" />
+    <Compile Include="UI\WrapLabel.cs" />
 	<Compile Include="UI\OpeningHintForm.cs">
 		<SubType>Form</SubType>
 	</Compile>
@@ -273,9 +275,6 @@
     </Compile>
     <Compile Include="UI\SqlSyntax.cs" />
     <Compile Include="UI\TextPromptDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="UI\ExportSheetDialog.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="UI\ConnectionProfileEditForm.cs">

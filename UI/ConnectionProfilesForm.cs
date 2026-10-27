@@ -56,12 +56,13 @@ namespace DB2Sheet.UI
             _openJdbcEnvironment = openJdbcEnvironment;
             if (settings == null) throw new ArgumentNullException(nameof(settings));
 
-            Text = AppPresentation.WindowTitle("连接方案管理");
-            Width = 720;
-            Height = 500;
-            MinimumSize = new Size(560, 360);
-            StartPosition = FormStartPosition.Manual;
-            FormSizeMemory.Attach(this, settings, "Connections");
+            InitializeWindow(
+                AppPresentation.WindowTitle("连接方案管理"),
+                720,
+                500,
+                new Size(560, 360),
+                settings,
+                "Connections");
             _headerFont = new Font(Font, FontStyle.Bold);
 
             _profiles = new ListView
@@ -95,24 +96,12 @@ namespace DB2Sheet.UI
             toolbar.Controls.Add(_copyButton);
             toolbar.Controls.Add(_deleteButton);
 
-            FlowLayoutPanel footer = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft
-            };
-            footer.Controls.Add(closeButton);
+            FlowLayoutPanel footer = CreateActionBar(closeButton);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 3
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(toolbar, 0, 0);
             root.Controls.Add(_profiles, 0, 1);
             root.Controls.Add(footer, 0, 2);

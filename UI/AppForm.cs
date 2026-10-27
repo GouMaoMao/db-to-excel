@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
+using DB2Sheet.Contracts;
 
 namespace DB2Sheet.UI
 {
@@ -52,6 +53,87 @@ namespace DB2Sheet.UI
         /// <remarks>只在界面线程由 <see cref="RevealFirstShow"/> 调用。此时进度窗应当已经关掉。</remarks>
         protected virtual void OnFirstShowRevealed()
         {
+        }
+
+        /// <summary>按标题、初始尺寸、最小尺寸和居中方式摆好窗体骨架。</summary>
+        /// <param name="title">完整窗口标题。需要品牌前缀时由调用方先经 <see cref="AppPresentation.WindowTitle"/> 组合。</param>
+        /// <param name="width">首次显示的宽度。</param>
+        /// <param name="height">首次显示的高度。</param>
+        /// <param name="minimumSize">用户可缩到的最小尺寸。</param>
+        /// <param name="startPosition">居中方式。需要记住尺寸时改用带存储参数的重载。</param>
+        /// <remarks>必须在创建句柄之前调用。只设置窗体属性，不创建控件。</remarks>
+        protected void InitializeWindow(
+            string title, int width, int height, Size minimumSize, FormStartPosition startPosition)
+        {
+            Text = title;
+            Width = width;
+            Height = height;
+            MinimumSize = minimumSize;
+            StartPosition = startPosition;
+        }
+
+        /// <summary>摆好会记住宽高的功能窗骨架，并在句柄创建前恢复上次尺寸。</summary>
+        /// <param name="title">完整窗口标题。</param>
+        /// <param name="width">没有历史尺寸时的宽度。</param>
+        /// <param name="height">没有历史尺寸时的高度。</param>
+        /// <param name="minimumSize">用户可缩到的最小尺寸。</param>
+        /// <param name="store">会话设置存储。</param>
+        /// <param name="sizeKey">该窗体在 <c>session.formBounds</c> 里的稳定键。</param>
+        /// <remarks>
+        /// 内部调用 <see cref="FormSizeMemory.Attach"/>，因此窗体位置改为按上次保存的值或工作区居中。
+        /// 必须在创建句柄之前、添加控件之前调用。
+        /// </remarks>
+        protected void InitializeWindow(
+            string title, int width, int height, Size minimumSize, ISettingsStore store, string sizeKey)
+        {
+            InitializeWindow(title, width, height, minimumSize, FormStartPosition.Manual);
+            FormSizeMemory.Attach(this, store, sizeKey);
+        }
+
+        /// <summary>建立统一内边距的单列根表格，并按顺序加入行样式。</summary>
+        /// <param name="rows">各行的高。省略时只留一行铺满。</param>
+        /// <returns>可直接加入窗体的根表格。调用方继续添加行样式和控件。</returns>
+        /// <remarks>自动加一列铺满可用宽度，窗口缩小时内容跟着收窄。</remarks>
+        protected static TableLayoutPanel CreateRootTable(params RowStyle[] rows)
+        {
+            TableLayoutPanel root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(12),
+                ColumnCount = 1,
+                RowCount = rows == null || rows.Length == 0 ? 1 : rows.Length
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            if (rows == null || rows.Length == 0)
+            {
+                root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+                return root;
+            }
+
+            foreach (RowStyle row in rows)
+                root.RowStyles.Add(row);
+            return root;
+        }
+
+        /// <summary>建立统一留白的底部按钮栏，按钮按传入顺序从右往左排列。</summary>
+        /// <param name="buttons">按钮或夹在按钮之间的说明控件。第一个显示在最右端。</param>
+        /// <returns>可直接放进根表格最后一行的按钮栏。</returns>
+        /// <remarks>栏高随按钮自适应；上方留 8 像素，与内容分开。</remarks>
+        protected static FlowLayoutPanel CreateActionBar(params Control[] buttons)
+        {
+            FlowLayoutPanel actions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Margin = new Padding(0),
+                Padding = new Padding(0, 8, 0, 0)
+            };
+            if (buttons != null)
+                actions.Controls.AddRange(buttons);
+            return actions;
         }
 
         /// <summary>结束首次显示的透明阶段，把窗口画出来。</summary>

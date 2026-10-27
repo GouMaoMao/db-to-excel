@@ -4,45 +4,60 @@
 
 ## 当前目标与验收条件
 
-- 修复「新建/编辑连接方案」窗体中按钮上方提示文本不自动换行的缺陷。
-- 修复「JDBC 环境」窗体高度过低、长说明把「检测 Java／浏览／打开 JDK 下载页」挤出可视区域的问题。
-- 全部功能窗体在小屏、高缩放下都能看全界面：窗口不超出屏幕工作区，底部按钮始终可见，放不下的内容可滚动。
-- 完整计划见仓库根目录 `implementation_plan.md`。
+- 设置类窗体统一改造：公共骨架、带「新增」末项的列表、折行标签、小对话框和边框/居中实现。
+- 完整计划、已确认的决定和风险见 `docs/UI-UNIFICATION-PLAN.md`。
+- 验收标准：16 个现存 `AppForm` 派生窗体都走公共骨架（原有 17 个，`ExportSheetDialog` 已并入）；模型设置与 Skill 设置不再各有一份列表绘制；长说明按可用宽度折行且底部按钮始终可见；编译通过。
 
 ## 已完成
 
-- `FormSizeMemory` 新增 `ClampToWorkingArea`：首次显示、建句柄前把窗体收进光标所在屏幕的工作区，只缩小不放大；缩小后按「功能窗体相对工作区居中」的约定重新居中。
-- `AppForm.SetVisibleCore` 在首次显示分支统一调用该收敛，普通显示和推迟显示两条路径都生效，所有 `AppForm` 派生窗体（含不记忆尺寸的小窗）一并受保护。
-- `ConnectionProfileEditForm.ApplyHintWidths` 现在也给按钮上方的 `_status` 设最大宽度，缺 Java、测试失败等长句会折行而不是被截断。
-- `JdbcEnvironmentForm` 布局改为两段：上方滚动区只放说明，下方固定区放「检测 Java」、路径行、「打开 JDK 下载页」和状态行；初始高度 520 提到 560。
-- `AiModelSettingsForm` 右侧编辑表格包进自动滚动面板，根表格的状态行与操作行由固定像素高改为自适应高，操作栏改自适应高。
-- `AiSkillSettingsForm` 操作行由固定 40 像素改为自适应高。
-- `LocalDataForm` 引言按窗宽折行，窄窗不再横向裁掉半句。
+- `UI/AppForm.cs` 新增 `InitializeWindow`（普通/记尺寸两个重载）、`CreateRootTable`（单列铺满）、`CreateActionBar`。
+- 原有 17 个 `AppForm` 派生窗体全部改为调用 `InitializeWindow`；`ExportSheetDialog` 随后并入
+  `TextPromptDialog`，现存 16 个派生窗体。9 个功能窗和 3 个小对话框使用公共根表格和按钮栏。
+  `QueryEditorForm`、`SheetRefreshForm`、`AiChatForm` 只换窗口骨架，内部布局未动。
+- 新增 `UI/AddItemList.cs`：统一右键状态、「新增」末项、分隔线、退选锚点和默认行高。
+  模型设置与 Skill 设置改为使用 `AddItemListBox`，各自只保留非新增行的绘制/行高和编辑器逻辑。
+- 新增 `UI/WrapLabel.cs`：按父表格列宽或父容器可用宽度折行并撑高。替换了模型设置、Skill 设置、
+  JDBC 环境、本地数据、连接编辑、设置、进度窗共七处折行实现。
+- 删除 `UI/ExportSheetDialog.cs`；`TextPromptDialog` 增加带附加勾选和校验的 `TryShow` 重载，
+  普通输入继续走原重载。目标表名校验移到 `QueryEditorForm.ValidateSheetName`，标题改走
+  `AppPresentation.WindowTitle("写入 Sheet")`。
+- `RefreshSummaryForm`、`OpeningHintForm` 改用 `LightBorder`，边框统一为 `SystemColors.ControlDark`。
+- `LocalDataForm` 改用 `FormSizeMemory.CenterOnWorkingArea`，删除自己的居中方法。
+- `DB2Sheet.csproj` 增加两个新文件的 `Compile Include`，移除 `ExportSheetDialog.cs`。
+- 对照当前代码检查 `AGENTS.md`，补充公共窗口骨架、`WrapLabel` 折行、带「新增」末项列表自绘、
+  记尺寸窗体与小窗的居中口径，以及写入 Sheet 不记尺寸这几处约定。
 
 ## 本次涉及文件
 
-- `UI/FormSizeMemory.cs`
-- `UI/AppForm.cs`
-- `UI/ConnectionProfileEditForm.cs`
-- `UI/JdbcEnvironmentForm.cs`
-- `UI/AiModelSettingsForm.cs`
-- `UI/AiSkillSettingsForm.cs`
-- `UI/LocalDataForm.cs`
-- `implementation_plan.md`（新增，计划正文）
-- `docs/HANDOFF.md`
+- `UI/AppForm.cs`、`UI/FormSizeMemory.cs`
+- `UI/AddItemList.cs`（新增）、`UI/WrapLabel.cs`（新增）
+- `UI/AiChatForm.cs`、`UI/AiModelSettingsForm.cs`、`UI/AiSentDetailForm.cs`、`UI/AiSkillSettingsForm.cs`
+- `UI/ConnectionProfileEditForm.cs`、`UI/ConnectionProfilesForm.cs`、`UI/ExceptionDetailForm.cs`
+- `UI/JdbcEnvironmentForm.cs`、`UI/LocalDataForm.cs`、`UI/OpeningHintForm.cs`
+- `UI/OperationProgressForm.cs`、`UI/QueryEditorForm.cs`、`UI/RefreshSummaryForm.cs`
+- `UI/SettingsForm.cs`、`UI/SheetRefreshForm.cs`、`UI/TextPromptDialog.cs`
+- `UI/ExportSheetDialog.cs`（删除）
+- `DB2Sheet.csproj`
+- `AGENTS.md`
+- `docs/UI-UNIFICATION-PLAN.md`、`docs/HANDOFF.md`、`docs/ARCHITECTURE.md`
 
 ## 验证结果
 
 - `MSBuild DB2Sheet.csproj /t:Rebuild /p:Configuration=Debug` 通过，0 错误。
-- 编译仅剩 1 个既有警告 CS2002（`UI/DatabaseTreeImageCatalog.cs` 在 csproj 中重复 Include），与本次改动无关。
-- 使用者已在 Windows 上人工验收通过：连接方案编辑窗长提示折行、JDBC 环境窗按钮始终可见、模型设置与 Skill 设置矮窗滚动、各窗不超出工作区。
-- 已提交并推送 `main`：`c5cc652`（GitHub 与 Gitee 同一次提交，标签 `v2.0.2` 与附件 `db-to-excel.exe` 两侧一致，`scripts/check-release.ps1` 退出码 0）。
-- 顺手删除了仓库根目录和 `Logs\` 下的临时 `.log` 文件；这些文件被 `.gitignore` 的 `*.log` 忽略，从未入库。
-- 未运行 `DB2Sheet.Tests`：测试项目仍有三个既有编译错误（`AiTranscriptHtmlTests`、`AppPresentationTests`、`QueryProfileRepositoryTests`），本次未处理。
+- 仅剩既有警告 CS2002（`UI/DatabaseTreeImageCatalog.cs` 在 csproj 中重复 Include），与本次改动无关。
+- 用临时 WinForms 窗体验证了 `WrapLabel` 的单列根表格和 AutoSize 横幅、`AddItemListBox` 的
+  28/36 像素行高和右键退选锚点、`CreateActionBar` 的右对齐和自适应高度；`LocalDataForm`
+  与 `TextPromptDialog` 缩到最小宽度后按钮仍在客户区内。
+- 人工目视已由用户验收通过，包括连接编辑窗、JDBC 环境、设置、进度窗和模型/Skill 列表。
+- 已对照当前代码复核 `AGENTS.md` 的界面、会话状态和文档章节，未发现其他因本次改动而失真的描述。
+- 未运行 `DB2Sheet.Tests`：测试项目仍有三个既有编译错误，本轮未处理测试项目。
+- 未提交；按用户决定，本次改动一次提交。
 
 ## 阻塞项与下一步
 
-- 无阻塞，工作区干净。
-- 本次未提升版本号；需要发布时只改 `Properties/AssemblyInfo.cs` 两处版本号，提交并推送，先跑 `scripts/publish-release.ps1 -CheckOnly`，再用 `scripts/start-release.ps1` 发布，最后用 `scripts/check-release.ps1` 核验。
-- 若目视发现某个窗体内容仍被裁（例如模型设置右侧字段在极矮窗口下的换行），按 `implementation_plan.md` 的同一思路补滚动或自适应行高，不要再写死更大的初始高度。
-- `implementation_plan.md` 是否长期保留待定；确认完成后可删除或移入 `docs/`。
+- 无阻塞。
+- 文档和代码已对齐；下一步只等提交或发布决定。
+- 若以后调整折行或高度，优先改 `WrapLabel` 或对应窗体的根表格行样式，不要再加回各窗自己的
+  `Resize`/`MaximumSize` 钩子。
+- 需要发布时先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs`
+  两处版本号，先跑 `scripts/publish-release.ps1 -CheckOnly`，再发布并核验。

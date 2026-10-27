@@ -28,25 +28,21 @@ namespace DB2Sheet.UI
         {
             if (paths == null) throw new ArgumentNullException(nameof(paths));
 
-            Text = AppPresentation.WindowTitle("本地数据");
-            Width = 720;
-            Height = 440;
-            MinimumSize = new Size(520, 320);
-            StartPosition = FormStartPosition.Manual;
+            InitializeWindow(
+                AppPresentation.WindowTitle("本地数据"),
+                720,
+                440,
+                new Size(520, 320),
+                FormStartPosition.Manual);
             ShowInTaskbar = false;
             MinimizeBox = false;
-            CenterOnWorkArea();
+            FormSizeMemory.CenterOnWorkingArea(this);
 
-            Label intro = new Label
+            Label intro = new WrapLabel
             {
                 Text = AppPresentation.LocalDataIntro,
-                AutoSize = true,
-                MaximumSize = new Size(Math.Max(120, ClientSize.Width - 48), 0),
                 Padding = new Padding(0, 0, 0, 8)
             };
-            // 长句按窗宽换行：不设最大宽度时只会横向撑出窗体，窄窗里被裁掉半句。
-            Resize += (sender, args) =>
-                intro.MaximumSize = new Size(Math.Max(120, ClientSize.Width - 48), 0);
 
             _list = new ListView
             {
@@ -92,27 +88,12 @@ namespace DB2Sheet.UI
             _tips.SetToolTip(_openButton, AppPresentation.LocalDataOpenTip);
             _tips.SetToolTip(closeButton, AppPresentation.LocalDataCloseTip);
 
-            FlowLayoutPanel footer = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.RightToLeft,
-                AutoSize = true,
-                Padding = new Padding(0, 8, 0, 0)
-            };
-            footer.Controls.Add(closeButton);
-            footer.Controls.Add(_openButton);
-            footer.Controls.Add(_copyButton);
+            FlowLayoutPanel footer = CreateActionBar(closeButton, _openButton, _copyButton);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 3
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(intro, 0, 0);
             root.Controls.Add(_list, 0, 1);
             root.Controls.Add(footer, 0, 2);
@@ -259,16 +240,6 @@ namespace DB2Sheet.UI
             {
                 _fittingColumn = false;
             }
-        }
-
-        /// <summary>相对光标所在屏幕的工作区居中。不写入会话设置。</summary>
-        /// <remarks>在创建句柄之前设置位置，避免先画出角落再跳到中间。</remarks>
-        private void CenterOnWorkArea()
-        {
-            Rectangle area = FormSizeMemory.CursorWorkingArea();
-            Location = new Point(
-                area.Left + Math.Max(0, (area.Width - Width) / 2),
-                area.Top + Math.Max(0, (area.Height - Height) / 2));
         }
 
         /// <summary>列表中的一项：名称、路径，以及应按文件还是目录打开。</summary>

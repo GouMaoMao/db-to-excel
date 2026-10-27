@@ -32,11 +32,12 @@ namespace DB2Sheet.UI
         /// <param name="browserData">与对话栏共用的 WebView2 用户数据目录。</param>
         private AiSentDetailForm(IList<AiSentSection> sections, int? inputTokens, AiSentCall call, string browserData)
         {
-            Text = AppPresentation.WindowTitle("请求详情");
-            Width = 640;
-            Height = 900;
-            MinimumSize = new Size(420, 320);
-            StartPosition = FormStartPosition.CenterParent;
+            InitializeWindow(
+                AppPresentation.WindowTitle("请求详情"),
+                640,
+                900,
+                new Size(420, 320),
+                FormStartPosition.CenterParent);
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
             _html = AiSentReportHtml.Document(sections, inputTokens, call);
@@ -80,16 +81,13 @@ namespace DB2Sheet.UI
                 UseVisualStyleBackColor = true
             };
             _tips.SetToolTip(close, AppPresentation.AiSentCloseTip);
-            FlowLayoutPanel actions = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Bottom,
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft,
-                Padding = new Padding(12, 8, 12, 12)
-            };
-            actions.Controls.Add(close);
-            Controls.Add(host);
-            Controls.Add(actions);
+            FlowLayoutPanel actions = CreateActionBar(close);
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize));
+            root.Controls.Add(host, 0, 0);
+            root.Controls.Add(actions, 0, 1);
+            Controls.Add(root);
             AcceptButton = close;
             CancelButton = close;
             Shown += (sender, args) =>

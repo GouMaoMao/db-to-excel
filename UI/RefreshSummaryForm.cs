@@ -23,11 +23,12 @@ namespace DB2Sheet.UI
         private RefreshSummaryForm(string summary, string details, Color successColor, Color truncatedColor)
         {
             bool hasDetails = !string.IsNullOrWhiteSpace(details);
-            Text = AppPresentation.WindowTitle("批量刷新");
-            Width = 560;
-            Height = hasDetails ? 400 : 236;
-            MinimumSize = new Size(480, hasDetails ? 340 : 210);
-            StartPosition = FormStartPosition.CenterParent;
+            InitializeWindow(
+                AppPresentation.WindowTitle("批量刷新"),
+                560,
+                hasDetails ? 400 : 236,
+                new Size(480, hasDetails ? 340 : 210),
+                FormStartPosition.CenterParent);
             FormBorderStyle = hasDetails ? FormBorderStyle.Sizable : FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -44,29 +45,14 @@ namespace DB2Sheet.UI
                 AutoSize = true,
                 DialogResult = DialogResult.OK
             };
-            FlowLayoutPanel actions = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft,
-                Padding = new Padding(0, 8, 0, 0),
-                Margin = new Padding(0)
-            };
-            actions.Controls.Add(okButton);
+            FlowLayoutPanel actions = CreateActionBar(okButton);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 3
-            };
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(hasDetails
-                ? new RowStyle(SizeType.Percent, 100)
-                : new RowStyle(SizeType.Absolute, 44));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                hasDetails
+                    ? new RowStyle(SizeType.Percent, 100)
+                    : new RowStyle(SizeType.Absolute, 44),
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(CreateBody(summary, details, hasDetails), 0, 0);
             root.Controls.Add(CreateLegend(_legendFont, successColor, truncatedColor), 0, 1);
             root.Controls.Add(actions, 0, 2);
@@ -136,14 +122,9 @@ namespace DB2Sheet.UI
 
             surface.Controls.Add(summaryLabel);
 
-            return new Panel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(1),
-                BackColor = Color.FromArgb(210, 214, 220),
-                Margin = new Padding(0),
-                Controls = { surface }
-            };
+            Control frame = LightBorder.Wrap(surface);
+            frame.Margin = new Padding(0);
+            return frame;
         }
 
         /// <summary>底部图例用窗体底色，两行色块各占一行字高，不随明细滚动。说明文字用较小的灰色斜体。</summary>

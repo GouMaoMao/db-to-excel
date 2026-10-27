@@ -125,12 +125,13 @@ namespace DB2Sheet.UI
             _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
             _openSqlFormatSettings = openSqlFormatSettings;
 
-            Text = AppPresentation.WindowTitle("Sheet 批量刷新");
-            Width = 1100;
-            Height = 680;
-            MinimumSize = new Size(900, 520);
-            StartPosition = FormStartPosition.Manual;
-            FormSizeMemory.Attach(this, _settings, "SheetRefresh");
+            InitializeWindow(
+                AppPresentation.WindowTitle("Sheet 批量刷新"),
+                1100,
+                680,
+                new Size(900, 520),
+                _settings,
+                "SheetRefresh");
 
             _connectionTree = new DatabaseConnectionTree(
                 connections, providers, executionService, _operationRunner, _settings, jdbcEnvironment, openJdbcEnvironment);

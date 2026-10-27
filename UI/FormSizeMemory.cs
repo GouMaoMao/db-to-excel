@@ -38,6 +38,18 @@ namespace DB2Sheet.UI
             return Screen.FromPoint(Cursor.Position).WorkingArea;
         }
 
+        /// <summary>按光标所在屏幕的工作区居中，不写入会话设置。</summary>
+        /// <param name="form">要摆位置的窗体。可以还没有句柄。</param>
+        /// <remarks>必须在显示之前调用，避免先画出角落再跳到中间。</remarks>
+        internal static void CenterOnWorkingArea(Form form)
+        {
+            if (form == null || form.IsDisposed) return;
+            Rectangle area = CursorWorkingArea();
+            form.Location = new Point(
+                area.Left + Math.Max(0, (area.Width - form.Width) / 2),
+                area.Top + Math.Max(0, (area.Height - form.Height) / 2));
+        }
+
         /// <summary>把窗体宽高收进光标所在屏幕的工作区，使小屏或高缩放下也能看全界面。</summary>
         /// <param name="form">要收敛的窗体。可以还没有句柄。</param>
         /// <param name="margin">四周预留的边距，避免贴着任务栏或屏幕边缘。</param>
@@ -104,10 +116,7 @@ namespace DB2Sheet.UI
 
         private static void Center(Form form)
         {
-            Rectangle area = CursorWorkingArea();
-            form.Location = new Point(
-                area.Left + Math.Max(0, (area.Width - form.Width) / 2),
-                area.Top + Math.Max(0, (area.Height - form.Height) / 2));
+            CenterOnWorkingArea(form);
         }
 
         private static bool TryRead(ISettingsStore store, string key, out int width, out int height, out bool maximized)

@@ -21,11 +21,12 @@ namespace DB2Sheet.UI
         /// <param name="offerAskAi">为 true 时显示「问 AI」。只有查询执行失败会打开。</param>
         public ExceptionDetailForm(string summary, string detail, bool offerAskAi)
         {
-            Text = AppPresentation.WindowTitle("错误详情");
-            Width = 720;
-            Height = 480;
-            MinimumSize = new Size(520, 360);
-            StartPosition = FormStartPosition.CenterParent;
+            InitializeWindow(
+                AppPresentation.WindowTitle("错误详情"),
+                720,
+                480,
+                new Size(520, 360),
+                FormStartPosition.CenterParent);
             ShowInTaskbar = false;
 
             _summary = new TextBox
@@ -62,14 +63,7 @@ namespace DB2Sheet.UI
                 }
             };
 
-            FlowLayoutPanel footer = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.RightToLeft,
-                AutoSize = true
-            };
-            footer.Controls.Add(closeButton);
-            footer.Controls.Add(copyButton);
+            FlowLayoutPanel footer = CreateActionBar(closeButton, copyButton);
             if (offerAskAi)
             {
                 Button askButton = new Button { Text = "问 AI", AutoSize = true, UseVisualStyleBackColor = true };
@@ -82,17 +76,11 @@ namespace DB2Sheet.UI
                 footer.Controls.Add(askButton);
             }
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 4
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.Absolute, 72),
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(new Label
             {
                 Text = "发生错误。下面是完整信息，便于排查。",

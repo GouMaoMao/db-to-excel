@@ -26,13 +26,14 @@ namespace DB2Sheet.UI
             Func<AiEditorSnapshot> readEditor,
             Func<AiMentionSource> readMentions)
         {
-            Text = AppPresentation.WindowTitle("AI 对话");
-            Width = 440;
-            Height = 640;
-            MinimumSize = new Size(360, 480);
-            StartPosition = FormStartPosition.Manual;
+            InitializeWindow(
+                AppPresentation.WindowTitle("AI 对话"),
+                440,
+                640,
+                new Size(360, 480),
+                settings,
+                "AiChat");
             ShowInTaskbar = false;
-            FormSizeMemory.Attach(this, settings, "AiChat");
             _chat = new AiChatControl(assistant, operationRunner, settings, readEditor, readMentions, null) { Dock = DockStyle.Fill };
             Controls.Add(_chat);
         }

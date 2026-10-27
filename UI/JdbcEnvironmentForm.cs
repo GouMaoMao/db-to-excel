@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
@@ -27,7 +26,6 @@ namespace DB2Sheet.UI
         private readonly Button _detectJavaButton;
         private readonly Button _openDownloadButton;
         private readonly Label _javaStatus;
-        private readonly List<Label> _guideLabels = new List<Label>();
 
         /// <summary>创建 JDBC 环境窗体。</summary>
         /// <param name="store">环境设置存储。</param>
@@ -39,12 +37,13 @@ namespace DB2Sheet.UI
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
 
-            Text = AppPresentation.WindowTitle("JDBC 环境");
-            Width = 720;
-            Height = 560;
-            MinimumSize = new Size(560, 460);
-            StartPosition = FormStartPosition.Manual;
-            FormSizeMemory.Attach(this, settings, "JdbcEnvironment");
+            InitializeWindow(
+                AppPresentation.WindowTitle("JDBC 环境"),
+                720,
+                560,
+                new Size(560, 460),
+                settings,
+                "JdbcEnvironment");
 
             JdbcEnvironmentSettings current = _store.Load();
             _javaPath = new TextBox { Dock = DockStyle.Fill, Text = current.JavaExecutable ?? string.Empty };
@@ -71,7 +70,6 @@ namespace DB2Sheet.UI
             javaLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             Control guide = CreateGuide();
-            guide.SizeChanged += GuideSizeChanged;
             javaLayout.Controls.Add(guide, 0, 0);
 
             Panel scrollHost = new Panel
@@ -123,24 +121,11 @@ namespace DB2Sheet.UI
 
             Button saveButton = new Button { Text = "保存", AutoSize = true };
             Button closeButton = new Button { Text = "关闭", AutoSize = true, DialogResult = DialogResult.Cancel };
-            FlowLayoutPanel footer = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.RightToLeft,
-                AutoSize = true
-            };
-            footer.Controls.Add(closeButton);
-            footer.Controls.Add(saveButton);
+            FlowLayoutPanel footer = CreateActionBar(closeButton, saveButton);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 2
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(javaGroup, 0, 0);
             root.Controls.Add(footer, 0, 1);
             Controls.Add(root);
@@ -311,11 +296,9 @@ namespace DB2Sheet.UI
 
         private static Label CreateStatusLabel()
         {
-            return new Label
+            return new WrapLabel
             {
-                AutoSize = true,
                 Dock = DockStyle.Top,
-                MaximumSize = new Size(1000, 0),
                 MinimumSize = new Size(0, 40),
                 ForeColor = SystemColors.GrayText,
                 Padding = new Padding(0, 8, 0, 0)
@@ -376,27 +359,7 @@ namespace DB2Sheet.UI
         /// <returns>自动高度、限制宽度的标签。</returns>
         private Label CreateWrappingLabel(string text)
         {
-            Label label = new Label
-            {
-                AutoSize = true,
-                MaximumSize = new Size(640, 0),
-                Text = text
-            };
-            _guideLabels.Add(label);
-            return label;
-        }
-
-        /// <summary>把引导文字的最大宽度收成面板客户区宽度，避免长句横向撑出窗体。</summary>
-        private void GuideSizeChanged(object sender, EventArgs e)
-        {
-            Control host = sender as Control;
-            if (host == null || host.ClientSize.Width <= 0) return;
-            int width = host.ClientSize.Width;
-            foreach (Label label in _guideLabels)
-            {
-                if (label.MaximumSize.Width == width) continue;
-                label.MaximumSize = new Size(width, 0);
-            }
+            return new WrapLabel { Text = text };
         }
 
         /// <summary>让说明区与滚动区域同宽。即将超出时先留出滚动条宽度，避免出现滚动条后宽度再跳一次。</summary>

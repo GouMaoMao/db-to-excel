@@ -138,13 +138,14 @@ namespace DB2Sheet.UI
             _assistant = assistant ?? throw new ArgumentNullException(nameof(assistant));
             _openJdbcEnvironment = openJdbcEnvironment;
 
-            Text = AppPresentation.WindowTitle("SQL 查询");
             Rectangle workingArea = FormSizeMemory.CursorWorkingArea();
-            Width = Math.Min(1320, workingArea.Width - 40);
-            Height = Math.Min(860, workingArea.Height - 60);
-            MinimumSize = new Size(820, 600);
-            StartPosition = FormStartPosition.Manual;
-            FormSizeMemory.Attach(this, _settings, "QueryEditor");
+            InitializeWindow(
+                AppPresentation.WindowTitle("SQL 查询"),
+                Math.Min(1320, workingArea.Width - 40),
+                Math.Min(860, workingArea.Height - 60),
+                new Size(820, 600),
+                _settings,
+                "QueryEditor");
 
             _connectionTree = new DatabaseConnectionTree(
                 _connections, _providers, _executionService, _operationRunner, _settings, _jdbcEnvironment, _openJdbcEnvironment);
@@ -801,7 +802,15 @@ namespace DB2Sheet.UI
         {
             QueryTab tab = ActiveTab;
             if (!ValidateInputs(out ConnectionProfileSnapshot connection)) return;
-            if (!ExportSheetDialog.TryShow(this, tab.Name, out string targetSheet, out bool writeSql))
+            if (!TextPromptDialog.TryShow(
+                    this,
+                    AppPresentation.WindowTitle("写入 Sheet"),
+                    "请输入目标 Sheet 名称",
+                    tab.Name,
+                    "同时把SQL代码保存在Excel中",
+                    ValidateSheetName,
+                    out string targetSheet,
+                    out bool writeSql))
             {
                 _status.Text = "已取消写入。";
                 return;
@@ -941,6 +950,22 @@ namespace DB2Sheet.UI
                 rows,
                 extra,
                 _settings.Get(CoreSettings.MaxExportRows));
+        }
+
+        /// <summary>检查目标表名是否能直接用作 Excel 工作表名。</summary>
+        /// <param name="name">已去掉首尾空白的名称。</param>
+        /// <returns>可以写入时为空。否则是要留在输入窗上显示的说明。</returns>
+        private static string ValidateSheetName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "请输入目标 Sheet 名称。";
+            if (name.IndexOfAny(new[] { ':', '\\', '/', '?', '*', '[', ']' }) >= 0)
+                return "目标 Sheet 名称不能包含下列字符：: \\ / ? * [ ]";
+            if (name.Length > 31)
+                return "目标 Sheet 名称不能超过 31 个字符。";
+            if (string.Equals(name, SqlSheetTaskReader.SqlSheetName, StringComparison.OrdinalIgnoreCase))
+                return "目标 Sheet 不能命名为 SQL，这张表要留给批量刷新。";
+            return null;
         }
 
         /// <summary>判断当前工作簿是否已有同名工作表。比较时忽略大小写，不激活工作表。</summary>

@@ -18,16 +18,15 @@ namespace DB2Sheet.UI
     public sealed class AiModelSettingsForm : AppForm
     {
         private const string KeyMask = "••••••••";
-        private const int RowHeight = 28;
-        private const int SeparatorBand = 8;
+        private const int RowHeight = AddItemListBox.DefaultRowHeight;
 
         private readonly AiAssistant _assistant;
         private readonly IOperationRunner _operationRunner;
         private readonly Image _addIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_add.png");
         private readonly ToolTip _tips = new ToolTip();
         private readonly ContextMenuStrip _listMenu = new ContextMenuStrip();
-        private readonly AddModelItem _addItem = new AddModelItem();
-        private readonly ModelListBox _list = new ModelListBox();
+        private readonly AddItem _addItem = new AddItem();
+        private readonly AddItemListBox _list;
         private readonly List<AiModelProfile> _profiles = new List<AiModelProfile>();
         private readonly HashSet<string> _expandedProfileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly TextBox _name = new TextBox { BorderStyle = BorderStyle.FixedSingle };
@@ -48,12 +47,23 @@ namespace DB2Sheet.UI
         private bool _binding;
         private bool _busy;
         private bool _keyDirty;
-        private int _anchorIndex = -1;
         private string _listTip = string.Empty;
         private string _loadedId;
         private string _loadedKey;
         private string _testedFingerprint;
         private List<string> _testedIds = new List<string>();
+
+        /// <summary>程序化改编辑器和选中时，同时暂停列表的退选锚点跟踪。</summary>
+        private bool Binding
+        {
+            get { return _binding; }
+            set
+            {
+                _binding = value;
+                if (_list != null)
+                    _list.SuppressSelectionTracking = value;
+            }
+        }
 
         /// <summary>创建模型设置窗体。</summary>
         /// <param name="assistant">模型存储、拉列表和探测用的助手。</param>
@@ -63,13 +73,16 @@ namespace DB2Sheet.UI
         {
             _assistant = assistant ?? throw new ArgumentNullException(nameof(assistant));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
-            Text = AppPresentation.WindowTitle("模型设置");
-            Width = 780;
-            Height = 560;
-            MinimumSize = new Size(680, 520);
-            StartPosition = FormStartPosition.Manual;
-            FormSizeMemory.Attach(this, settings, "AiModels");
+            InitializeWindow(
+                AppPresentation.WindowTitle("模型设置"),
+                780,
+                560,
+                new Size(680, 520),
+                settings,
+                "AiModels");
 
+            _list = new AddItemListBox(_addIcon);
+            _list.SelectableItem = item => item is ProfileItem;
             _protocol.Items.Add(AiProtocol.OpenAiCompatible);
             _protocol.Items.Add(AiProtocol.Claude);
             _protocol.Items.Add(AiProtocol.Gemini);
@@ -79,8 +92,8 @@ namespace DB2Sheet.UI
                     args.Value = AiProtocolNames.DisplayName(protocol);
             };
             _protocol.SelectedIndex = 0;
-            _list.MeasureItem += ListMeasureItem;
-            _list.DrawItem += ListDrawItem;
+            _list.EntryMeasure += ListMeasureItem;
+            _list.EntryDraw += ListDrawItem;
             _list.KeyDown += ListKeyDown;
             _list.MouseMove += ListMouseMove;
             _list.MouseLeave += ListMouseLeave;
@@ -90,11 +103,9 @@ namespace DB2Sheet.UI
             deleteItem.ToolTipText = AppPresentation.AiModelDeleteTip;
             _listMenu.Items.Add(deleteItem);
 
-            Label help = new Label
+            Label help = new WrapLabel
             {
-                AutoSize = false,
                 Margin = new Padding(0),
-                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                 ForeColor = SystemColors.GrayText,
                 Text = AppPresentation.AiProtocolHelp,
                 Padding = new Padding(0, 0, 0, 8)
@@ -115,18 +126,7 @@ namespace DB2Sheet.UI
             testButton.Click += TestButtonClick;
             _saveButton.Enabled = false;
 
-            FlowLayoutPanel actions = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                FlowDirection = FlowDirection.RightToLeft,
-                WrapContents = false,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(0, 8, 0, 0)
-            };
-            actions.Controls.Add(closeButton);
-            actions.Controls.Add(testButton);
-            actions.Controls.Add(_saveButton);
+            FlowLayoutPanel actions = CreateActionBar(closeButton, testButton, _saveButton);
 
             TableLayoutPanel editor = new TableLayoutPanel
             {
@@ -165,27 +165,19 @@ namespace DB2Sheet.UI
             split.Panel1.Controls.Add(_list);
             split.Panel2.Controls.Add(editorScroll);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 4
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(help, 0, 0);
             root.Controls.Add(split, 0, 1);
             root.Controls.Add(_status, 0, 2);
             root.Controls.Add(actions, 0, 3);
             Controls.Add(root);
             CancelButton = closeButton;
-            root.SizeChanged += (sender, args) => FitHelp(root, help);
             Load += (sender, args) =>
             {
-                FitHelp(root, help);
                 TrySetSplitter(split);
                 Reload(null);
             };
@@ -198,39 +190,22 @@ namespace DB2Sheet.UI
             _status.Text = AppPresentation.SaveRequiresTestHint;
         }
 
-        /// <summary>按当前窗宽让顶部说明换行，并把所在行撑到能放下末行。</summary>
-        /// <param name="root">容纳说明的表格。宽度含内边距。</param>
-        /// <param name="help">协议说明。底部留有空隙，高度随折行增加。</param>
-        private static void FitHelp(TableLayoutPanel root, Label help)
-        {
-            int width = root.ClientSize.Width - root.Padding.Horizontal;
-            if (width < 1) return;
-            Size measured = TextRenderer.MeasureText(
-                help.Text,
-                help.Font,
-                new Size(width, int.MaxValue),
-                TextFormatFlags.WordBreak | TextFormatFlags.Left | TextFormatFlags.TextBoxControl);
-            int height = measured.Height + help.Padding.Vertical;
-            if (help.Width == width && help.Height == height) return;
-            help.Size = new Size(width, height);
-        }
-
         /// <summary>选中仍停在「新增」时才清空右侧。中间若已改选配置，则不打断。</summary>
         private void BeginNewIfAddRow()
         {
-            if (IsDisposed || !(_list.SelectedItem is AddModelItem)) return;
+            if (IsDisposed || !(_list.SelectedItem is AddItem)) return;
             BeginNew();
         }
 
         /// <summary>清空右侧，开始填写一条还没保存的配置，并让「新增」保持选中。</summary>
         private void BeginNew()
         {
-            _binding = true;
+            Binding = true;
             int addIndex = _list.Items.Count - 1;
-            if (addIndex >= 0 && _list.Items[addIndex] is AddModelItem)
+            if (addIndex >= 0 && _list.Items[addIndex] is AddItem)
             {
                 _list.SelectedIndex = addIndex;
-                _anchorIndex = addIndex;
+                _list.AnchorIndex = addIndex;
             }
             _loadedId = null;
             _loadedKey = null;
@@ -240,7 +215,7 @@ namespace DB2Sheet.UI
             _key.Text = string.Empty;
             _default.Checked = _assistant.Models.GetAll().Count == 0;
             _protocol.SelectedIndex = 0;
-            _binding = false;
+            Binding = false;
             ClearTest();
             _status.Text = "新建配置。密钥需要填写一次。";
             _name.Focus();
@@ -490,7 +465,7 @@ namespace DB2Sheet.UI
         /// <param name="loadEditor">是否将所选配置重新载入右侧编辑区。</param>
         private void RebuildVisibleItems(string selectId, bool loadEditor)
         {
-            _binding = true;
+            Binding = true;
             _list.Items.Clear();
             int selectedIndex = -1;
             foreach (AiModelProfile profile in _profiles)
@@ -510,9 +485,9 @@ namespace DB2Sheet.UI
             _list.Items.Add(_addItem);
             if (selectedIndex >= 0)
                 _list.SelectedIndex = selectedIndex;
-            _binding = false;
+            Binding = false;
 
-            _anchorIndex = selectedIndex;
+            _list.AnchorIndex = selectedIndex;
             if (loadEditor && selectedIndex >= 0)
                 ListSelectedIndexChanged(_list, EventArgs.Empty);
         }
@@ -536,16 +511,8 @@ namespace DB2Sheet.UI
         private void ListSelectedIndexChanged(object sender, EventArgs e)
         {
             if (_binding) return;
-            if (_list.SelectedItem is AddModelItem)
+            if (_list.SelectedItem is AddItem)
             {
-                if (_list.RightButton)
-                {
-                    _binding = true;
-                    _list.SelectedIndex = RestorableIndex();
-                    _binding = false;
-                    return;
-                }
-
                 // 等这次点击把选中写完，再清空右侧。「新增」保持选中。
                 if (IsHandleCreated)
                     BeginInvoke(new Action(BeginNewIfAddRow));
@@ -560,19 +527,18 @@ namespace DB2Sheet.UI
                 int profileIndex = FindProfileIndex(modelItem.Profile.Id);
                 if (profileIndex >= 0)
                 {
-                    _binding = true;
+                    Binding = true;
                     _list.SelectedIndex = profileIndex;
-                    _binding = false;
-                    _anchorIndex = profileIndex;
+                    _list.AnchorIndex = profileIndex;
+                    Binding = false;
                 }
                 return;
             }
 
             ProfileItem item = _list.SelectedItem as ProfileItem;
             if (item == null) return;
-            _anchorIndex = _list.SelectedIndex;
             AiModelProfile profile = item.Profile;
-            _binding = true;
+            Binding = true;
             _loadedId = profile.Id;
             _loadedKey = profile.ProtectedKey;
             _keyDirty = false;
@@ -581,12 +547,12 @@ namespace DB2Sheet.UI
             _key.Text = string.IsNullOrWhiteSpace(profile.ProtectedKey) ? string.Empty : KeyMask;
             _default.Checked = profile.IsDefault;
             _protocol.SelectedItem = AiProtocolNames.Parse(profile.Protocol);
-            _binding = false;
+            Binding = false;
             ClearTest();
             _status.Text = AppPresentation.SaveRequiresTestHint;
         }
 
-        /// <summary>为配置、子型号行及「新增」分隔线设置各自的行高。</summary>
+        /// <summary>为配置和子型号行设置行高。「新增」及其分隔线由共用列表处理。</summary>
         private void ListMeasureItem(object sender, MeasureItemEventArgs e)
         {
             if (e.Index < 0 || e.Index >= _list.Items.Count)
@@ -595,10 +561,7 @@ namespace DB2Sheet.UI
                 return;
             }
 
-            bool separated = e.Index > 0 && e.Index < _list.Items.Count && _list.Items[e.Index] is AddModelItem;
-            e.ItemHeight = separated ? RowHeight + SeparatorBand
-                : _list.Items[e.Index] is ModelIdItem ? RowHeight - 2
-                : RowHeight;
+            e.ItemHeight = _list.Items[e.Index] is ModelIdItem ? RowHeight - 2 : RowHeight;
         }
 
         /// <summary>鼠标停在新增项或可展开配置上时显示对应说明。</summary>
@@ -608,7 +571,7 @@ namespace DB2Sheet.UI
             string tip = string.Empty;
             if (index >= 0 && index < _list.Items.Count)
             {
-                if (_list.Items[index] is AddModelItem)
+                if (_list.Items[index] is AddItem)
                     tip = AppPresentation.AiModelAddTip;
                 else
                 {
@@ -684,35 +647,16 @@ namespace DB2Sheet.UI
             _listMenu.Show(_list, e.Location);
         }
 
-        /// <summary>右键没有点在配置上时退回的行。正在新建时退回「新增」，否则为 -1。</summary>
-        private int RestorableIndex()
-        {
-            if (_anchorIndex < 0 || _anchorIndex >= _list.Items.Count) return -1;
-            object item = _list.Items[_anchorIndex];
-            return item is ProfileItem || item is AddModelItem ? _anchorIndex : -1;
-        }
-
-        /// <summary>画出配置父项、子型号行，或末项「新增」及其上方的分隔线。</summary>
+        /// <summary>画出配置父项和子型号行。「新增」及其分隔线由共用列表处理。</summary>
         private void ListDrawItem(object sender, DrawItemEventArgs e)
         {
             if (e.Index < 0 || e.Index >= _list.Items.Count) return;
-            if (_list.Items[e.Index] is AddModelItem)
-            {
-                DrawAddItem(e);
-                return;
-            }
 
             e.DrawBackground();
             ModelIdItem modelItem = _list.Items[e.Index] as ModelIdItem;
             if (modelItem != null)
             {
-                TextRenderer.DrawText(
-                    e.Graphics,
-                    modelItem.ModelId,
-                    e.Font,
-                    new Rectangle(e.Bounds.Left + 42, e.Bounds.Top, Math.Max(0, e.Bounds.Width - 46), e.Bounds.Height),
-                    SystemColors.ControlText,
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.Left);
+                AddItemListBox.DrawEntry(e.Graphics, e.Font, e.Bounds, modelItem.ModelId, null, false, 42, 20);
                 return;
             }
 
@@ -733,56 +677,8 @@ namespace DB2Sheet.UI
             }
 
             Image icon = AiModelIcons.For(item.Profile.DisplayName, modelIds);
-            if (icon != null)
-                e.Graphics.DrawImage(icon, e.Bounds.Left + 20, e.Bounds.Top + (e.Bounds.Height - icon.Height) / 2, icon.Width, icon.Height);
-            TextRenderer.DrawText(
-                e.Graphics,
-                item.ToString(),
-                e.Font,
-                new Rectangle(e.Bounds.Left + 42, e.Bounds.Top, Math.Max(0, e.Bounds.Width - 46), e.Bounds.Height),
-                selected ? SystemColors.HighlightText : SystemColors.ControlText,
-                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.Left);
+            AddItemListBox.DrawEntry(e.Graphics, e.Font, e.Bounds, item.ToString(), icon, selected, 42, 20);
             e.DrawFocusRectangle();
-        }
-
-        /// <summary>选中时只高亮文字行。上面已有配置时，分隔线仍用窗口底色。</summary>
-        private void DrawAddItem(DrawItemEventArgs e)
-        {
-            bool selected = (e.State & DrawItemState.Selected) != 0;
-            Rectangle content = e.Bounds;
-            if (e.Index > 0)
-            {
-                e.Graphics.FillRectangle(SystemBrushes.Window, new Rectangle(e.Bounds.Left, e.Bounds.Top, e.Bounds.Width, SeparatorBand));
-                int y = e.Bounds.Top + (SeparatorBand / 2);
-                e.Graphics.DrawLine(SystemPens.ControlDark, e.Bounds.Left, y, e.Bounds.Right - 1, y);
-                content = new Rectangle(e.Bounds.Left, e.Bounds.Top + SeparatorBand, e.Bounds.Width, Math.Max(0, e.Bounds.Height - SeparatorBand));
-            }
-
-            e.Graphics.FillRectangle(selected ? SystemBrushes.Highlight : SystemBrushes.Window, content);
-            DrawEntry(e.Graphics, e.Font, content, _addItem.ToString(), _addIcon, selected);
-            if ((e.State & DrawItemState.Focus) != 0)
-                ControlPaint.DrawFocusRectangle(e.Graphics, content);
-        }
-
-        /// <summary>在一行里画出 16 像素图标和文字。选中时文字用高亮色。</summary>
-        /// <param name="graphics">列表项的画布。</param>
-        /// <param name="font">列表字体。</param>
-        /// <param name="bounds">图标和文字所在的区域。分隔线不在这里面。</param>
-        /// <param name="text">显示名或「新增」。</param>
-        /// <param name="icon">左侧图标。没有时只画文字。</param>
-        /// <param name="selected">为 true 时文字用系统高亮色。</param>
-        private static void DrawEntry(Graphics graphics, Font font, Rectangle bounds, string text, Image icon, bool selected)
-        {
-            if (icon != null)
-                graphics.DrawImage(icon, bounds.Left + 4, bounds.Top + (bounds.Height - icon.Height) / 2, icon.Width, icon.Height);
-            Color color = selected ? SystemColors.HighlightText : SystemColors.ControlText;
-            TextRenderer.DrawText(
-                graphics,
-                text,
-                font,
-                new Rectangle(bounds.Left + 24, bounds.Top, Math.Max(0, bounds.Width - 28), bounds.Height),
-                color,
-                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.Left);
         }
 
         /// <summary>放一行输入，并在它下面放一行灰色说明。</summary>
@@ -800,11 +696,10 @@ namespace DB2Sheet.UI
             input.Margin = new Padding(0, 4, 0, 0);
             table.Controls.Add(input, 1, row);
             table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            table.Controls.Add(new Label
+            table.Controls.Add(new WrapLabel
             {
                 Text = note,
                 ForeColor = SystemColors.GrayText,
-                AutoSize = true,
                 Margin = new Padding(0, 0, 0, 6)
             }, 1, row + 1);
             return row + 2;
@@ -826,50 +721,6 @@ namespace DB2Sheet.UI
             catch (InvalidOperationException)
             {
                 // 句柄还没按最终宽度布局时跳过，下次打开会再摆。
-            }
-        }
-
-        /// <summary>在选中变化之前记下是不是右键，避免右键点「新增」被当成开始新建。</summary>
-        private sealed class ModelListBox : ListBox
-        {
-            public ModelListBox()
-            {
-                Dock = DockStyle.Fill;
-                IntegralHeight = false;
-                BorderStyle = BorderStyle.FixedSingle;
-                DrawMode = DrawMode.OwnerDrawVariable;
-                ItemHeight = RowHeight;
-            }
-
-            /// <summary>当前这次按下是否为右键。在窗口消息里、选中变化之前写好。</summary>
-            public bool RightButton { get; private set; }
-
-            /// <summary>先记下鼠标键，再交给列表改变选中。</summary>
-            /// <param name="m">列表窗口消息。</param>
-            protected override void WndProc(ref Message m)
-            {
-                const int leftDown = 0x0201;
-                const int rightDown = 0x0204;
-                const int rightUp = 0x0205;
-                if (m.Msg == rightDown)
-                    RightButton = true;
-                else if (m.Msg == leftDown)
-                    RightButton = false;
-
-                base.WndProc(ref m);
-
-                if (m.Msg == rightUp)
-                    RightButton = false;
-            }
-        }
-
-        /// <summary>列表末项。点它开始填写新配置，本身不是一条已保存的模型。</summary>
-        private sealed class AddModelItem
-        {
-            /// <summary>列表里显示的文字。</summary>
-            public override string ToString()
-            {
-                return "新增";
             }
         }
 

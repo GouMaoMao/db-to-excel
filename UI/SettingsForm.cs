@@ -20,8 +20,7 @@ namespace DB2Sheet.UI
         private readonly ISettingsStore _store;
         private readonly Dictionary<string, SettingEditor> _editors =
             new Dictionary<string, SettingEditor>(StringComparer.OrdinalIgnoreCase);
-        private readonly Label _status;
-        private readonly List<Label> _notes = new List<Label>();
+        private readonly WrapLabel _status;
         private readonly Dictionary<TabPage, Panel> _categoryScrolls = new Dictionary<TabPage, Panel>();
         private readonly WheelRedirector _wheelRedirector;
         private TabControl _categories;
@@ -35,20 +34,20 @@ namespace DB2Sheet.UI
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _store = store ?? throw new ArgumentNullException(nameof(store));
 
-            Text = AppPresentation.WindowTitle("设置");
-            Width = 660;
-            Height = 600;
-            MinimumSize = new Size(520, 420);
-            StartPosition = FormStartPosition.Manual;
-            FormSizeMemory.Attach(this, _store, "Settings");
+            InitializeWindow(
+                AppPresentation.WindowTitle("设置"),
+                660,
+                600,
+                new Size(520, 420),
+                _store,
+                "Settings");
 
             _categories = new TabControl { Dock = DockStyle.Fill };
             _wheelRedirector = new WheelRedirector(this);
             Application.AddMessageFilter(_wheelRedirector);
             Disposed += (sender, args) => Application.RemoveMessageFilter(_wheelRedirector);
-            _status = new Label
+            _status = new WrapLabel
             {
-                AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Padding = new Padding(0, 6, 0, 6)
             };
@@ -58,26 +57,12 @@ namespace DB2Sheet.UI
 
             BuildCategories(_categories, initialCategory);
 
-            FlowLayoutPanel actions = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft
-            };
-            actions.Controls.Add(cancelButton);
-            actions.Controls.Add(saveButton);
-            actions.Controls.Add(resetButton);
+            FlowLayoutPanel actions = CreateActionBar(cancelButton, saveButton, resetButton);
 
-            TableLayoutPanel root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 3
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            TableLayoutPanel root = CreateRootTable(
+                new RowStyle(SizeType.Percent, 100),
+                new RowStyle(SizeType.AutoSize),
+                new RowStyle(SizeType.AutoSize));
             root.Controls.Add(_categories, 0, 0);
             root.Controls.Add(_status, 0, 1);
             root.Controls.Add(actions, 0, 2);
@@ -85,11 +70,8 @@ namespace DB2Sheet.UI
 
             resetButton.Click += ResetButtonClick;
             saveButton.Click += SaveButtonClick;
-            Resize += (sender, args) => ApplyNoteWidths();
-            Shown += (sender, args) => ApplyNoteWidths();
             AcceptButton = saveButton;
             CancelButton = cancelButton;
-            ApplyNoteWidths();
         }
 
         private void BuildCategories(TabControl categories, string initialCategory)
@@ -153,11 +135,7 @@ namespace DB2Sheet.UI
             };
             table.Location = Point.Empty;
             scroll.Controls.Add(table);
-            scroll.Resize += (sender, args) =>
-            {
-                FitCategoryTable(scroll, table);
-                ApplyNoteWidths();
-            };
+            scroll.Resize += (sender, args) => FitCategoryTable(scroll, table);
             page.Controls.Add(scroll);
             _categoryScrolls.Add(page, scroll);
             return page;
@@ -210,46 +188,15 @@ namespace DB2Sheet.UI
             string text = AppPresentation.SettingNote(key);
             if (string.IsNullOrEmpty(text)) return;
 
-            Label note = new Label
+            Label note = new WrapLabel
             {
                 Text = text,
-                AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Margin = new Padding(3, 0, 8, 4)
             };
-            _notes.Add(note);
             int row = table.RowCount++;
             table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             table.Controls.Add(note, 1, row);
-        }
-
-        /// <summary>把框下说明收进所在参数表的输入列，避免长句横向撑出窗体。</summary>
-        private void ApplyNoteWidths()
-        {
-            foreach (Label note in _notes)
-            {
-                if (note.IsDisposed) continue;
-                int width = NoteWidth(note.Parent as TableLayoutPanel);
-                if (note.MaximumSize.Width == width) continue;
-                note.MaximumSize = new Size(width, 0);
-            }
-        }
-
-        /// <summary>说明放在输入列。列宽尚未算出时按窗体宽度减去名称列估算。</summary>
-        /// <param name="table">说明所在的参数表。</param>
-        /// <returns>说明标签的最大宽度。</returns>
-        private int NoteWidth(TableLayoutPanel table)
-        {
-            if (table != null)
-            {
-                int[] columns = table.GetColumnWidths();
-                if (columns != null && columns.Length > 1 && columns[1] > 40)
-                {
-                    return Math.Max(120, columns[1] - 8);
-                }
-            }
-
-            return Math.Max(120, ClientSize.Width - 270);
         }
 
         private static SettingEditor CreateEditor(SettingDefinition definition)
