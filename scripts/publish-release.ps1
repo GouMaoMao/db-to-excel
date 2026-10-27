@@ -37,6 +37,7 @@ function Invoke-Native {
     param(
         [Parameter(Mandatory = $true, Position = 0)]
         [scriptblock]$Command,
+        [Parameter(Position = 1)]
         [int]$Code = 3
     )
     & $Command

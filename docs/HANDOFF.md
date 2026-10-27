@@ -36,6 +36,7 @@
 - `scripts/start-release.ps1 -MirrorOnly` 在后台跑完，`Logs\release-status.json` 记录 `exitCode=0`；日志显示标签与 Gitee 一致、11 个 Release 判定一致并跳过，耗时约 16 秒。
 - `scripts/publish-release.ps1 -CheckOnly` 在 `v2.0.2` 已发布时正确停在「检查标签」，提示改版本号，退出码 3。
 - 四个 PowerShell 脚本都用 `[System.Management.Automation.Language.Parser]::ParseFile` 做过语法检查，无错误。
+- `Invoke-Native` 的退出码参数改为 `Position=1`，并用最小脚本验证过位置绑定生效（`f { } 5` 返回 5）。
 - 测试项目仍因三个既有编译错误无法生成：`AiTranscriptHtmlTests`、`AppPresentationTests`、`QueryProfileRepositoryTests`。本次未处理。
 - 尚未在 Excel 或 WPS 宿主中人工查看编辑器格式化效果和模型检测弹窗。
 
