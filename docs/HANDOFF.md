@@ -37,7 +37,8 @@
 - `UI/OperationProgressForm.cs`、`UI/QueryEditorForm.cs`、`UI/RefreshSummaryForm.cs`
 - `UI/SettingsForm.cs`、`UI/SheetRefreshForm.cs`、`UI/TextPromptDialog.cs`
 - `UI/ExportSheetDialog.cs`（删除）
-- `DB2Sheet.csproj`
+- `DB2Sheet.csproj`、`Properties/AssemblyInfo.cs`
+- `scripts/publish-release.ps1`
 - `AGENTS.md`
 - `docs/UI-UNIFICATION-PLAN.md`、`docs/HANDOFF.md`、`docs/ARCHITECTURE.md`
 
@@ -51,13 +52,15 @@
 - 人工目视已由用户验收通过，包括连接编辑窗、JDBC 环境、设置、进度窗和模型/Skill 列表。
 - 已对照当前代码复核 `AGENTS.md` 的界面、会话状态和文档章节，未发现其他因本次改动而失真的描述。
 - 未运行 `DB2Sheet.Tests`：测试项目仍有三个既有编译错误，本轮未处理测试项目。
-- 未提交；按用户决定，本次改动一次提交。
+- 已提交 `90d20d3`（界面统一重构）、`7a1ec8c`（2.0.3 版本号）和 `a1cefb6`（发布预检空引用修复）。
+- 2.0.3 已发布到 GitHub 和 Gitee：分支、标签 `v2.0.3`、Release 附件一致；
+  `scripts/check-release.ps1` 返回 0。
 
 ## 阻塞项与下一步
 
 - 无阻塞。
-- 文档和代码已对齐；下一步只等提交或发布决定。
+- 2.0.3 已发布并核验通过，工作区干净。
 - 若以后调整折行或高度，优先改 `WrapLabel` 或对应窗体的根表格行样式，不要再加回各窗自己的
   `Resize`/`MaximumSize` 钩子。
-- 需要发布时先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs`
+- 下次发布仍先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs`
   两处版本号，先跑 `scripts/publish-release.ps1 -CheckOnly`，再发布并核验。
