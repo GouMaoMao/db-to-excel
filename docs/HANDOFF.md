@@ -35,11 +35,14 @@
 
 - `MSBuild DB2Sheet.csproj /t:Rebuild /p:Configuration=Debug` 通过，0 错误。
 - 编译仅剩 1 个既有警告 CS2002（`UI/DatabaseTreeImageCatalog.cs` 在 csproj 中重复 Include），与本次改动无关。
-- 未在 Excel 宿主中人工核对界面；以下手工项仍需使用者确认：连接方案编辑窗长提示折行、JDBC 环境窗按钮始终可见、模型设置与 Skill 设置在矮窗下的滚动与按钮完整、各窗在 150% 缩放下不超出工作区。
+- 使用者已在 Windows 上人工验收通过：连接方案编辑窗长提示折行、JDBC 环境窗按钮始终可见、模型设置与 Skill 设置矮窗滚动、各窗不超出工作区。
+- 已提交并推送 `main`：`c5cc652`（GitHub 与 Gitee 同一次提交，标签 `v2.0.2` 与附件 `db-to-excel.exe` 两侧一致，`scripts/check-release.ps1` 退出码 0）。
+- 顺手删除了仓库根目录和 `Logs\` 下的临时 `.log` 文件；这些文件被 `.gitignore` 的 `*.log` 忽略，从未入库。
 - 未运行 `DB2Sheet.Tests`：测试项目仍有三个既有编译错误（`AiTranscriptHtmlTests`、`AppPresentationTests`、`QueryProfileRepositoryTests`），本次未处理。
 
 ## 阻塞项与下一步
 
-- 无阻塞。需要在 Windows 上分别以 100% 和 150% 缩放打开下列窗体做目视验收：连接管理、连接方案编辑、JDBC 环境、参数设置、模型设置、Skill 设置、本地数据、SQL 查询、批量刷新。
+- 无阻塞，工作区干净。
+- 本次未提升版本号；需要发布时只改 `Properties/AssemblyInfo.cs` 两处版本号，提交并推送，先跑 `scripts/publish-release.ps1 -CheckOnly`，再用 `scripts/start-release.ps1` 发布，最后用 `scripts/check-release.ps1` 核验。
 - 若目视发现某个窗体内容仍被裁（例如模型设置右侧字段在极矮窗口下的换行），按 `implementation_plan.md` 的同一思路补滚动或自适应行高，不要再写死更大的初始高度。
 - `implementation_plan.md` 是否长期保留待定；确认完成后可删除或移入 `docs/`。
