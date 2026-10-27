@@ -17,6 +17,8 @@
 
 通过后，脚本用该工程生成 exe，打注解标签 `v` 加三段版本，推送 `main` 和标签，再用 `gh` 创建或更新对应的 GitHub Release 并上传 exe。已有标签必须指向当前提交。GitHub Release 成功后执行 `scripts/mirror-gitee.ps1`。行为与复制到其他项目的步骤见 `docs/gitee-mirror.md`。
 
+发布前可以先跑只读预检 `scripts/publish-release.ps1 -CheckOnly`，它检查工作区、分支、两处版本号、安装工程、MSBuild、GitHub 登录、Gitee 配置和标签状态，不写远端。正式发布用 `scripts/start-release.ps1` 在后台运行，日志和状态写到 `Logs\`，避免终端关闭打断长任务。失败信息会写明阶段：退出码 2 是网络类失败，最多再试一次；退出码 3 是配置或状态问题，必须改完再跑。镜像失败时 GitHub 侧已经完成，只重跑 `scripts/mirror-gitee.ps1`。发布后运行 `scripts/check-release.ps1` 核验两侧的分支、标签和附件。
+
 ## 目标环境
 
 - Windows 桌面系统

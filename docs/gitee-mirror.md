@@ -22,6 +22,10 @@
 
 > 脚本先读取 GitHub 的 `origin`，再强制推送分支和符合规则的标签。本机尚未推到 GitHub 的提交不会进入 Gitee。不符合规则的分支、标签和 Release 不会被删除。令牌需要能强制推送。不要在 Gitee 上直接提交。Windows 上用 Git Bash 执行。附件的文件名和字节大小与 GitHub 一致时，不下载也不上传。
 
+标签会先比较两边指向的提交，只把有差异的标签合并在一次推送里发出。附件用带连接和低速上限的 `curl` 下载，下载后按 GitHub 记录的字节数校验，再上传到 Gitee。Gitee 接口和附件传输都最多尝试两次，第二次仍失败就停止，不再重跑整轮。
+
 确认 Gitee 上该分支与 GitHub 指向同一次提交，并且符合规则的 Release 与 GitHub 的标题和附件一致。
+
+需要一条命令核对时运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-release.ps1`。它只读比较两侧的分支、标签和附件字节数，不打印令牌，退出码 0 表示一致。
 
 > 安装包如何构建不在这套文件里。
