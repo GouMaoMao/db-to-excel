@@ -89,7 +89,11 @@ function Test-GitHubReleaseExists([string]$Tag) {
 
 function Resolve-ReleaseTag([string]$Tag, [switch]$Repair) {
     $head = (git rev-parse HEAD).Trim()
-    $remote = (git ls-remote --tags origin "refs/tags/$Tag").Trim()
+    $remoteListing = @(git ls-remote --tags origin "refs/tags/$Tag")
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Release "无法查询远端标签 $Tag。"
+    }
+    $remote = ($remoteListing -join "`n").Trim()
     $remoteExists = -not [string]::IsNullOrWhiteSpace($remote)
     git rev-parse --verify --quiet "refs/tags/$Tag" | Out-Null
     if ($LASTEXITCODE -ne 0) {
