@@ -4,50 +4,35 @@
 
 ## 当前目标与验收条件
 
-- 发布 `2.0.2`：提交并推送 GitHub，生成安装包和 GitHub Release，再镜像分支、标签、Release 与附件到 Gitee。
-- SQL 查询窗体改用成熟格式化方案，输出紧凑并保留字段或条件后的单行注释。
-- 模型设置的检测按钮列出接口返回的全部型号，并提示检测后仍需保存。
-- 项目和安装包按 AGPLv3 提供许可证与第三方声明。
+- `2.0.2` 已发布到 GitHub 和 Gitee，两边的标签、Release 和 `db-to-excel.exe` 附件一致。
+- 下次发布前确认工作区干净，然后只运行 `scripts/publish-release.ps1`。
 
 ## 已完成
 
-- 引入 `PoorMansTSQLFormatter` 1.4.3.1，以 `TSqlStandardFormatter` 替换原约 780 行自写格式化器。
-- 固定为两空格缩进、小写关键字、120 字符行宽；关闭字段、CASE、BETWEEN 展开，保留布尔条件分行和行尾注释。
-- 「测试」按钮更名为「检测模型」，增加悬浮说明；检测成功后列出接口返回的全部型号。
-- 添加 GNU AGPLv3 官方完整 `LICENSE`、`THIRD_PARTY_NOTICES.md` 和 README 许可证入口。
-- 版本从 `2.0.1` 升级为 `2.0.2`。
-- 本地 Advanced Installer 工程已通过官方 `/AddFile` 命令加入 `PoorMansTSqlFormatterLib35.dll`、`LICENSE` 和 `THIRD_PARTY_NOTICES.md`，均属于 `MainFeature`。
-- 更新架构和部署文档。
+- `2.0.2` 已包含 `PoorMansTSqlFormatter` 1.4.3.1 的 SQL 格式化、「检测模型」列出接口返回的全部型号、AGPLv3 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`，安装工程已引用这些文件。
+- 本地标签 `v2.0.2` 原指向旧提交 `aa4944c`，远端没有该标签和 Release；删除该本地标签后在 `91c0beb` 由发布脚本重建。
+- GitHub Release `v2.0.2` 已创建，附件 `db-to-excel.exe` 为 24,103,597 字节。
+- Gitee 的 `main`、`v2.0.2` 标签、Release `2.0.2` 和同名附件已按 GitHub 对齐。
+- 修复 `scripts/mirror-gitee.ps1` 的 JSON 解析：`Invoke-External` 先把原生输出按 UTF-8 解码并以换行拼接，不再用 `Out-String`，避免中文正文让 `ConvertFrom-Json` 失败。
+- `.cursor/rules/db2sheet.mdc` 的约定正文入口改为 `AGENTS.md`。
 
 ## 本次涉及文件
 
-- `Contracts/ISqlFormattingService.cs`
-- `DB2Sheet.csproj`
-- `LICENSE`
-- `Properties/AssemblyInfo.cs`
-- `README.md`
-- `Services/SqlFormattingService.cs`
-- `THIRD_PARTY_NOTICES.md`
-- `UI/AiModelSettingsForm.cs`
-- `UI/AppPresentation.cs`
-- `docs/ARCHITECTURE.md`
-- `docs/DEPLOYMENT.md`
+- `.cursor/rules/db2sheet.mdc`
+- `scripts/mirror-gitee.ps1`
 - `docs/HANDOFF.md`
-- `DB2Sheet.Tests/Services/SqlFormattingServiceTests.cs`（测试目录不入库）
-- `installer/db-to-excel.aip`、`installer/安装说明.md`（安装目录不入库）
 
 ## 验证结果
 
-- NuGet 恢复和主项目 Debug 编译成功，生成新的 `bin/Debug/DB2Sheet.dll`。
-- `PoorMansTSqlFormatterLib35.dll` 已写入 VSTO 清单。
-- 对新主程序集执行运行时断言通过：字段列表保持单行，WHERE 条件分行，行尾注释保留，重复格式化稳定。
-- Advanced Installer 工程已核对三个新增安装文件的 Component、File 和 MainFeature 记录。
-- GitHub CLI 已登录；远程不存在 `v2.0.2`；当前分支为 `main`。
-- 测试项目因三个既有编译错误无法生成：`AiTranscriptHtmlTests` 参数类型过期、`AppPresentationTests` 缺少 Ribbon 构造参数、`QueryProfileRepositoryTests` 仍引用已删除的 `TargetSheetName`。本次未顺带修改。
+- `gh release view v2.0.2` 显示附件 `db-to-excel.exe` 为 24,103,597 字节，说明首行是「## 变更」，中文正常。
+- Gitee 接口 `GET /releases/tags/v2.0.2` 返回 200，附件含 `db-to-excel.exe`；`git ls-remote` 显示 Gitee 的 `main` 与 `v2.0.2` 和 GitHub 指向同一提交。
+- `scripts/mirror-gitee.ps1` 本次运行退出码为 0，其余版本的 Release 判定一致并跳过。
+- 修复前同一脚本在 `ConvertFrom-Json` 处失败：终端 `gb2312` 码页错误解码 `gh` 的 UTF-8 输出，中文 `body` 处截断 JSON。
+- 测试项目仍因三个既有编译错误无法生成：`AiTranscriptHtmlTests` 参数类型过期、`AppPresentationTests` 缺少 Ribbon 构造参数、`QueryProfileRepositoryTests` 仍引用已删除的 `TargetSheetName`。
 - 尚未在 Excel 或 WPS 宿主中人工查看编辑器格式化效果和模型检测弹窗。
 
 ## 阻塞项与下一步
 
-- 无发布配置阻塞。提交当前改动，确保工作区干净后，只运行 `scripts/publish-release.ps1`。
-- 发布脚本应完成 Release 构建、Advanced Installer 打包、`v2.0.2` 标签、GitHub Release 和 Gitee 镜像。
-- 发布后核验 GitHub、Gitee 的标签、Release 和 `db-to-excel.exe` 附件。
+- 无发布阻塞，提交本次记录后工作区应保持干净。
+- 下次发布只改 `Properties/AssemblyInfo.cs` 的两处版本号，提交并推送后运行 `scripts/publish-release.ps1`。
+- 待人工在 Excel 和 WPS 中验证本版的格式化输出与「检测模型」弹窗。
