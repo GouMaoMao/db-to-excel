@@ -4,40 +4,37 @@
 
 ## 当前目标与验收条件
 
-- 查询窗打开时结束上次未归档对话并新建一条，关闭时归档本窗对话。输入框从对话正文下沿拖动，不设 240 上限。已归档列表可就地删除。Token 说明已改写。
-- 验收状态：Excel 中拖动手柄和已归档删除已通过。
+- SQL 编辑器按宽度自动换行，不显示横向滚动条。换行只影响显示。
+- 查询预览、写入、美化、复制和导出失败时，底部状态栏只留一句短说明，具体异常仍只出现在错误详情里。
+- 打开提示放大为 440×148、18 磅，文案左侧为 32 像素 `icon_robot.png`。SQL 查询和批量刷新共用这一提示。
+- 验收状态：已编译。尚未在 Excel 里打开查询窗核对换行、失败状态栏和打开提示。
 
 ## 已完成
 
-- 拖动手柄在对话正文下沿、引用芯片之上。向上拖输入框变高。最低约一行（48 像素），不再用 240 卡住；最多拖到正文被挤没。松开后写入 `session.aiComposerInputHeight`，注册上限 16384。
-- 已归档条目左侧用 `Resources/icon_talk.png`。右键在该项旁边展开「删除」，列表保持打开。删除成功后该项从仍打开的列表里消失。左键仍恢复。页签删除使用 `Resources/icon_delete.png`。
-- Token 说明改为：发给模型的文本计费单位，包括对话内容、系统提示词、勾选的 SKILL、引用的内容；不要附带 MB 级别的文件。
-- 新打开 SQL 查询窗调用 `BeginQuerySession`：结束上次未归档对话再新建。只收起再展开 AI 栏不新建、不归档。关闭查询窗且未取消时 `EndQuerySession`。
-- 对话正文字号改为 12 像素。`.kilo/` 已加入 `.gitignore`，不入库。
+- `SqlEditorControl` 打开 AvalonEdit 自动换行，横向滚动条设为 Disabled。
+- `ShowError` 不再把 `exception.Message` 写入状态栏。预览失败写「查询预览失败。」或「选中文本预览失败。」，写入写「写入失败。」，保存后美化写「美化失败。」，复制写「复制失败。」，导出写「导出失败。」。错误详情和「问 AI」不变。
+- 打开提示使用 `AppPresentation.OpeningHintFontSize`（18）。图标在构造提示窗时从嵌入资源解码，不在 Excel 启动时预加载；图片框在窗体关闭时释放该图。
+- 连接树测试失败仍会把异常消息送到同一条状态栏，这次未改。
 
 ## 本次涉及文件
 
-- `UI/AiChatControl.cs`
-- `UI/AppPresentation.cs`
+- `UI/SqlEditorControl.cs`
 - `UI/QueryEditorForm.cs`
-- `Services/AiTranscriptHtml.cs`
-- `Services/SettingsRegistry.cs`
-- `Resources/icon_delete.png`
-- `Resources/icon_talk.png`
-- `DB2Sheet.csproj`
-- `docs/specs/ai-assistant.md`
+- `UI/OpeningHintForm.cs`
+- `UI/AppPresentation.cs`
 - `docs/specs/sql-query-form.md`
-- `.gitignore`
+- `docs/specs/preview-and-write.md`
+- `docs/specs/ui-common.md`
 - `docs/HANDOFF.md`
 
 ## 验证结果
 
-- 用户确认已在 Excel 中核对：从对话正文下沿向上拖，输入框能高过原先的 240，直到正文被挤没；向下拖能收回。已归档列表右键后列表仍在，旁边出现「删除」，确认删除后该条马上消失。
-- 此前用 Visual Studio 18 Community 的 MSBuild 编译 `DB2Sheet.csproj`（Debug）通过，输出 `bin\Debug\DB2Sheet.dll`；只有既有的 `CS2002` 重复源文件警告（`UI/DatabaseTreeImageCatalog.cs`）。本轮未再编译。
-- 未运行自动化测试：本地 `DB2Sheet.Tests` 未入库，且与当前源码不同步。
-- `.kilo/` 已被忽略。`Resources/icon_session_add.png` 仍有未提交修改，此前记为与这次对话改动无关，未纳入本次提交。
+- 用 Visual Studio 18 Community 的 MSBuild 编译 `DB2Sheet.csproj`（Debug）通过，输出 `bin\Debug\DB2Sheet.dll`。只有既有的 `CS2002` 重复源文件警告（`UI/DatabaseTreeImageCatalog.cs`）。
+- 未在 Excel 中打开查询窗核对。未运行自动化测试：本地 `DB2Sheet.Tests` 未入库，且与当前源码不同步。
+- `Resources/icon_session_add.png` 仍有未提交修改，与这次改动无关，未纳入本次说明。
 
 ## 阻塞项与下一步
 
 - 无阻塞。
-- 无功能待办。下次发布仍先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs` 两处版本号，先跑 `scripts/publish-release.ps1 -CheckOnly`，再发布并核验。
+- 请在 Excel 中打开 SQL 查询：长行应自动换行且没有横向滚动条；故意让预览失败，状态栏只留「查询预览失败。」，详情仍在错误窗里；打开过程中的「正在打开…」应更大，左侧有机器人图标。批量刷新打开时会看到同一块提示。
+- 下次发布仍先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs` 两处版本号，先跑 `scripts/publish-release.ps1 -CheckOnly`，再发布并核验。

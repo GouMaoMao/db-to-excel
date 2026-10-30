@@ -23,6 +23,9 @@ namespace DB2Sheet.UI
         /// <summary>功能窗体首开准备期间的轻量提示文案。</summary>
         public const string OpeningHintText = "正在打开…";
 
+        /// <summary>打开提示的字号。是界面正文字号的两倍，只用于这块短时提示。</summary>
+        public const float OpeningHintFontSize = 18F;
+
         /// <summary>SQL 工作表单元格和 SQL 编辑器使用的等宽字体。</summary>
         public const string SqlSheetFontName = "Cascadia Code Light";
 

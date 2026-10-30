@@ -788,7 +788,7 @@ namespace DB2Sheet.UI
                     if (ActiveTab == tab)
                         _resultsSplit.Panel2Collapsed = true;
                 }
-                ShowError(exception, sqlText);
+                ShowError(exception, selectedOnly ? "选中文本预览失败。" : "查询预览失败。", sqlText);
             }
         }
 
@@ -880,7 +880,7 @@ namespace DB2Sheet.UI
             }
             catch (Exception exception)
             {
-                ShowError(exception, failedDuringQuery ? sqlText : null);
+                ShowError(exception, "写入失败。", failedDuringQuery ? sqlText : null);
             }
         }
 
@@ -912,7 +912,7 @@ namespace DB2Sheet.UI
             }
             catch (Exception exception)
             {
-                ShowError(exception);
+                ShowError(exception, "美化失败。");
                 return SavedSqlBeautify.Failed;
             }
         }
@@ -1610,7 +1610,7 @@ namespace DB2Sheet.UI
             }
             catch (Exception exception)
             {
-                ShowError(exception);
+                ShowError(exception, "复制失败。");
             }
         }
 
@@ -1690,7 +1690,7 @@ namespace DB2Sheet.UI
             }
             catch (Exception exception)
             {
-                ShowError(exception);
+                ShowError(exception, "复制失败。");
             }
         }
 
@@ -1801,7 +1801,7 @@ namespace DB2Sheet.UI
                 }
                 catch (Exception exception)
                 {
-                    ShowError(exception);
+                    ShowError(exception, "导出失败。");
                 }
             }
         }
@@ -2495,9 +2495,14 @@ namespace DB2Sheet.UI
                 truncated ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 
-        private void ShowError(Exception exception, string sqlForAi = null)
+        /// <summary>弹出错误详情，状态栏只写一句短说明。</summary>
+        /// <param name="exception">完整异常。详情窗显示类型、消息、堆栈和 InnerException。</param>
+        /// <param name="statusText">状态栏上的一句说明，不包含异常原文。</param>
+        /// <param name="sqlForAi">非空时详情窗提供「问 AI」，并把这段 SQL 填进新对话。不写入状态栏。</param>
+        /// <remarks>必须在界面线程调用。异常原文只出现在错误详情里，避免多行消息把状态栏撑高。</remarks>
+        private void ShowError(Exception exception, string statusText, string sqlForAi = null)
         {
-            _status.Text = exception.Message;
+            _status.Text = statusText;
             bool ask = ExceptionDetailForm.Show(this, exception, sqlForAi != null);
             if (ask)
                 OpenAiErrorChat(sqlForAi, exception.Message);

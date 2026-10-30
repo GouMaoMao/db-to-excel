@@ -13,6 +13,7 @@ namespace DB2Sheet.UI
     /// <summary>封装支持格式化、行注释和选区执行请求的 SQL 文本编辑器。</summary>
     /// <remarks>
     /// 编辑区是 AvalonEdit，语法高亮直接使用 <see cref="SqlSyntax"/> 的 T-SQL 定义。
+    /// 文本按编辑区宽度自动换行，只影响显示；文档里的换行、复制、保存和送去执行的 SQL 都不改。
     /// 控件只接收纯文本。对外的 <see cref="SqlText"/> 使用回车换行，编辑器内部使用换行符。
     /// 控件不直接连接数据库。调用方负责响应 <see cref="ExecuteSelectionRequested"/> 并执行只读校验及查询。
     /// </remarks>
@@ -39,8 +40,8 @@ namespace DB2Sheet.UI
                 FontFamily = new FontFamily(_font.FontFamily.Name),
                 FontSize = _font.SizeInPoints * 96.0 / 72.0,
                 ShowLineNumbers = false,
-                WordWrap = false,
-                HorizontalScrollBarVisibility = WpfScrollBarVisibility.Auto,
+                WordWrap = true,
+                HorizontalScrollBarVisibility = WpfScrollBarVisibility.Disabled,
                 VerticalScrollBarVisibility = WpfScrollBarVisibility.Auto,
                 Background = System.Windows.SystemColors.WindowBrush,
                 Foreground = System.Windows.SystemColors.WindowTextBrush,
