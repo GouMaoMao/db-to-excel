@@ -370,6 +370,7 @@
     <EmbeddedResource Include="Resources\icon_session_history.png" />
     <EmbeddedResource Include="Resources\iocn_window_new.png" />
     <EmbeddedResource Include="Resources\icon_close.png" />
+    <EmbeddedResource Include="Resources\icon_delete.png" />
     <EmbeddedResource Include="Resources\icon_send.png" />
     <EmbeddedResource Include="Resources\icon_talk.png" />
 	<EmbeddedResource Include="Resources\icon_ing.png" />

@@ -1014,14 +1014,14 @@ namespace DB2Sheet.UI
         /// <summary>
         /// 窗口已经按最终尺寸显示，但仍然完全透明。
         /// 在这里摆左右分栏，并把左栏上下分成两半。显示之后再改分割条会把旧位置留在屏幕上。
+        /// 同时开始这一轮 AI 对话：结束上次留下的未归档对话，再新建一条。与 AI 栏是否展开无关。
         /// </summary>
         protected override void PrepareFirstShow()
         {
             ApplyWorkspaceSplit();
             TrySetSplitterDistance(_leftSplit, _leftSplit.Height / 2);
             ApplyAiSplit();
-            if (_settings.Get(CoreSettings.AiChatVisible))
-                _aiChat.EnsureConversation();
+            _aiChat.BeginQuerySession();
         }
 
         /// <summary>按已记住的千分比摆左右分栏。容器还没有宽度时不改距离。</summary>
@@ -1080,6 +1080,7 @@ namespace DB2Sheet.UI
         }
 
         /// <summary>展开或收起右侧 AI 对话。展开时加宽窗体，收起时收回；宽度只有拖动分割条才记住。</summary>
+        /// <remarks>只改可见性。不新建对话，也不归档。对话在打开和关闭查询窗时开始、结束。</remarks>
         private void ToggleAiPanel()
         {
             bool visible = !_settings.Get(CoreSettings.AiChatVisible);
@@ -1090,8 +1091,6 @@ namespace DB2Sheet.UI
                 NarrowAfterAiPanel();
             ApplyAiSplit();
             _toggleChatWidth = -1;
-            if (visible)
-                _aiChat.EnsureConversation();
         }
 
         /// <summary>
@@ -2298,6 +2297,16 @@ namespace DB2Sheet.UI
 
         private void QueryEditorFormFormClosed(object sender, FormClosedEventArgs e)
         {
+            try
+            {
+                if (_aiChat != null && !_aiChat.IsDisposed)
+                    _aiChat.EndQuerySession();
+            }
+            catch (Exception exception)
+            {
+                ExceptionDetailForm.Show(this, exception);
+            }
+
             FormClosing -= QueryEditorFormFormClosing;
             _queryTabs.MouseDown -= QueryTabsMouseDown;
             _queryTabs.MouseUp -= QueryTabsMouseUp;

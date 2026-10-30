@@ -42,6 +42,9 @@ packages/
 *.bak
 Logs/release-status.json
 
+# Local Kilo plans
+.kilo/
+
 # OS files
 .DS_Store
 Thumbs.db

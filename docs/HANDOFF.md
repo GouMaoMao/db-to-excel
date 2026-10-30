@@ -4,42 +4,40 @@
 
 ## 当前目标与验收条件
 
-- 把 `AGENTS.md` 里的五块功能细则拆到 `docs/specs/`，让每次请求常驻的只有强制规则和规格索引。
-- 验收条件：`AGENTS.md` 只剩强制规则、读取顺序和规格索引；五份规格逐条承接原章节；三个工具入口改为按索引读取。
+- 查询窗打开时结束上次未归档对话并新建一条，关闭时归档本窗对话。输入框从对话正文下沿拖动，不设 240 上限。已归档列表可就地删除。Token 说明已改写。
+- 验收状态：Excel 中拖动手柄和已归档删除已通过。
 
 ## 已完成
 
-- 新建 `docs/specs/ui-common.md`、`sql-query-form.md`、`batch-refresh.md`、`preview-and-write.md`、`ai-assistant.md`，规则文字按原顺序逐条搬入，没有重写。
-- 连接树注释显示那一条从原「预览与写入」移到 `ui-common.md`，因为 SQL 查询和批量刷新共用这棵树，放在写入路径下会在改连接树时被漏读。
-- `AGENTS.md` 从 35,976 字节降到 7,372 字节，新增「读取顺序」「规格索引」；删掉界面、SQL 查询窗体、批量刷新、预览与写入、AI 助手五节。
-- 读取顺序里写明：动手前按索引读完命中规格，命中多份都读；最终回复用一行列出已读规格；`AGENTS.md` 超过约 15 KB 就把细则移回 `docs/specs/`。
-- 把「唯一的 AI 项目约定正文」和「细则只写在本文件」两处旧口径改成「强制规则只在 `AGENTS.md`，功能细则只在 `docs/specs/`，一条规则只写一处」。
-- 更新 `CLAUDE.md`、`.cursor/rules/db2sheet.mdc`、`.github/copilot-instructions.md` 的入口说明，保留 `CLAUDE.md` 的 `@AGENTS.md` 导入。
-- 修正 `docs/UI-UNIFICATION-PLAN.md` 的界面细则指针和本文件开头的长期规范指针。
-- 保留上一轮未提交的命令注释约定（`<# 用途｜风险 #>`），本轮一并入库。
+- 拖动手柄在对话正文下沿、引用芯片之上。向上拖输入框变高。最低约一行（48 像素），不再用 240 卡住；最多拖到正文被挤没。松开后写入 `session.aiComposerInputHeight`，注册上限 16384。
+- 已归档条目左侧用 `Resources/icon_talk.png`。右键在该项旁边展开「删除」，列表保持打开。删除成功后该项从仍打开的列表里消失。左键仍恢复。页签删除使用 `Resources/icon_delete.png`。
+- Token 说明改为：发给模型的文本计费单位，包括对话内容、系统提示词、勾选的 SKILL、引用的内容；不要附带 MB 级别的文件。
+- 新打开 SQL 查询窗调用 `BeginQuerySession`：结束上次未归档对话再新建。只收起再展开 AI 栏不新建、不归档。关闭查询窗且未取消时 `EndQuerySession`。
+- 对话正文字号改为 12 像素。`.kilo/` 已加入 `.gitignore`，不入库。
 
 ## 本次涉及文件
 
-- `AGENTS.md`
-- `docs/specs/ui-common.md`（新增）
-- `docs/specs/sql-query-form.md`（新增）
-- `docs/specs/batch-refresh.md`（新增）
-- `docs/specs/preview-and-write.md`（新增）
-- `docs/specs/ai-assistant.md`（新增）
-- `CLAUDE.md`、`.cursor/rules/db2sheet.mdc`、`.github/copilot-instructions.md`
-- `docs/UI-UNIFICATION-PLAN.md`、`docs/HANDOFF.md`
+- `UI/AiChatControl.cs`
+- `UI/AppPresentation.cs`
+- `UI/QueryEditorForm.cs`
+- `Services/AiTranscriptHtml.cs`
+- `Services/SettingsRegistry.cs`
+- `Resources/icon_delete.png`
+- `Resources/icon_talk.png`
+- `DB2Sheet.csproj`
+- `docs/specs/ai-assistant.md`
+- `docs/specs/sql-query-form.md`
+- `.gitignore`
+- `docs/HANDOFF.md`
 
 ## 验证结果
 
-- 用 HEAD 版 `AGENTS.md` 按 UTF-8 逐行比对：127 行里除 8 行按计划改写（开头两段、操作说明、批量刷新与预览写入各一处跨节引用、文档章节三条），其余每条规则都能在新文件里逐字找到。
-- 同一脚本检查原文规则是否在多处重复出现，重复 0 条。
-- 规格索引、五个文件头的触发路径，以及正文里引用的源码路径都用 `Test-Path` 核对过，全部存在。
-- 未运行 `MSBuild` 和发布脚本：纯文档改动，不涉及编译产物。
-- 未做子 Agent 冷启动试验，需要新会话；留待下次按「改批量刷新状态圆点颜色」验证索引是否够清楚。
+- 用户确认已在 Excel 中核对：从对话正文下沿向上拖，输入框能高过原先的 240，直到正文被挤没；向下拖能收回。已归档列表右键后列表仍在，旁边出现「删除」，确认删除后该条马上消失。
+- 此前用 Visual Studio 18 Community 的 MSBuild 编译 `DB2Sheet.csproj`（Debug）通过，输出 `bin\Debug\DB2Sheet.dll`；只有既有的 `CS2002` 重复源文件警告（`UI/DatabaseTreeImageCatalog.cs`）。本轮未再编译。
+- 未运行自动化测试：本地 `DB2Sheet.Tests` 未入库，且与当前源码不同步。
+- `.kilo/` 已被忽略。`Resources/icon_session_add.png` 仍有未提交修改，此前记为与这次对话改动无关，未纳入本次提交。
 
 ## 阻塞项与下一步
 
 - 无阻塞。
-- `ai-assistant.md` 是最大的一份，仍承接原 AI 章节全部内容；若以后只改请求或设置部分，可再按「对话栏外观」与「模型、Skill、请求与审计」拆开。
-- 下次改 UI 或 AI 相关文件时按索引读规格，并在回复里列出已读规格；连续几次出现漏读再调整索引写法。
-- 下次发布仍先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs` 两处版本号，先跑 `scripts/publish-release.ps1 -CheckOnly`，再发布并核验。
+- 无功能待办。下次发布仍先读 `.cursor/skills/publish-release/SKILL.md`；只改 `Properties/AssemblyInfo.cs` 两处版本号，先跑 `scripts/publish-release.ps1 -CheckOnly`，再发布并核验。

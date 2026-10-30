@@ -78,6 +78,7 @@ namespace DB2Sheet.Services
             registry.Register(CoreSettings.BeautifyAfterSave);
             registry.Register(CoreSettings.BeautifyAfterRefresh);
             registry.Register(CoreSettings.AiChatSplitRatio);
+            registry.Register(CoreSettings.AiComposerInputHeight);
             registry.Register(CoreSettings.AiChatVisible);
             registry.Register(CoreSettings.AiModelChoice);
             registry.Register(CoreSettings.AiThinkingChoice);
@@ -181,6 +182,10 @@ namespace DB2Sheet.Services
         /// <summary>SQL 查询窗右侧 AI 栏宽度占该栏所在区域的千分比。0 表示用户还没拖过，展开时对话栏为当时 SQL 列的 2/3。</summary>
         public static readonly SettingDefinition<int> AiChatSplitRatio = Integer(
             "session.aiChatSplitRatio", "AI 对话栏宽度比例", "会话", 0, 0, 999);
+
+        /// <summary>AI 对话输入框高度，单位是像素。用户拖过才偏离默认。不出现在参数设置里。上限只拒绝明显无效的数字，界面上能拖到当前对话栏放得下为止。</summary>
+        public static readonly SettingDefinition<int> AiComposerInputHeight = Integer(
+            "session.aiComposerInputHeight", "AI 输入框高度", "会话", 72, 48, 16384);
 
         /// <summary>对话里上次选中的账号和子型号，形如「账号标识|型号」。不出现在参数设置里。</summary>
         public static readonly SettingDefinition<string> AiModelChoice =

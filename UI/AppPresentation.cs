@@ -375,8 +375,10 @@ namespace DB2Sheet.UI
             "复制AI生成的SQL代码到SQL编辑器区域执行。使用者必须理解SQL代码逻辑，再使用。",
             "模型切换：不同模型在生成质量、响应速度、Token消耗上存在区别。",
             "Skills：为AI注入场景知识，显著提升生成SQL的准确性。",
-            "Token：对话文本的计费单位，描述越简洁消耗越低；不建议引用MB级别的文件给AI，会大幅增加token消耗。",
-            "对话过长、更换业务查询需求时建议新开对话，减少历史对话干扰，降低Token开销。"
+            "Token：发给模型的文本计费单位，包括对话内容、系统提示词、勾选的SKILL、引用的内容。不要附带 MB 级别的文件，那会大幅增加 Token。",
+            "对话过长、更换业务查询需求时建议新开对话，减少历史对话干扰，降低Token开销。",
+            "生成结果不理想时，建议先提高思考强度；仍不理想再更换模型。",
+            "一项查询完成后请关闭 SQL 查询窗，本次对话会随之归档。下一项查询请重新打开窗体，不要在已结束的对话里继续追问。"
         };
 
         private static readonly Random HintRandom = new Random();
@@ -456,7 +458,12 @@ namespace DB2Sheet.UI
         /// <summary>对话页签条上历史按钮的悬浮提示。</summary>
         public const string AiArchivedTip =
             "已归档\r\n"
-            + "列出已收起的对话。选中一条后把它放回页签。";
+            + "列出已收起的对话。左键把一条放回页签。在某一条上右键，点「删除」去掉这条对话，审计日志仍保留。";
+
+        /// <summary>对话正文下沿拖动手柄的悬浮提示。</summary>
+        public const string AiInputResizeTip =
+            "调整输入框高度\r\n"
+            + "拖动对话正文下沿，改变输入框高度。松开后记住，下次打开仍用这个高度。";
 
         /// <summary>对话栏右上角关闭按钮的悬浮提示。</summary>
         public const string AiCloseChatTip =

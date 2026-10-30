@@ -26,6 +26,11 @@ namespace DB2Sheet.UI
         private const int ConversationTabIconPending = 1;
         private const int ConversationTabIconError = 2;
         private const int ConversationTabIconUnread = 3;
+        private const int InputHeightDefault = 72;
+        private const int InputHeightMin = 48;
+        private const int InputHeightStoreMax = 16384;
+        private const int InputGripHeight = 6;
+        private const int ChatChromeHeight = 41;
 
         private readonly AiAssistant _assistant;
         private readonly IOperationRunner _operationRunner;
@@ -55,14 +60,21 @@ namespace DB2Sheet.UI
         private readonly Button _skillButton;
         private readonly Button _sqlRef;
         private readonly FlowLayoutPanel _chipRow;
+        private readonly Panel _inputHost;
+        private readonly Panel _inputGrip;
         private readonly Panel _composer;
+        private int _composerLayoutDepth;
+        private int _inputHeight = InputHeightDefault;
+        private int _inputRoom = InputHeightStoreMax;
+        private bool _draggingInput;
+        private int _dragStartY;
+        private int _dragStartHeight;
         private readonly Dictionary<string, Image> _mentionIcons = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
         private readonly List<Attachment> _attachments = new List<Attachment>();
         private readonly MentionPopup _mention;
         private readonly ToolTip _tips = new ToolTip();
         private readonly TextBox _input = new TextBox
         {
-            Dock = DockStyle.Fill,
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
             BorderStyle = BorderStyle.FixedSingle,
@@ -73,6 +85,8 @@ namespace DB2Sheet.UI
         private readonly Font _chipFont = new Font(AppPresentation.DefaultFontName, AppPresentation.AiComposerFontSize, FontStyle.Regular, GraphicsUnit.Point);
         private readonly Image _sendIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_send.png", 24);
         private readonly Image _sendIconGray = DatabaseTreeImageCatalog.LoadActionIcon("icon_send.png", 24, true);
+        private readonly Image _deleteIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_delete.png", 16);
+        private readonly Image _archivedItemIcon = DatabaseTreeImageCatalog.LoadActionIcon("icon_talk.png", 16);
         private readonly Label _mentionHint;
         private readonly string _composerHint = AppPresentation.PickAiComposerHint();
         private Panel _modelRow;
@@ -85,6 +99,8 @@ namespace DB2Sheet.UI
         private readonly ContextMenuStrip _thinkingMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _skillMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _historyMenu = new ContextMenuStrip();
+        private bool _querySessionStarted;
+        private bool _closingSession;
         private readonly List<Image> _tabIcons = new List<Image>();
         private readonly HashSet<string> _errorConversationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _unreadConversationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -157,6 +173,7 @@ namespace DB2Sheet.UI
             _assistant = assistant ?? throw new ArgumentNullException(nameof(assistant));
             _operationRunner = operationRunner ?? throw new ArgumentNullException(nameof(operationRunner));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _inputHeight = NormalizeStoredInputHeight(_settings.Get(CoreSettings.AiComposerInputHeight));
             _readEditor = readEditor ?? throw new ArgumentNullException(nameof(readEditor));
             _readMentions = readMentions ?? throw new ArgumentNullException(nameof(readMentions));
             _closePanel = closePanel;
@@ -201,8 +218,10 @@ namespace DB2Sheet.UI
 
             _renameItem = new ToolStripMenuItem("重命名", null, (sender, args) => Guard(RenameCurrent));
             _archiveItem = new ToolStripMenuItem("归档", null, (sender, args) => Guard(ArchiveCurrent));
-            _deleteItem = new ToolStripMenuItem("删除", null, (sender, args) => Guard(DeleteCurrent));
+            _deleteItem = new ToolStripMenuItem("删除", _deleteIcon, (sender, args) => Guard(DeleteCurrent));
             _archivedMenu = new ToolStripMenuItem("已归档");
+            _historyMenu.Closing += KeepArchivedListOpen;
+            _archivedMenu.DropDown.Closing += KeepArchivedListOpen;
             _tabMenu.Items.Add("新建", null, (sender, args) => StartConversation("新对话", string.Empty, false));
             _tabMenu.Items.Add(_renameItem);
             _tabMenu.Items.Add(_archiveItem);
@@ -218,11 +237,11 @@ namespace DB2Sheet.UI
             _chipRow.AutoSize = false;
             _chipRow.Controls.Add(_skillButton);
             _chipRow.Controls.Add(_sqlRef);
-            Panel inputHost = new Panel { Dock = DockStyle.Top, Height = 72, Padding = new Padding(8, 0, 8, 0), BackColor = SystemColors.Control };
-            inputHost.Controls.Add(_input);
+            _inputHost = new Panel { Height = _inputHeight, Padding = new Padding(8, 0, 8, 0), BackColor = SystemColors.Control };
+            _inputHost.Controls.Add(_input);
+            _inputGrip = CreateInputGrip();
             _mentionHint = new Label
             {
-                Dock = DockStyle.Top,
                 Height = 20,
                 Text = _composerHint,
                 Font = _chipFont,
@@ -244,7 +263,6 @@ namespace DB2Sheet.UI
             _modelButton.Location = new Point(8, 4);
             _modelRow = new Panel
             {
-                Dock = DockStyle.Top,
                 Height = Math.Max(36, sendSize.Height),
                 Padding = new Padding(0, 0, 8, 0),
                 BackColor = SystemColors.Control
@@ -256,9 +274,9 @@ namespace DB2Sheet.UI
             _composer = new Panel { Dock = DockStyle.Bottom, Height = 156, BackColor = SystemColors.Control };
             _composer.Controls.Add(_modelRow);
             _composer.Controls.Add(_mentionHint);
-            _composer.Controls.Add(inputHost);
+            _composer.Controls.Add(_inputHost);
+            _composer.Controls.Add(_inputGrip);
             _composer.Controls.Add(_chipRow);
-            _composer.Resize += (sender, args) => LayoutComposer();
             Panel line = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = SystemColors.ControlDark };
             Panel transcript = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
             transcript.Controls.Add(_view);
@@ -291,17 +309,35 @@ namespace DB2Sheet.UI
             LayoutComposer();
         }
 
-        /// <summary>没有对话时新建一条，已有对话时保持当前选择。</summary>
-        public void EnsureConversation()
+        /// <summary>新打开的 SQL 查询窗开始一轮对话。本控件只做一次。</summary>
+        /// <remarks>
+        /// 先结束上次查询窗留下的未归档对话，再新建一条。与 AI 栏当时是否展开无关。
+        /// 只收起再打开 AI 栏不会调用这里。在界面线程调用。
+        /// </remarks>
+        public void BeginQuerySession()
         {
-            if (_assistant.Conversations.GetAll().Count == 0)
+            if (_querySessionStarted || IsDisposed) return;
+            _querySessionStarted = true;
+            try
             {
+                EndOpenConversations();
                 StartConversation("新对话", string.Empty, false);
-                return;
             }
+            catch (Exception exception)
+            {
+                ExceptionDetailForm.Show(FindForm(), exception);
+            }
+        }
 
-            if (string.IsNullOrEmpty(_currentId))
-                SelectFirstActive();
+        /// <summary>SQL 查询窗已经关闭时，结束本窗仍开着的对话。不逐条确认。</summary>
+        /// <remarks>
+        /// 没有消息且标题仍是「新对话」的删除文件，其余归档。不删除审计记录。
+        /// 用户取消关闭时不要调用。在界面线程调用。
+        /// </remarks>
+        public void EndQuerySession()
+        {
+            if (IsDisposed) return;
+            EndOpenConversations();
         }
 
         /// <summary>另建一条对话并填入草稿。报错入口用它，不切走查询窗里正在写的那条。</summary>
@@ -389,6 +425,8 @@ namespace DB2Sheet.UI
                 _thinkingMenu.Dispose();
                 _skillMenu.Dispose();
                 _historyMenu.Dispose();
+                _deleteIcon.Dispose();
+                _archivedItemIcon.Dispose();
                 foreach (Image icon in _tabIcons)
                     icon.Dispose();
                 _tabIcons.Clear();
@@ -486,7 +524,8 @@ namespace DB2Sheet.UI
                 Select(created.Id);
                 _input.Text = draft ?? string.Empty;
                 RefreshSqlReference();
-                _input.Focus();
+                if (_input.CanFocus)
+                    _input.Focus();
             }
             catch (Exception exception)
             {
@@ -550,6 +589,60 @@ namespace DB2Sheet.UI
                 conversation.Id,
                 conversation.Title);
             SelectFirstActive();
+        }
+
+        /// <summary>结束当前仍未归档的对话。查询窗打开时清掉上一轮，关闭时结束这一轮。</summary>
+        /// <remarks>
+        /// 在界面线程调用。批量改动期间忽略存储刷新，避免页签在中途被重新选中。
+        /// 没有消息且标题仍是「新对话」的删除文件，其余归档。不逐条确认，不删除审计记录。
+        /// </remarks>
+        private void EndOpenConversations()
+        {
+            if (_closingSession) return;
+            List<AiConversation> open = new List<AiConversation>();
+            foreach (AiConversation conversation in _assistant.Conversations.GetAll())
+            {
+                if (conversation != null && !conversation.Archived)
+                    open.Add(conversation);
+            }
+
+            _closingSession = true;
+            try
+            {
+                foreach (AiConversation conversation in open)
+                    FinishConversation(conversation);
+            }
+            finally
+            {
+                _closingSession = false;
+                ReloadFromStore();
+            }
+        }
+
+        /// <summary>结束一条仍开着的对话。空的「新对话」删文件，其余归档。</summary>
+        /// <param name="conversation">尚未归档的对话。</param>
+        /// <remarks>不确认。应在界面线程、且 <see cref="_closingSession"/> 为 true 时调用，这样存储事件不会中途重排页签。</remarks>
+        private void FinishConversation(AiConversation conversation)
+        {
+            if (conversation == null) return;
+            int count = conversation.Messages == null ? 0 : conversation.Messages.Count;
+            bool drop = count == 0 && string.Equals(conversation.Title, "新对话", StringComparison.Ordinal);
+            ClearConversationAlerts(conversation.Id);
+            if (string.Equals(_currentId, conversation.Id, StringComparison.OrdinalIgnoreCase))
+                _currentId = null;
+            if (drop)
+            {
+                _assistant.Conversations.Delete(conversation.Id);
+                _assistant.WriteAction(
+                    "conversation.delete",
+                    "title=" + conversation.Title + "\r\nmessages=" + count.ToString(),
+                    conversation.Id,
+                    conversation.Title);
+                return;
+            }
+
+            _assistant.Conversations.SetArchived(conversation.Id, true);
+            _assistant.WriteAction("conversation.archive", "title=" + conversation.Title, conversation.Id, conversation.Title);
         }
 
         private void RestoreConversation(string id)
@@ -850,6 +943,7 @@ namespace DB2Sheet.UI
 
         private void ReloadFromStore()
         {
+            if (_closingSession) return;
             string id = _currentId;
             ReloadTabs();
             if (!string.IsNullOrEmpty(id))
@@ -1235,17 +1329,43 @@ namespace DB2Sheet.UI
             LayoutComposer();
         }
 
-        /// <summary>按当前宽度重算引用行、灰色说明和模型行的高度，再把底栏撑到刚好放下。</summary>
-        /// <remarks>这里仅测量当前说明，不切换文字。测量比文字区略窄并多留几像素，避免末行被挡住。宽度还没有时不改。</remarks>
+        /// <summary>先按新宽度重排底栏；底栏变高或变矮时再排一次，让对话正文把这块高度让出来。</summary>
+        /// <param name="e">本次布局的原因。</param>
+        /// <remarks>只在界面线程由 WinForms 调用。重入时只做基类布局，避免测量和摆放互相触发。第二次布局会改正文区域的高度。</remarks>
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            if (_composerLayoutDepth > 0)
+            {
+                base.OnLayout(e);
+                return;
+            }
+
+            _composerLayoutDepth++;
+            try
+            {
+                base.OnLayout(e);
+                int before = _composer == null ? 0 : _composer.Height;
+                LayoutComposer();
+                if (_composer != null && !_composer.IsDisposed && _composer.Height != before)
+                    base.OnLayout(e);
+            }
+            finally
+            {
+                _composerLayoutDepth--;
+            }
+        }
+
+        /// <summary>按当前宽度把拖动手柄、引用行、输入框、说明和模型行从上到下摆开，再把底栏撑到刚好放下。</summary>
+        /// <remarks>只在界面线程调用。手柄在对话正文下沿。五个区域不靠停靠，避免分割条拖动时输入框留在旧位置盖住 Skill 和引用。这里仅测量当前说明，不切换文字。测量比文字区略窄并多留几像素，避免末行被挡住。宽度还没有时不改。模型芯片每次都按完整子型号测量，栏变宽后把文字放回来。输入框不设固定上限，只受当前对话栏剩余高度限制。</remarks>
         private void LayoutComposer()
         {
-            if (_composer == null || _chipRow == null || _mentionHint == null || _modelRow == null) return;
+            if (_composer == null || _chipRow == null || _inputGrip == null || _inputHost == null || _mentionHint == null || _modelRow == null) return;
             int width = _composer.ClientSize.Width;
             if (width <= 0) return;
-            Size preferred = _chipRow.GetPreferredSize(new Size(width, 0));
+            if (_chipRow.Width != width)
+                _chipRow.Width = width;
+            Size preferred = _chipRow.GetPreferredSize(new Size(width, int.MaxValue));
             int chips = Math.Max(36, preferred.Height);
-            if (_chipRow.Height != chips)
-                _chipRow.Height = chips;
             int hintWidth = Math.Max(1, width - _mentionHint.Padding.Horizontal - 4);
             Size measured = TextRenderer.MeasureText(
                 _mentionHint.Text,
@@ -1253,39 +1373,56 @@ namespace DB2Sheet.UI
                 new Size(hintWidth, int.MaxValue),
                 TextFormatFlags.WordBreak | TextFormatFlags.Left | TextFormatFlags.TextBoxControl);
             int hint = Math.Max(20, measured.Height + _mentionHint.Padding.Vertical + 4);
-            if (_mentionHint.Height != hint)
-                _mentionHint.Height = hint;
             Size sendSize = _send.GetPreferredSize(Size.Empty);
             int sendWidth = SendButtonWidth();
             if (_send.Width != sendWidth)
                 _send.Width = sendWidth;
             int modelRowHeight = Math.Max(36, sendSize.Height);
-            if (_modelRow.Height != modelRowHeight)
-                _modelRow.Height = modelRowHeight;
-            int modelY = Math.Max(0, (_modelRow.ClientSize.Height - _modelButton.Height) / 2);
+            _inputRoom = ClientSize.Height - ChatChromeHeight - InputGripHeight - chips - hint - modelRowHeight;
+            int inputHeight = ClampInputToRoom(_inputHeight, _inputRoom);
+            int y = 0;
+            _inputGrip.SetBounds(0, y, width, InputGripHeight);
+            y += InputGripHeight;
+            _chipRow.SetBounds(0, y, width, chips);
+            y += chips;
+            _inputHost.SetBounds(0, y, width, inputHeight);
+            _input.SetBounds(
+                _inputHost.Padding.Left,
+                _inputHost.Padding.Top,
+                Math.Max(0, _inputHost.ClientSize.Width - _inputHost.Padding.Horizontal),
+                Math.Max(0, _inputHost.ClientSize.Height - _inputHost.Padding.Vertical));
+            y += inputHeight;
+            _mentionHint.SetBounds(0, y, width, hint);
+            y += hint;
+            _modelRow.SetBounds(0, y, width, modelRowHeight);
+            y += modelRowHeight;
             int modelLeft = 8;
-            Size preferredModel = _modelButton.GetPreferredSize(Size.Empty);
+            string fullCaption = CurrentModelText() + "  ﹀";
+            TextFormatFlags captionFlags = TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
+            int captionWidth = TextRenderer.MeasureText(fullCaption, _modelButton.Font, Size.Empty, captionFlags).Width;
+            int imageWidth = _modelButton.Image == null ? 0 : _modelButton.Image.Width;
+            int fullWidth = captionWidth + imageWidth + _modelButton.Padding.Horizontal + 8;
+            Size preferredThinking = _thinkingButton.GetPreferredSize(Size.Empty);
+            int thinkingWidth = Math.Max(preferredThinking.Width, _thinkingButton.Width);
             int sendLeft = _modelRow.ClientSize.Width - _modelRow.Padding.Right - _send.Width;
-            int modelWidth = Math.Max(0, Math.Min(
-                preferredModel.Width,
-                sendLeft - modelLeft - 4 - _thinkingButton.Width - 4));
-            int modelTextWidth = Math.Max(
-                0,
-                modelWidth - _modelButton.Padding.Horizontal - (_modelButton.Image == null ? 0 : _modelButton.Image.Width) - 4);
+            int available = Math.Max(0, sendLeft - modelLeft - 4 - thinkingWidth - 4);
+            int modelWidth = Math.Min(fullWidth, available);
+            int modelTextWidth = Math.Max(0, modelWidth - _modelButton.Padding.Horizontal - imageWidth - 4);
             _modelButton.Text = FitModelCaption(CurrentModelText(), modelTextWidth);
             if (_modelButton.AutoSize)
                 _modelButton.AutoSize = false;
-            if (_modelButton.Width != modelWidth || _modelButton.Height != preferredModel.Height)
-                _modelButton.Size = new Size(modelWidth, preferredModel.Height);
+            int modelHeight = Math.Max(_modelButton.Height, _modelButton.Font.Height + _modelButton.Padding.Vertical + 6);
+            if (_modelButton.Width != modelWidth || _modelButton.Height != modelHeight)
+                _modelButton.Size = new Size(modelWidth, modelHeight);
+            int modelY = Math.Max(0, (_modelRow.ClientSize.Height - _modelButton.Height) / 2);
             if (_modelButton.Left != modelLeft || _modelButton.Top != modelY)
                 _modelButton.Location = new Point(modelLeft, modelY);
             int thinkingX = _modelButton.Right + 4;
             int thinkingY = Math.Max(0, (_modelRow.ClientSize.Height - _thinkingButton.Height) / 2);
             if (_thinkingButton.Left != thinkingX || _thinkingButton.Top != thinkingY)
                 _thinkingButton.Location = new Point(thinkingX, thinkingY);
-            int next = _modelRow.Height + hint + 72 + chips + 8;
-            if (_composer.Height != next)
-                _composer.Height = next;
+            if (_composer.Height != y)
+                _composer.Height = y;
         }
 
         /// <summary>按模型芯片可用宽度截短型号文字，同时保留下拉标记。</summary>
@@ -1387,8 +1524,201 @@ namespace DB2Sheet.UI
             {
                 if (conversation == null || !conversation.Archived) continue;
                 string id = conversation.Id;
-                items.Add(conversation.Title, null, (sender, args) => Guard(() => RestoreConversation(id)));
+                ArchivedConversationItem item = new ArchivedConversationItem(conversation.Title, _archivedItemIcon);
+                item.Tag = id;
+                item.DropDownItems.Add("删除", _deleteIcon, (sender, args) => Guard(() => DeleteArchived(id)));
+                item.ToolTipText = AppPresentation.AiArchivedTip;
+                item.Click += (sender, args) => Guard(() => RestoreConversation(id));
+                items.Add(item);
             }
+        }
+
+        /// <summary>右键落在已归档列表里时不收起列表，方便旁边的删除子菜单留在原处。</summary>
+        /// <remarks>只取消点在列表或已展开子菜单上的关闭。点到外面、按 Esc 或左键选中仍会收起。在界面线程由菜单关闭事件调用。</remarks>
+        private static void KeepArchivedListOpen(object sender, ToolStripDropDownClosingEventArgs e)
+        {
+            if (e == null) return;
+            if (e.CloseReason != ToolStripDropDownCloseReason.AppClicked
+                && e.CloseReason != ToolStripDropDownCloseReason.AppFocusChange)
+                return;
+            ToolStripDropDown menu = sender as ToolStripDropDown;
+            if (menu != null && DropDownOrChildContains(menu, Cursor.Position))
+                e.Cancel = true;
+        }
+
+        /// <summary>鼠标是否还在这份菜单或其已经打开的子菜单上。</summary>
+        /// <param name="menu">已归档列表或它的子菜单。</param>
+        /// <param name="screen">屏幕坐标。</param>
+        /// <returns>点在菜单可见区域内时为 true。</returns>
+        private static bool DropDownOrChildContains(ToolStripDropDown menu, Point screen)
+        {
+            if (menu == null || !menu.Visible) return false;
+            if (menu.Bounds.Contains(screen)) return true;
+            foreach (ToolStripItem item in menu.Items)
+            {
+                ToolStripMenuItem menuItem = item as ToolStripMenuItem;
+                if (menuItem == null || !menuItem.HasDropDownItems) continue;
+                if (DropDownOrChildContains(menuItem.DropDown, screen))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>删除一条已归档对话。有消息时先确认。删成后从仍打开的列表里拿掉这一条。</summary>
+        /// <param name="id">对话标识。</param>
+        /// <remarks>列表为了右键不收起，不会自己重画。等这次单击结束后再移除，避免还在处理菜单项时把它释放掉。</remarks>
+        private void DeleteArchived(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            AiConversation conversation = _assistant.Conversations.Get(id);
+            if (conversation == null) return;
+            DeleteConversation(conversation, true);
+            if (_assistant.Conversations.Get(id) != null || !IsHandleCreated) return;
+            string captured = id;
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed) return;
+                try
+                {
+                    RemoveArchivedMenuItem(captured);
+                }
+                catch (Exception exception)
+                {
+                    ExceptionDetailForm.Show(FindForm(), exception);
+                }
+            }));
+        }
+
+        /// <summary>从仍打开的已归档列表里去掉一条。历史列表空了就留下不可用说明。</summary>
+        /// <param name="id">已删除的对话标识。</param>
+        private void RemoveArchivedMenuItem(string id)
+        {
+            RemoveArchivedItem(_historyMenu.Items, id);
+            if (_historyMenu.Visible && _historyMenu.Items.Count == 0)
+                _historyMenu.Items.Add(new ToolStripMenuItem(AppPresentation.AiNoArchivedConversation) { Enabled = false });
+            if (_archivedMenu == null) return;
+            RemoveArchivedItem(_archivedMenu.DropDownItems, id);
+            if (_archivedMenu.DropDownItems.Count > 0) return;
+            _archivedMenu.Enabled = false;
+            if (_archivedMenu.DropDown.Visible)
+                _archivedMenu.DropDown.Close();
+        }
+
+        /// <summary>按标识从一份菜单里移除归档项。先收起它的删除子菜单。</summary>
+        /// <param name="items">历史按钮或页签「已归档」的菜单项。</param>
+        /// <param name="id">对话标识。</param>
+        private static void RemoveArchivedItem(ToolStripItemCollection items, string id)
+        {
+            if (items == null) return;
+            for (int index = items.Count - 1; index >= 0; index--)
+            {
+                if (!string.Equals(items[index].Tag as string, id, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                ToolStripMenuItem menuItem = items[index] as ToolStripMenuItem;
+                if (menuItem != null && menuItem.HasDropDownItems && menuItem.DropDown.Visible)
+                    menuItem.DropDown.Close();
+                items.RemoveAt(index);
+            }
+        }
+
+        /// <summary>对话正文下沿的拖动手柄。高度固定，位置由底栏测量后写入。</summary>
+        /// <returns>尚未加入底栏的面板。调用方负责加入并在布局时摆放。</returns>
+        private Panel CreateInputGrip()
+        {
+            Panel grip = new Panel
+            {
+                Height = InputGripHeight,
+                Cursor = Cursors.SizeNS,
+                BackColor = SystemColors.Control
+            };
+            grip.Paint += InputGripPaint;
+            grip.MouseDown += InputGripMouseDown;
+            grip.MouseMove += InputGripMouseMove;
+            grip.MouseUp += InputGripMouseUp;
+            grip.MouseCaptureChanged += InputGripCaptureChanged;
+            _tips.SetToolTip(grip, AppPresentation.AiInputResizeTip);
+            return grip;
+        }
+
+        /// <summary>在手柄中间画一条浅线，让拖动位置看得见。</summary>
+        private void InputGripPaint(object sender, PaintEventArgs e)
+        {
+            if (_inputGrip == null || e == null) return;
+            int y = _inputGrip.Height / 2;
+            using (Pen pen = new Pen(SystemColors.ControlDark))
+                e.Graphics.DrawLine(pen, 8, y, Math.Max(8, _inputGrip.Width - 8), y);
+        }
+
+        /// <summary>按下手柄后记住起点，随后的移动按垂直位移改输入框高度。</summary>
+        private void InputGripMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || _inputGrip == null) return;
+            _draggingInput = true;
+            _dragStartY = Cursor.Position.Y;
+            _dragStartHeight = ClampInputToRoom(_inputHeight, _inputRoom);
+            _inputGrip.Capture = true;
+        }
+
+        /// <summary>拖动时按对话栏剩余高度限制输入框，并立刻重排底栏。</summary>
+        /// <remarks>底栏贴在下方。手柄在对话正文下沿，向上拖使输入框变高，手柄跟着上移。最低约一行。</remarks>
+        private void InputGripMouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_draggingInput) return;
+            int next = ClampInputToRoom(_dragStartHeight + (_dragStartY - Cursor.Position.Y), _inputRoom);
+            if (next == _inputHeight) return;
+            _inputHeight = next;
+            LayoutComposer();
+        }
+
+        /// <summary>松开鼠标后把高度写入会话，下次打开沿用。</summary>
+        private void InputGripMouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            FinishInputResize();
+        }
+
+        /// <summary>捕获被系统拿走时同样结束拖动，避免高度停在半截状态却没记住。</summary>
+        private void InputGripCaptureChanged(object sender, EventArgs e)
+        {
+            if (_inputGrip != null && !_inputGrip.Capture)
+                FinishInputResize();
+        }
+
+        /// <summary>结束拖动。高度没变则不写设置。</summary>
+        /// <remarks>只在界面线程调用。写入 <c>session.aiComposerInputHeight</c>，不出现在参数设置里。</remarks>
+        private void FinishInputResize()
+        {
+            if (!_draggingInput) return;
+            _draggingInput = false;
+            if (_inputGrip != null && _inputGrip.Capture)
+                _inputGrip.Capture = false;
+            int stored = _settings.Get(CoreSettings.AiComposerInputHeight);
+            if (stored == _inputHeight) return;
+            _settings.Set(CoreSettings.AiComposerInputHeight, _inputHeight);
+        }
+
+        /// <summary>读出上次记住的输入框高度。超出可保存范围时回到默认。</summary>
+        /// <param name="height">设置里的像素高度。</param>
+        /// <returns>48 到 16384 之间的高度。越界时为 72。</returns>
+        private static int NormalizeStoredInputHeight(int height)
+        {
+            if (height < InputHeightMin || height > InputHeightStoreMax)
+                return InputHeightDefault;
+            return height;
+        }
+
+        /// <summary>把拖动中的高度限制在一行以上，并且不超过当前对话栏放得下的高度。</summary>
+        /// <param name="height">希望的像素高度。</param>
+        /// <param name="room">当前对话栏在页签和底栏其余行之外还能给输入框的高度。尚未布局时可能很小。</param>
+        /// <returns>实际用于摆放的高度。对话栏还没高度时不按剩余空间裁剪。</returns>
+        private static int ClampInputToRoom(int height, int room)
+        {
+            if (height < InputHeightMin) height = InputHeightMin;
+            if (height > InputHeightStoreMax) height = InputHeightStoreMax;
+            if (room >= InputHeightMin && height > room)
+                height = room;
+            return height;
         }
 
         /// <summary>页签条右侧的图标按钮。图像由本控件在释放时丢掉。</summary>
@@ -2084,11 +2414,11 @@ namespace DB2Sheet.UI
             return image;
         }
 
+        /// <summary>输入框上方的引用行。位置由底栏测量后写入，不参与停靠。</summary>
         private static FlowLayoutPanel ChoiceRow()
         {
             return new FlowLayoutPanel
             {
-                Dock = DockStyle.Top,
                 Height = 36,
                 WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
@@ -2178,6 +2508,50 @@ namespace DB2Sheet.UI
             public string Label { get; }
             public string Body { get; }
             public bool Enabled { get; set; }
+        }
+
+        /// <summary>已归档菜单里的一条。左键恢复，右键在原列表旁展开删除，不收起列表。</summary>
+        private sealed class ArchivedConversationItem : ToolStripMenuItem
+        {
+            /// <summary>创建一条已归档对话。</summary>
+            /// <param name="text">对话标题。</param>
+            /// <param name="icon">左侧对话图标。由外层持有，不要在这里释放。</param>
+            public ArchivedConversationItem(string text, Image icon)
+                : base(text ?? string.Empty)
+            {
+                Image = icon;
+            }
+
+            /// <summary>右键展开旁边的删除子菜单，不走左键选中。</summary>
+            /// <param name="e">鼠标按键。</param>
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                if (e != null && e.Button == MouseButtons.Right)
+                {
+                    ShowDropDown();
+                    return;
+                }
+
+                base.OnMouseDown(e);
+            }
+
+            /// <summary>左键恢复并收起列表。有子菜单时系统松开会把子菜单打开，所以这里自己处理。</summary>
+            /// <param name="e">鼠标按键。</param>
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                if (e != null && e.Button == MouseButtons.Right)
+                    return;
+                if (e != null && e.Button == MouseButtons.Left)
+                {
+                    ToolStripDropDown menu = Parent as ToolStripDropDown;
+                    if (menu != null)
+                        menu.Close(ToolStripDropDownCloseReason.ItemClicked);
+                    OnClick(EventArgs.Empty);
+                    return;
+                }
+
+                base.OnMouseUp(e);
+            }
         }
 
         /// <summary>停在输入框旁的引用菜单。不抢走输入框焦点，方便继续用键盘筛选。</summary>
