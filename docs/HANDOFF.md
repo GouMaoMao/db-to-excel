@@ -31,7 +31,7 @@
 
 - 用 Visual Studio 18 Community 的 MSBuild 编译 `DB2Sheet.csproj`（Debug）通过，输出 `bin\Debug\DB2Sheet.dll`。只有既有的 `CS2002` 重复源文件警告（`UI/DatabaseTreeImageCatalog.cs`）。
 - 未在 Excel 中打开查询窗核对。未运行自动化测试：本地 `DB2Sheet.Tests` 未入库，且与当前源码不同步。
-- `Resources/icon_session_add.png` 仍有未提交修改，与这次改动无关，未纳入本次说明。
+- `Resources/icon_session_add.png` 已另提交。它把新建对话按钮换成蓝色气泡加号，与这次 SQL 查询窗改动无关。
 
 ## 阻塞项与下一步
 
